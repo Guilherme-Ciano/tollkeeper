@@ -60,6 +60,7 @@ type KeySet struct {
 	keys      map[string]crypto.PublicKey
 	fetchedAt time.Time
 	lastTry   time.Time
+	lastErr   error
 }
 
 func NewKeySet(url string, client *http.Client, minRetry time.Duration) *KeySet {
@@ -96,18 +97,19 @@ func (k *KeySet) Refresh(ctx context.Context) error {
 }
 
 func (k *KeySet) refresh(ctx context.Context, force bool) error {
-	k.mu.RLock()
-	recent := k.now().Sub(k.lastTry) < k.minRetry
-	empty := len(k.keys) == 0
-	k.mu.RUnlock()
-	if recent && !force {
-		if empty {
-			return ErrKeysUnavailable
-		}
-		return nil
-	}
 	_, err, _ := k.group.Do("refresh", func() (any, error) {
-		return nil, k.fetch(context.WithoutCancel(ctx))
+		k.mu.RLock()
+		recent := k.now().Sub(k.lastTry) < k.minRetry
+		lastErr := k.lastErr
+		k.mu.RUnlock()
+		if recent && !force {
+			return nil, lastErr
+		}
+		err := k.fetch(context.WithoutCancel(ctx))
+		k.mu.Lock()
+		k.lastErr = err
+		k.mu.Unlock()
+		return nil, err
 	})
 	if err != nil {
 		return fmt.Errorf("refresh jwks: %w", err)
