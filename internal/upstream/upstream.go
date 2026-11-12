@@ -11,6 +11,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/modelcontextprotocol/go-sdk/jsonrpc"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/sony/gobreaker/v2"
 
@@ -76,9 +77,7 @@ func New(
 		ReadyToTrip: func(c gobreaker.Counts) bool {
 			return c.ConsecutiveFailures >= failures
 		},
-		IsExcluded: func(err error) bool {
-			return errors.Is(err, context.Canceled)
-		},
+		IsExcluded: clientFault,
 		OnStateChange: func(name string, _, to gobreaker.State) {
 			if hooks.BreakerState != nil {
 				hooks.BreakerState(name, int(to))
@@ -86,6 +85,19 @@ func New(
 		},
 	})
 	return u
+}
+
+func clientFault(err error) bool {
+	if errors.Is(err, context.Canceled) {
+		return true
+	}
+	if we, ok := errors.AsType[*jsonrpc.Error](err); ok {
+		switch we.Code {
+		case jsonrpc.CodeInvalidParams, jsonrpc.CodeInvalidRequest, jsonrpc.CodeMethodNotFound:
+			return true
+		}
+	}
+	return false
 }
 
 func (u *Upstream) ID() string {
@@ -147,49 +159,93 @@ func (u *Upstream) connect(ctx context.Context) (*mcp.ClientSession, func(), err
 	return cs, cleanup, nil
 }
 
+const (
+	healthInterval = 15 * time.Second
+	healthFailures = 3
+)
+
 func (u *Upstream) Run(ctx context.Context) {
 	backoff := u.cfg.RestartBackoff
 	for ctx.Err() == nil {
 		cs, cleanup, err := u.connect(ctx)
 		if err != nil {
-			u.log.WarnContext(
-				ctx,
-				"upstream connect failed",
-				slog.String("error", err.Error()),
-				slog.Duration("retry_in", backoff),
-			)
+			u.log.WarnContext(ctx, "upstream connect failed",
+				slog.String("error", err.Error()), slog.Duration("retry_in", backoff))
 			if !sleep(ctx, jitter(backoff)) {
 				return
 			}
 			backoff = min(backoff*2, u.cfg.RestartMax)
 			continue
 		}
-		backoff = u.cfg.RestartBackoff
+		connectedAt := time.Now()
 		u.setUp(cs)
 		u.log.InfoContext(ctx, "upstream connected")
 		u.notify()
 		u.readyOnce.Do(func() { close(u.ready) })
-		waitErr := make(chan error, 1)
-		go func() { waitErr <- cs.Wait() }()
+		stopped := u.supervise(ctx, cs)
+		u.setUp(nil)
+		cleanup()
+		if stopped {
+			return
+		}
+		u.notify()
+		if time.Since(connectedAt) >= u.cfg.RestartMax {
+			backoff = u.cfg.RestartBackoff
+			continue
+		}
+		if !sleep(ctx, jitter(backoff)) {
+			return
+		}
+		backoff = min(backoff*2, u.cfg.RestartMax)
+	}
+}
+
+func (u *Upstream) supervise(ctx context.Context, cs *mcp.ClientSession) bool {
+	waitErr := make(chan error, 1)
+	go func() { waitErr <- cs.Wait() }()
+	ticker := time.NewTicker(healthInterval)
+	defer ticker.Stop()
+	failures := 0
+	for {
 		select {
 		case <-ctx.Done():
-			u.setUp(nil)
-			_ = cs.Close()
-			if err := <-waitErr; err != nil {
-				u.log.DebugContext(ctx, "upstream session closed", slog.String("error", err.Error()))
-			}
-			cleanup()
-			return
+			u.closeSession(ctx, cs, waitErr)
+			return true
 		case err := <-waitErr:
-			u.setUp(nil)
-			cleanup()
-			u.notify()
 			attrs := []slog.Attr{}
 			if err != nil {
 				attrs = append(attrs, slog.String("error", err.Error()))
 			}
 			u.log.LogAttrs(ctx, slog.LevelWarn, "upstream disconnected", attrs...)
+			return false
+		case <-ticker.C:
+			if u.probe(ctx, cs) {
+				failures = 0
+				continue
+			}
+			failures++
+			if failures >= healthFailures {
+				u.log.WarnContext(ctx, "upstream failed health checks, reconnecting", slog.Int("failures", failures))
+				u.closeSession(ctx, cs, waitErr)
+				return false
+			}
 		}
+	}
+}
+
+func (u *Upstream) probe(ctx context.Context, cs *mcp.ClientSession) bool {
+	pctx, cancel := context.WithTimeout(ctx, u.cfg.Timeout)
+	defer cancel()
+	_, err := cs.ListTools(pctx, nil)
+	return err == nil
+}
+
+func (u *Upstream) closeSession(ctx context.Context, cs *mcp.ClientSession, waitErr <-chan error) {
+	if err := cs.Close(); err != nil {
+		u.log.DebugContext(ctx, "upstream close", slog.String("error", err.Error()))
+	}
+	if err := <-waitErr; err != nil {
+		u.log.DebugContext(ctx, "upstream session closed", slog.String("error", err.Error()))
 	}
 }
 
@@ -302,14 +358,14 @@ func (u *Upstream) CallTool(ctx context.Context, c Call) (*mcp.CallToolResult, e
 	if cs == nil {
 		return nil, fmt.Errorf("%s: %w", u.cfg.ID, ErrUnavailable)
 	}
-	select {
-	case u.sem <- struct{}{}:
-	case <-ctx.Done():
-		return nil, fmt.Errorf("%s: %w", u.cfg.ID, context.Cause(ctx))
-	}
-	defer func() { <-u.sem }()
 	ctx, cancel := context.WithTimeoutCause(ctx, u.cfg.Timeout, ErrTimeout)
 	defer cancel()
+	select {
+	case u.sem <- struct{}{}:
+	default:
+		return nil, fmt.Errorf("%s: %w", u.cfg.ID, ErrSaturated)
+	}
+	defer func() { <-u.sem }()
 	params := &mcp.CallToolParams{
 		Meta:           c.Meta,
 		Name:           c.Tool,

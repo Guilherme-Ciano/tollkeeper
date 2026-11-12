@@ -72,7 +72,7 @@ func Build(ctx context.Context, cfg config.Config, log *slog.Logger, version str
 	if cfg.Auth.Mode == config.AuthModeJWT {
 		a.keys = authn.NewKeySet(
 			cfg.Auth.JWT.JWKSURL,
-			&http.Client{Timeout: 10 * time.Second},
+			&http.Client{Timeout: 10 * time.Second, CheckRedirect: upstream.NoRedirects},
 			cfg.Auth.JWT.JWKSMinRetry,
 		)
 		verifier = authn.NewVerifier(authn.FromKeySet(a.keys), authn.VerifierOptions{
