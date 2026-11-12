@@ -70,7 +70,7 @@ The admission step runs at the HTTP layer so it can answer with real status code
 
 ## Quickstart
 
-Requires Docker (or rootless Podman exposing its Docker socket) and Go 1.27 for the demo client.
+Requires Docker with BuildKit/buildx (default in Docker Desktop and the docker-ce packages; on distributions that split it out, install `docker-buildx`), or rootless Podman exposing its Docker socket, plus Go 1.27 for the demo client.
 
 ```bash
 git clone https://github.com/Guilherme-Ciano/tollkeeper && cd tollkeeper
