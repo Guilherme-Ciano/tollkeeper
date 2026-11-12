@@ -1,0 +1,171 @@
+version: "2"
+
+run:
+  timeout: 5m
+  tests: true
+  modules-download-mode: readonly
+
+linters:
+  default: standard
+  enable:
+    - asasalint
+    - asciicheck
+    - bidichk
+    - bodyclose
+    - containedctx
+    - contextcheck
+    - copyloopvar
+    - durationcheck
+    - errchkjson
+    - errname
+    - errorlint
+    - exhaustive
+    - exptostd
+    - fatcontext
+    - forcetypeassert
+    - gocheckcompilerdirectives
+    - gochecknoglobals
+    - gochecknoinits
+    - gocognit
+    - goconst
+    - gocritic
+    - gosec
+    - iface
+    - intrange
+    - loggercheck
+    - makezero
+    - mirror
+    - misspell
+    - modernize
+    - musttag
+    - nakedret
+    - nilerr
+    - nilnesserr
+    - nilnil
+    - noctx
+    - nolintlint
+    - perfsprint
+    - prealloc
+    - predeclared
+    - reassign
+    - recvcheck
+    - revive
+    - rowserrcheck
+    - sloglint
+    - spancheck
+    - sqlclosecheck
+    - testifylint
+    - thelper
+    - tparallel
+    - unconvert
+    - unparam
+    - usestdlibvars
+    - usetesting
+    - wastedassign
+    - wrapcheck
+  disable:
+    - godot
+    - godox
+    - dupword
+  settings:
+    errcheck:
+      check-type-assertions: true
+      check-blank: true
+    gocognit:
+      min-complexity: 20
+    gocritic:
+      enabled-tags: [diagnostic, performance, style]
+      disabled-checks: [commentFormatting, commentedOutCode, docStub, hugeParam, whyNoLint]
+    gosec:
+      excludes: [G104]
+    nakedret:
+      max-func-lines: 0
+    nolintlint:
+      require-explanation: false
+      require-specific: true
+      allow-unused: false
+    revive:
+      enable-all-rules: false
+      rules:
+        - name: blank-imports
+        - name: context-as-argument
+        - name: context-keys-type
+        - name: dot-imports
+        - name: early-return
+        - name: error-naming
+        - name: error-return
+        - name: error-strings
+        - name: errorf
+        - name: increment-decrement
+        - name: indent-error-flow
+        - name: range
+        - name: receiver-naming
+        - name: redefines-builtin-id
+        - name: superfluous-else
+        - name: time-naming
+        - name: unexported-return
+        - name: unreachable-code
+        - name: unused-parameter
+        - name: var-declaration
+        - name: var-naming
+        - name: use-any
+        - name: deep-exit
+        - name: unnecessary-stmt
+    sloglint:
+      no-mixed-args: true
+      kv-only: false
+      attr-only: true
+      context: scope
+      static-msg: true
+      key-naming-case: snake
+      forbidden-keys: [time, level, msg, source]
+    staticcheck:
+      checks: ["all", "-ST1000", "-ST1003", "-ST1016", "-ST1020", "-ST1021", "-ST1022"]
+    wrapcheck:
+      ignore-package-globs:
+        - github.com/Guilherme-Ciano/*
+  exclusions:
+    generated: strict
+    presets: [std-error-handling]
+    rules:
+      - path: _test\.go
+        linters: [gochecknoglobals, wrapcheck, forcetypeassert, gosec, goconst, gocognit]
+      - path: cmd/
+        linters: [gochecknoglobals]
+        text: "^(version|commit|date) is a global variable"
+      - path: (internal/config/load\.go|internal/audit/keys\.go|internal/cli/)
+        linters: [gosec]
+        text: "G304"
+      - path: internal/upstream/transport\.go
+        linters: [gosec]
+        text: "G204"
+      - path: internal/upstream/upstream\.go
+        linters: [gosec]
+        text: "G404"
+      - path: internal/devissuer/
+        linters: [gosec]
+        text: "G710"
+      - path: internal/tools/nocomments/
+        linters: [gosec]
+        text: "G703"
+
+formatters:
+  enable: [gofumpt, gci, golines]
+  settings:
+    gofumpt:
+      extra:
+        group-params: true
+        clothe-returns: true
+    gci:
+      sections:
+        - standard
+        - default
+        - localmodule
+    golines:
+      max-len: 120
+  exclusions:
+    generated: strict
+
+issues:
+  max-issues-per-linter: 0
+  max-same-issues: 0
