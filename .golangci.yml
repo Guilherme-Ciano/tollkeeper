@@ -148,6 +148,9 @@ linters:
       - path: internal/tools/nocomments/
         linters: [gosec]
         text: "G703"
+      - path: cmd/mcpbench/
+        linters: [gosec]
+        text: "G(204|304)"
 
 formatters:
   enable: [gofumpt, gci, golines]
