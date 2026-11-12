@@ -13,6 +13,7 @@ import (
 	"os"
 	"os/exec"
 	"sort"
+	"strings"
 	"time"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
@@ -77,7 +78,7 @@ func StdioEnv(cfg config.Upstream, environ func(string) (string, bool)) []string
 
 func stdioFactory(cfg config.Upstream, log *slog.Logger, environ func(string) (string, bool)) TransportFactory {
 	return func(ctx context.Context) (mcp.Transport, func(), error) {
-		cmd := exec.CommandContext(ctx, cfg.Command[0], cfg.Command[1:]...)
+		cmd := exec.CommandContext(context.WithoutCancel(ctx), cfg.Command[0], cfg.Command[1:]...)
 		cmd.Env = StdioEnv(cfg, environ)
 		cmd.SysProcAttr = processGroup()
 		stderr, err := cmd.StderrPipe()
@@ -101,20 +102,37 @@ func stdioFactory(cfg config.Upstream, log *slog.Logger, environ func(string) (s
 	}
 }
 
+const maxStderrLine = 8 << 10
+
 func pipeLog(r io.Reader, log *slog.Logger) {
-	s := bufio.NewScanner(r)
-	s.Buffer(make([]byte, 4096), 64<<10)
-	for s.Scan() {
-		log.Info("upstream stderr", slog.String("line", s.Text()))
+	br := bufio.NewReaderSize(r, maxStderrLine)
+	for {
+		line, err := br.ReadSlice('\n')
+		if len(line) > 0 {
+			log.Info("upstream stderr", slog.String("line", strings.TrimRight(string(line), "\r\n")),
+				slog.Bool("truncated", errors.Is(err, bufio.ErrBufferFull)))
+		}
+		switch {
+		case err == nil, errors.Is(err, bufio.ErrBufferFull):
+			continue
+		default:
+			return
+		}
 	}
 }
 
 type bearerTransport struct {
 	token string
+	host  string
 	base  http.RoundTripper
 }
 
+var ErrForeignHost = errors.New("refusing to send upstream credentials to another host")
+
 func (b bearerTransport) RoundTrip(r *http.Request) (*http.Response, error) {
+	if r.URL.Host != b.host {
+		return nil, fmt.Errorf("%w: %s", ErrForeignHost, r.URL.Host)
+	}
 	r2 := r.Clone(r.Context())
 	r2.Header.Set("Authorization", "Bearer "+b.token)
 	resp, err := b.base.RoundTrip(r2)
@@ -141,7 +159,11 @@ func HTTPClient(ctx context.Context, cfg config.Upstream) (*http.Client, error) 
 	var rt http.RoundTripper = otelhttp.NewTransport(baseTransport())
 	switch cfg.Auth.Type {
 	case config.UpstreamAuthBearer:
-		rt = bearerTransport{token: cfg.Auth.Token, base: rt}
+		u, err := url.Parse(cfg.URL)
+		if err != nil {
+			return nil, fmt.Errorf("%s: upstream url: %w", cfg.ID, err)
+		}
+		rt = bearerTransport{token: cfg.Auth.Token, host: u.Host, base: rt}
 	case config.UpstreamAuthClientCredentials:
 		params := url.Values{}
 		if cfg.Auth.Resource != "" {
@@ -155,14 +177,22 @@ func HTTPClient(ctx context.Context, cfg config.Upstream) (*http.Client, error) 
 			EndpointParams: params,
 			AuthStyle:      oauth2.AuthStyleInHeader,
 		}
-		tokenClient := &http.Client{Transport: otelhttp.NewTransport(baseTransport()), Timeout: 10 * time.Second}
+		tokenClient := &http.Client{
+			Transport:     otelhttp.NewTransport(baseTransport()),
+			Timeout:       10 * time.Second,
+			CheckRedirect: NoRedirects,
+		}
 		tctx := context.WithValue(context.WithoutCancel(ctx), oauth2.HTTPClient, tokenClient)
 		rt = &oauth2.Transport{Source: oauth2.ReuseTokenSource(nil, cc.TokenSource(tctx)), Base: rt}
 	case config.UpstreamAuthNone, "":
 	default:
 		return nil, fmt.Errorf("%s: unknown upstream auth %q: %w", cfg.ID, cfg.Auth.Type, ErrUnknownTransport)
 	}
-	return &http.Client{Transport: rt}, nil
+	return &http.Client{Transport: rt, CheckRedirect: NoRedirects}, nil
+}
+
+func NoRedirects(*http.Request, []*http.Request) error {
+	return http.ErrUseLastResponse
 }
 
 func LookupEnv(name string) (string, bool) {

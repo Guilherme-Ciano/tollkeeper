@@ -344,6 +344,8 @@ func upstreamMessage(err error) string {
 	switch {
 	case errors.Is(err, upstream.ErrBreakerOpen):
 		return "upstream temporarily unavailable (circuit open)"
+	case errors.Is(err, upstream.ErrSaturated):
+		return "upstream busy, retry later"
 	case errors.Is(err, upstream.ErrTimeout):
 		return "upstream timed out"
 	case errors.Is(err, upstream.ErrUnavailable):
