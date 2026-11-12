@@ -15,6 +15,8 @@ var (
 	ErrKeyType      = errors.New("key is not ed25519")
 	ErrBackpressure = errors.New("audit buffer full")
 	ErrClosed       = errors.New("audit log closed")
+	ErrSinkFailed   = errors.New("audit sink failing")
+	ErrCorrupt      = errors.New("audit log tail may be inconsistent; writes stopped")
 )
 
 func GenerateKeyPair() (privPEM, pubPEM []byte, err error) {

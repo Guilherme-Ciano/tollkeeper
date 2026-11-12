@@ -37,15 +37,27 @@ type Options struct {
 	Hooks              Hooks
 }
 
+type logFile interface {
+	io.Writer
+	io.ReaderAt
+	io.Closer
+	Stat() (os.FileInfo, error)
+	Sync() error
+	Truncate(size int64) error
+}
+
 type Log struct {
 	opts      Options
-	file      *os.File
+	file      logFile
 	ch        chan Event
 	stop      chan struct{}
 	done      chan struct{}
 	closeOnce sync.Once
+	sendMu    sync.RWMutex
 	closed    atomic.Bool
 	dropped   atomic.Uint64
+	sinkErr   atomic.Pointer[error]
+	fatal     atomic.Bool
 	runErr    error
 
 	seq          uint64
@@ -114,11 +126,13 @@ func (l *Log) recover() error {
 	}
 	l.seq = body.Seq
 	l.prev = rec.Hash
-	l.lastCkptSeq = body.Seq
+	if body.Checkpoint != nil {
+		l.lastCkptSeq = body.Seq
+	}
 	return nil
 }
 
-func lastLine(f *os.File) ([]byte, error) {
+func lastLine(f logFile) ([]byte, error) {
 	info, err := f.Stat()
 	if err != nil {
 		return nil, fmt.Errorf("stat audit log: %w", err)
@@ -160,9 +174,21 @@ func (l *Log) QueueDepth() int {
 	return len(l.ch)
 }
 
+func (l *Log) SinkErr() error {
+	if p := l.sinkErr.Load(); p != nil {
+		return *p
+	}
+	return nil
+}
+
 func (l *Log) Append(ctx context.Context, e Event) error {
+	l.sendMu.RLock()
+	defer l.sendMu.RUnlock()
 	if l.closed.Load() {
 		return ErrClosed
+	}
+	if err := l.SinkErr(); err != nil && !l.opts.FailOpen {
+		return fmt.Errorf("%w: %w", ErrSinkFailed, err)
 	}
 	select {
 	case l.ch <- e:
@@ -187,14 +213,21 @@ func (l *Log) Append(ctx context.Context, e Event) error {
 }
 
 func (l *Log) flush(batch []Event) []Event {
-	if len(batch) == 0 && !l.checkpointDue() {
+	if len(batch) == 0 && !l.checkpointDue() && l.dropped.Load() == 0 {
 		return batch
 	}
 	if err := l.write(batch); err != nil {
 		l.runErr = err
+		l.sinkErr.Store(&err)
+		l.dropped.Add(uint64(len(batch)))
 		if l.opts.Hooks.SinkError != nil {
 			l.opts.Hooks.SinkError(err)
 		}
+		return batch[:0]
+	}
+	if !l.fatal.Load() {
+		l.sinkErr.Store(nil)
+		l.runErr = nil
 	}
 	return batch[:0]
 }
@@ -293,15 +326,20 @@ func (l *Log) appendCheckpoint() error {
 }
 
 func (l *Log) write(batch []Event) (err error) {
+	if l.fatal.Load() {
+		return ErrCorrupt
+	}
 	seq, prev, ckSeq, ckTime := l.seq, l.prev, l.lastCkptSeq, l.lastCkptTime
+	d := l.dropped.Swap(0)
 	defer func() {
 		if err != nil {
 			atomic.StoreUint64(&l.seq, seq)
 			l.prev, l.lastCkptSeq, l.lastCkptTime = prev, ckSeq, ckTime
+			l.dropped.Add(d)
 		}
 	}()
 	l.buf.Reset()
-	if d := l.dropped.Swap(0); d > 0 {
+	if d > 0 {
 		if err := l.appendBody(
 			&Body{Event: &Event{Phase: PhaseDecision, Method: "audit", Decision: DecisionGap, Dropped: d}},
 		); err != nil {
@@ -341,21 +379,33 @@ func (l *Log) commit() error {
 		return fmt.Errorf("stat audit log: %w", err)
 	}
 	if _, err := l.file.Write(l.buf.Bytes()); err != nil {
-		return errors.Join(fmt.Errorf("write audit batch: %w", err), l.file.Truncate(info.Size()))
+		return l.undo(info.Size(), fmt.Errorf("write audit batch: %w", err))
 	}
 	if l.opts.Fsync {
 		if err := l.file.Sync(); err != nil {
-			return fmt.Errorf("fsync audit log: %w", err)
+			return l.undo(info.Size(), fmt.Errorf("fsync audit log: %w", err))
 		}
 	}
 	return nil
 }
 
+func (l *Log) undo(size int64, cause error) error {
+	if err := l.file.Truncate(size); err != nil {
+		l.fatal.Store(true)
+		fatal := fmt.Errorf("%w: %w: truncate after failed write: %w", ErrCorrupt, cause, err)
+		l.sinkErr.Store(&fatal)
+		return fatal
+	}
+	return cause
+}
+
 func (l *Log) Close() error {
 	var err error
 	l.closeOnce.Do(func() {
+		l.sendMu.Lock()
 		l.closed.Store(true)
 		close(l.stop)
+		l.sendMu.Unlock()
 		<-l.done
 		err = errors.Join(l.runErr, l.file.Close())
 	})
