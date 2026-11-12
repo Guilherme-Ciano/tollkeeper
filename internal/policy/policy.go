@@ -21,7 +21,7 @@ import (
 
 const (
 	costLimit   = 100_000
-	evalTimeout = 2 * time.Millisecond
+	evalTimeout = 50 * time.Millisecond
 	maxArgBytes = 256 << 10
 )
 

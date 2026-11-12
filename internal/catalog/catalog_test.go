@@ -143,3 +143,33 @@ func FuzzQualify(f *testing.F) {
 		}
 	})
 }
+
+func TestReplaceRejectsCrossUpstreamCollision(t *testing.T) {
+	t.Parallel()
+	c := New(10)
+	if _, err := c.Replace("a", []Tool{tool("a", "x", "1")}); err != nil {
+		t.Fatal(err)
+	}
+	shadow := Tool{Name: "a__x", Upstream: "b", Original: "x", Pin: "1"}
+	if _, err := c.Replace("b", []Tool{shadow}); !errors.Is(err, ErrDuplicate) {
+		t.Fatalf("upstream b shadowed a's tool: %v", err)
+	}
+	if got, _ := c.Lookup("a__x"); got.Upstream != "a" {
+		t.Fatalf("tool now routes to %s", got.Upstream)
+	}
+}
+
+func TestDescriptorChangeIsUpserted(t *testing.T) {
+	t.Parallel()
+	c := New(10)
+	t1 := tool("a", "x", "1")
+	t1.Descriptor = []byte(`{"name":"a__x","title":"old"}`)
+	if _, err := c.Replace("a", []Tool{t1}); err != nil {
+		t.Fatal(err)
+	}
+	t1.Descriptor = []byte(`{"name":"a__x","title":"new"}`)
+	d, err := c.Replace("a", []Tool{t1})
+	if err != nil || len(d.Upserted) != 1 {
+		t.Fatalf("descriptor-only change not propagated: %+v %v", d, err)
+	}
+}

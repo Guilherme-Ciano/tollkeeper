@@ -45,6 +45,7 @@ type JWT struct {
 	JWKSRefresh   time.Duration `koanf:"jwks_refresh"`
 	JWKSMinRetry  time.Duration `koanf:"jwks_min_retry"`
 	AllowInsecure bool          `koanf:"allow_insecure_jwks"`
+	Types         []string      `koanf:"types"`
 }
 
 type Upstream struct {
@@ -145,7 +146,7 @@ func Defaults() Config {
 	return Config{
 		Server: Server{
 			Listen:             ":8080",
-			AdminListen:        ":9090",
+			AdminListen:        "127.0.0.1:9090",
 			MaxBodyBytes:       1 << 20,
 			NamespaceSeparator: "__",
 			ResyncDebounce:     250 * time.Millisecond,

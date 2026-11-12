@@ -132,6 +132,7 @@ auth:
     allow_insecure_jwks: true
     audiences: ["http://%s/mcp"]
     algorithms: ["EdDSA"]
+    types: ["at+jwt"]
 upstreams:
   - id: noop
     transport: streamable_http

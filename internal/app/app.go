@@ -46,8 +46,13 @@ type App struct {
 	listeners sync.Map
 }
 
-func Build(ctx context.Context, cfg config.Config, log *slog.Logger, version string) (*App, error) {
+func Build(ctx context.Context, cfg config.Config, log *slog.Logger, version string) (built *App, err error) {
 	a := &App{cfg: cfg, log: log, metrics: telemetry.NewMetrics(), catalog: catalog.New(maxCatalogTools)}
+	defer func() {
+		if err != nil {
+			err = errors.Join(err, a.close(ctx))
+		}
+	}()
 	tr, err := telemetry.NewTracing(
 		ctx,
 		cfg.Telemetry.ServiceName,
@@ -77,7 +82,7 @@ func Build(ctx context.Context, cfg config.Config, log *slog.Logger, version str
 		)
 		verifier = authn.NewVerifier(authn.FromKeySet(a.keys), authn.VerifierOptions{
 			Issuer: cfg.Auth.JWT.Issuer, Audiences: cfg.Auth.JWT.Audiences,
-			Algorithms: cfg.Auth.JWT.Algorithms, Leeway: cfg.Auth.JWT.ClockSkew,
+			Algorithms: cfg.Auth.JWT.Algorithms, Leeway: cfg.Auth.JWT.ClockSkew, Types: cfg.Auth.JWT.Types,
 		})
 	} else {
 		log.WarnContext(ctx, "authentication disabled: every caller is anonymous")
@@ -297,11 +302,11 @@ func (a *App) listen(ctx context.Context, name, addr string) (net.Listener, erro
 func (a *App) Run(ctx context.Context) error {
 	dataLn, err := a.listen(ctx, "data", a.cfg.Server.Listen)
 	if err != nil {
-		return err
+		return errors.Join(err, a.close(ctx))
 	}
 	adminLn, err := a.listen(ctx, "admin", a.cfg.Server.AdminListen)
 	if err != nil {
-		return errors.Join(err, dataLn.Close())
+		return errors.Join(err, dataLn.Close(), a.close(ctx))
 	}
 	bgCtx, stopBg := context.WithCancel(context.WithoutCancel(ctx))
 	defer stopBg()
@@ -342,15 +347,22 @@ func (a *App) Run(ctx context.Context) error {
 	runErr := g.Wait()
 	stopBg()
 	bg.Wait()
-	var closeErr error
-	if a.auditLog != nil {
-		closeErr = a.auditLog.Close()
-	}
-	tctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
-	defer cancel()
-	closeErr = errors.Join(closeErr, a.tracing.Shutdown(tctx))
+	closeErr := a.close(ctx)
 	a.log.InfoContext(ctx, "tollkeeper stopped")
 	return errors.Join(runErr, closeErr)
+}
+
+func (a *App) close(ctx context.Context) error {
+	var err error
+	if a.auditLog != nil {
+		err = a.auditLog.Close()
+	}
+	if a.tracing != nil {
+		tctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+		defer cancel()
+		err = errors.Join(err, a.tracing.Shutdown(tctx))
+	}
+	return err
 }
 
 func serve(s *http.Server, ln net.Listener) error {

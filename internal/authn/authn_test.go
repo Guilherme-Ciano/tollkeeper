@@ -307,3 +307,34 @@ func BenchmarkVerify(b *testing.B) {
 		}
 	}
 }
+
+func TestTokenTypeRestriction(t *testing.T) {
+	t.Parallel()
+	pub, priv := edKey(t)
+	ks := NewKeySet("http://unused", http.DefaultClient, time.Hour)
+	ks.keys["k"] = pub
+	v := NewVerifier(FromKeySet(ks), VerifierOptions{
+		Issuer: testIssuer, Audiences: []string{testAudience},
+		Algorithms: []string{"EdDSA"}, Types: []string{"at+jwt"},
+	})
+	mint := func(typ string) string {
+		tok := jwt.NewWithClaims(jwt.SigningMethodEdDSA, claims(nil))
+		tok.Header["kid"] = "k"
+		if typ == "" {
+			delete(tok.Header, "typ")
+		} else {
+			tok.Header["typ"] = typ
+		}
+		s, err := tok.SignedString(priv)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return s
+	}
+	for typ, ok := range map[string]bool{"at+jwt": true, "application/at+jwt": true, "AT+JWT": true, "JWT": false, "": false} {
+		_, err := v.Verify(t.Context(), mint(typ))
+		if (err == nil) != ok {
+			t.Fatalf("typ %q: err=%v", typ, err)
+		}
+	}
+}

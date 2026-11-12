@@ -3,6 +3,8 @@ package config
 import (
 	"errors"
 	"fmt"
+	"math"
+	"net"
 	"net/url"
 	"path"
 	"regexp"
@@ -89,6 +91,9 @@ func (c *Config) Validate() error {
 func (c *Config) validateServer(v *validator) {
 	v.require("server.listen", c.Server.Listen)
 	v.require("server.admin_listen", c.Server.AdminListen)
+	if c.Server.Pprof && !loopback(c.Server.AdminListen) {
+		v.add("server.pprof", "only allowed when server.admin_listen is a loopback address")
+	}
 	if c.Server.Listen != "" && c.Server.Listen == c.Server.AdminListen {
 		v.add("server.admin_listen", "must differ from server.listen")
 	}
@@ -97,8 +102,13 @@ func (c *Config) validateServer(v *validator) {
 		v.add("server.max_body_bytes", "must be within (0, 64MiB]")
 	}
 	sep := c.Server.NamespaceSeparator
-	if sep == "" || strings.ContainsAny(sep, " *?[]") {
-		v.add("server.namespace_separator", "must be non-empty and contain no spaces or glob characters")
+	if sep == "" || strings.ContainsAny(sep, " *?[]") ||
+		!strings.ContainsFunc(
+			sep,
+			func(r rune) bool { return (r < 'a' || r > 'z') && (r < '0' || r > '9') && r != '-' },
+		) {
+		v.add("server.namespace_separator",
+			"must be non-empty, contain no spaces or glob characters, and contain a character upstream ids cannot use")
 	}
 }
 
@@ -140,6 +150,9 @@ func (c *Config) validateAuth(v *validator) {
 			"ES384",
 			"EdDSA",
 		)
+	}
+	if c.Auth.JWT.JWKSMinRetry < time.Second {
+		v.add("auth.jwt.jwks_min_retry", "must be at least 1s to bound refetches for unknown key ids")
 	}
 	if c.Auth.JWT.ClockSkew < 0 || c.Auth.JWT.ClockSkew > 5*time.Minute {
 		v.add("auth.jwt.clock_skew", "must be within [0, 5m]")
@@ -250,8 +263,12 @@ func (c *Config) validateRateLimits(v *validator) {
 		v.require(f+".name", r.Name)
 		v.globs(f+".tools", r.Tools)
 		v.oneOf(f+".per", r.Per, PerGlobal, PerSubject, PerSubjectTool, PerClientID, PerUpstream, PerTool)
-		if _, _, err := ParseRate(r.Rate); err != nil {
+		if count, per, err := ParseRate(r.Rate); err != nil {
 			v.add(f+".rate", "%v", err)
+		} else if interval := per / time.Duration(count); interval < time.Microsecond {
+			v.add(f+".rate", "faster than one call per microsecond is not supported")
+		} else if r.Burst > 0 && int64(r.Burst) > math.MaxInt64/2/int64(interval) {
+			v.add(f+".burst", "too large for rate %s", r.Rate)
 		}
 		if r.Burst < 1 {
 			v.add(f+".burst", "must be at least 1")
@@ -278,6 +295,18 @@ func (c *Config) validateAudit(v *validator) {
 	if c.Audit.Checkpoint.SigningKeyFile != "" && c.Audit.Checkpoint.Every < 1 && c.Audit.Checkpoint.Interval <= 0 {
 		v.add("audit.checkpoint", "set every or interval when a signing key is configured")
 	}
+}
+
+func loopback(addr string) bool {
+	host, _, err := net.SplitHostPort(addr)
+	if err != nil {
+		return false
+	}
+	if host == "localhost" {
+		return true
+	}
+	ip := net.ParseIP(host)
+	return ip != nil && ip.IsLoopback()
 }
 
 func ParseRate(s string) (count int, per time.Duration, err error) {

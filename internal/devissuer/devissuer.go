@@ -27,6 +27,8 @@ import (
 	"github.com/Guilherme-Ciano/tollkeeper/internal/authn"
 )
 
+const maxPendingCodes = 10_000
+
 var (
 	ErrNonLoopback = errors.New("dev issuer refuses to bind a non-loopback address without --i-know-this-is-insecure")
 	ErrConfig      = errors.New("invalid dev issuer config")
@@ -415,6 +417,11 @@ func (i *Issuer) authorize(w http.ResponseWriter, r *http.Request) {
 		if i.now().After(i.code[k].expires) {
 			delete(i.code, k)
 		}
+	}
+	if len(i.code) >= maxPendingCodes {
+		i.mu.Unlock()
+		fail("temporarily_unavailable")
+		return
 	}
 	i.code[code] = authCode{
 		clientID: c.ID, redirectURI: q.Get("redirect_uri"), challenge: q.Get("code_challenge"),
