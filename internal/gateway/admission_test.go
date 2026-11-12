@@ -22,7 +22,7 @@ import (
 	"github.com/Guilherme-Ciano/tollkeeper/internal/telemetry"
 )
 
-func testGateway(t *testing.T, rules []config.Rule) (*Gateway, *telemetry.Metrics, *httptest.Server) {
+func testGateway(t *testing.T, rules []config.Rule) (*telemetry.Metrics, *httptest.Server) {
 	t.Helper()
 	cfg := config.Defaults()
 	cfg.Server.PublicURL = "http://127.0.0.1/mcp"
@@ -57,10 +57,10 @@ func testGateway(t *testing.T, rules []config.Rule) (*Gateway, *telemetry.Metric
 	g.Apply(d)
 	srv := httptest.NewServer(g.Handler())
 	t.Cleanup(srv.Close)
-	return g, m, srv
+	return m, srv
 }
 
-func send(t *testing.T, url, body string) (int, string) {
+func send(t *testing.T, url, body string) (status int, respBody string) {
 	t.Helper()
 	req, err := http.NewRequestWithContext(t.Context(), http.MethodPost, url, strings.NewReader(body))
 	if err != nil {
@@ -82,7 +82,7 @@ func send(t *testing.T, url, body string) (int, string) {
 
 func TestUnknownNotificationsDoNotGrowMetrics(t *testing.T) {
 	t.Parallel()
-	_, m, srv := testGateway(t, nil)
+	m, srv := testGateway(t, nil)
 	for i := range 50 {
 		status, _ := send(t, srv.URL+"/mcp", `{"jsonrpc":"2.0","method":"notifications/x`+strconv.Itoa(i)+`"}`)
 		if status != http.StatusAccepted {
@@ -96,7 +96,7 @@ func TestUnknownNotificationsDoNotGrowMetrics(t *testing.T) {
 
 func TestUnknownToolLooksLikeDeniedTool(t *testing.T) {
 	t.Parallel()
-	_, _, srv := testGateway(
+	_, srv := testGateway(
 		t,
 		[]config.Rule{{Name: "secret-rule-name", Tools: []string{"other__*"}, Effect: config.EffectAllow}},
 	)
