@@ -145,7 +145,7 @@ func New(d Deps) *Gateway {
 		}
 	}
 	g.server = mcp.NewServer(&mcp.Implementation{Name: "tollkeeper", Version: d.Version}, &mcp.ServerOptions{
-		Capabilities: &mcp.ServerCapabilities{Tools: &mcp.ToolCapabilities{ListChanged: true}},
+		Capabilities: &mcp.ServerCapabilities{Tools: &mcp.ToolCapabilities{}},
 		PageSize:     10000,
 		SetCacheable: func(_ context.Context, _ mcp.Request, c *mcp.Cacheable) {
 			c.CacheScope = "private"
@@ -410,9 +410,10 @@ func (g *Gateway) callTool(
 	}
 	if !ok || a.Tool.Name == "" || a.Tool.Name != name || a.Decision.Effect != policy.Allow {
 		g.log.ErrorContext(ctx, "tools/call without matching admission", slog.String("tool", name))
-		g.metrics.Requests.WithLabelValues(method, name, "", "backstop_denied").Inc()
+		g.metrics.Requests.WithLabelValues(method, "", "", "backstop_denied").Inc()
 		return nil, ErrNoAdmission
 	}
+	a.MarkDispatched()
 	if sc := trace.SpanContextFromContext(ctx); !sc.IsValid() && a.Envelope.TraceParent != "" {
 		ctx = g.propagator.Extract(ctx, metaCarrier{"traceparent": a.Envelope.TraceParent})
 	}

@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"strings"
+	"unicode"
 )
 
 var (
@@ -48,7 +49,7 @@ func openObject(dec *json.Decoder) error {
 }
 
 func checkKey(folded map[string]struct{}, known []string, k string) error {
-	lk := strings.ToLower(k)
+	lk := foldKey(k)
 	if _, dup := folded[lk]; dup {
 		return fmt.Errorf("%w: %q", ErrDuplicateKey, k)
 	}
@@ -96,17 +97,54 @@ func strictObject(raw []byte, known ...string) (map[string]json.RawMessage, erro
 	return out, nil
 }
 
+const MaxArgumentTokens = 100_000
+
+var ErrTooComplex = errors.New("arguments too complex")
+
+func foldKey(s string) string {
+	return strings.Map(func(r rune) rune {
+		m := r
+		for f := unicode.SimpleFold(r); f != r; f = unicode.SimpleFold(f) {
+			m = min(m, f)
+		}
+		return m
+	}, s)
+}
+
 type frame struct {
 	object bool
-	keys   map[string]struct{}
 	expect bool
+	first  string
+	keys   map[string]struct{}
+}
+
+func (f *frame) addKey(k string) error {
+	folded := foldKey(k)
+	switch {
+	case f.keys == nil && f.first == "":
+		f.first = folded
+		return nil
+	case f.keys == nil:
+		if folded == f.first {
+			return fmt.Errorf("%w: %q", ErrDuplicateKey, k)
+		}
+		f.keys = map[string]struct{}{f.first: {}}
+	}
+	if _, dup := f.keys[folded]; dup {
+		return fmt.Errorf("%w: %q", ErrDuplicateKey, k)
+	}
+	f.keys[folded] = struct{}{}
+	return nil
 }
 
 func RejectDuplicateKeys(raw []byte) error {
 	dec := json.NewDecoder(bytes.NewReader(raw))
 	dec.UseNumber()
-	var stack []*frame
-	for {
+	var stack []frame
+	for tokens := 0; ; tokens++ {
+		if tokens > MaxArgumentTokens {
+			return fmt.Errorf("%w: more than %d JSON tokens", ErrTooComplex, MaxArgumentTokens)
+		}
 		tok, err := dec.Token()
 		if errors.Is(err, io.EOF) {
 			return nil
@@ -120,10 +158,10 @@ func RejectDuplicateKeys(raw []byte) error {
 	}
 }
 
-func step(stack *[]*frame, tok json.Token) error {
+func step(stack *[]frame, tok json.Token) error {
 	var top *frame
 	if n := len(*stack); n > 0 {
-		top = (*stack)[n-1]
+		top = &(*stack)[n-1]
 	}
 	if d, ok := tok.(json.Delim); ok {
 		switch d {
@@ -131,7 +169,7 @@ func step(stack *[]*frame, tok json.Token) error {
 			if top != nil && top.object {
 				top.expect = true
 			}
-			*stack = append(*stack, &frame{object: d == '{', keys: map[string]struct{}{}, expect: true})
+			*stack = append(*stack, frame{object: d == '{', expect: true})
 		case '}', ']':
 			*stack = (*stack)[:len(*stack)-1]
 		}
@@ -140,20 +178,16 @@ func step(stack *[]*frame, tok json.Token) error {
 	if top == nil || !top.object {
 		return nil
 	}
-	if top.expect {
-		k, ok := tok.(string)
-		if !ok {
-			return fmt.Errorf("%w: non-string key", ErrEnvelope)
-		}
-		if _, dup := top.keys[k]; dup {
-			return fmt.Errorf("%w: %q", ErrDuplicateKey, k)
-		}
-		top.keys[k] = struct{}{}
-		top.expect = false
+	if !top.expect {
+		top.expect = true
 		return nil
 	}
-	top.expect = true
-	return nil
+	k, ok := tok.(string)
+	if !ok {
+		return fmt.Errorf("%w: non-string key", ErrEnvelope)
+	}
+	top.expect = false
+	return top.addKey(k)
 }
 
 func stringField(m map[string]json.RawMessage, k string) (string, error) {
