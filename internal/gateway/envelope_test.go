@@ -3,6 +3,7 @@ package gateway
 import (
 	"encoding/json"
 	"errors"
+	"strings"
 	"testing"
 )
 
@@ -120,6 +121,29 @@ func TestParseEnvelope(t *testing.T) {
 				t.Fatalf("got %+v\nwant %+v", got, tc.want)
 			}
 		})
+	}
+}
+
+func TestArgumentTokenLimit(t *testing.T) {
+	t.Parallel()
+	wide := "{\"a\":[" + strings.Repeat("{},", MaxArgumentTokens) + "{}]}"
+	if err := RejectDuplicateKeys([]byte(wide)); !errors.Is(err, ErrTooComplex) {
+		t.Fatalf("expected ErrTooComplex, got %v", err)
+	}
+	ok := "{\"a\":[" + strings.Repeat("{\"k\":1},", 1000) + "{}]}"
+	if err := RejectDuplicateKeys([]byte(ok)); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func BenchmarkRejectDuplicateKeysWide(b *testing.B) {
+	wide := []byte("{\"a\":[" + strings.Repeat("{},", 30000) + "{}]}")
+	b.ReportAllocs()
+	b.SetBytes(int64(len(wide)))
+	for b.Loop() {
+		if err := RejectDuplicateKeys(wide); err != nil {
+			b.Fatal(err)
+		}
 	}
 }
 
