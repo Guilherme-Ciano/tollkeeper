@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 )
@@ -327,5 +328,129 @@ func BenchmarkSeal(b *testing.B) {
 		if _, err := Seal(&body); err != nil {
 			b.Fatal(err)
 		}
+	}
+}
+
+func waitFor(t *testing.T, cond func() bool) {
+	t.Helper()
+	deadline := time.Now().Add(5 * time.Second)
+	for !cond() {
+		if time.Now().After(deadline) {
+			t.Fatal("condition not met in time")
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+}
+
+type flakyFile struct {
+	logFile
+	failWrites   atomic.Int64
+	failTruncate atomic.Bool
+}
+
+var errDiskFull = errors.New("no space left on device")
+
+func (f *flakyFile) Write(b []byte) (int, error) {
+	if f.failWrites.Add(-1) >= 0 {
+		return 0, errDiskFull
+	}
+	return f.logFile.Write(b)
+}
+
+func (f *flakyFile) Truncate(n int64) error {
+	if f.failTruncate.Load() {
+		return errDiskFull
+	}
+	return f.logFile.Truncate(n)
+}
+
+func openFlaky(t *testing.T) (*Log, *flakyFile, string) {
+	t.Helper()
+	path := filepath.Join(t.TempDir(), "audit.jsonl")
+	l, err := Open(
+		Options{Path: path, ChainID: "c", Buffer: 8, BatchSize: 1, FlushInterval: 5 * time.Millisecond, Fsync: true},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ff := &flakyFile{logFile: l.file}
+	ff.failWrites.Store(-1)
+	l.file = ff
+	return l, ff, path
+}
+
+func TestFailingSinkRejectsThenRecordsGap(t *testing.T) {
+	t.Parallel()
+	l, ff, path := openFlaky(t)
+	ff.failWrites.Store(1000000)
+	if err := l.Append(t.Context(), Event{Method: "lost", Decision: DecisionAllow}); err != nil {
+		t.Fatal(err)
+	}
+	waitFor(t, func() bool { return l.SinkErr() != nil })
+	if err := l.Append(t.Context(), Event{Method: "m"}); !errors.Is(err, ErrSinkFailed) {
+		t.Fatalf("fail_closed admitted an event while the sink was failing: %v", err)
+	}
+	ff.failWrites.Store(0)
+	waitFor(t, func() bool { return l.SinkErr() == nil })
+	if err := l.Append(t.Context(), Event{Method: "after", Decision: DecisionAllow}); err != nil {
+		t.Fatal(err)
+	}
+	if err := l.Close(); err != nil {
+		t.Fatal(err)
+	}
+	rep, err := verifyFile(t, path, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if rep.Gaps != 1 || rep.DroppedEvents != 1 || rep.Events != 2 {
+		t.Fatalf("expected one gap record covering the lost event, got %+v", rep)
+	}
+}
+
+func TestFailedTruncateLatchesFatal(t *testing.T) {
+	t.Parallel()
+	l, ff, _ := openFlaky(t)
+	ff.failTruncate.Store(true)
+	ff.failWrites.Store(1)
+	if err := l.Append(t.Context(), Event{Method: "m"}); err != nil {
+		t.Fatal(err)
+	}
+	waitFor(t, func() bool { return errors.Is(l.SinkErr(), ErrCorrupt) })
+	time.Sleep(30 * time.Millisecond)
+	if err := l.Append(t.Context(), Event{Method: "m"}); !errors.Is(err, ErrSinkFailed) {
+		t.Fatalf("writes continued after an unrecoverable truncate failure: %v", err)
+	}
+	if err := l.Close(); !errors.Is(err, ErrCorrupt) {
+		t.Fatalf("close should surface the corruption: %v", err)
+	}
+}
+
+func TestRecoverSignsUncheckpointedTail(t *testing.T) {
+	t.Parallel()
+	pub, priv := keyPair(t)
+	path := filepath.Join(t.TempDir(), "audit.jsonl")
+	l, err := Open(Options{Path: path, ChainID: "c", FlushInterval: time.Millisecond})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := l.Append(t.Context(), Event{Method: "m", Decision: DecisionAllow}); err != nil {
+		t.Fatal(err)
+	}
+	if err := l.Close(); err != nil {
+		t.Fatal(err)
+	}
+	l, err = Open(Options{Path: path, ChainID: "c", Signer: priv, FlushInterval: time.Millisecond})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := l.Close(); err != nil {
+		t.Fatal(err)
+	}
+	rep, err := verifyFile(t, path, pub)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if rep.Checkpoints != 1 || rep.UnsignedTail != 0 {
+		t.Fatalf("restart left the tail unsigned: %+v", rep)
 	}
 }

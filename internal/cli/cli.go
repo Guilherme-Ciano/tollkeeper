@@ -25,6 +25,7 @@ import (
 var (
 	ErrPolicyFixtures = errors.New("policy fixtures failed")
 	ErrUnhealthy      = errors.New("health check failed")
+	ErrVerify         = errors.New("audit verification failed")
 )
 
 type BuildInfo struct {
@@ -189,29 +190,66 @@ func auditCmd() *cobra.Command {
 	return cmd
 }
 
+type verifyOpts struct {
+	file         string
+	pubkey       string
+	chainID      string
+	maxUnsigned  uint64
+	noSignatures bool
+}
+
 func verifyCmd() *cobra.Command {
-	var file, pubkey string
+	var o verifyOpts
 	verify := &cobra.Command{
 		Use:   "verify",
 		Short: "Recompute the hash chain and check Ed25519 checkpoints",
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			return runVerify(cmd.OutOrStdout(), file, pubkey)
+			return runVerify(cmd.OutOrStdout(), o)
 		},
 	}
-	verify.Flags().StringVarP(&file, "file", "f", "audit.jsonl", "audit JSONL file")
-	verify.Flags().StringVar(&pubkey, "pubkey", "", "Ed25519 public key (PEM)")
+	verify.Flags().StringVarP(&o.file, "file", "f", "audit.jsonl", "audit JSONL file")
+	verify.Flags().StringVar(&o.pubkey, "pubkey", "", "Ed25519 public key (PEM); required unless --no-signatures")
+	verify.Flags().StringVar(&o.chainID, "chain-id", "", "expected chain id")
+	verify.Flags().
+		Uint64Var(&o.maxUnsigned, "max-unsigned", 1000, "maximum records allowed after the last signed checkpoint")
+	verify.Flags().
+		BoolVar(&o.noSignatures, "no-signatures", false, "only check the hash chain; it does not prove authenticity")
 	return verify
 }
 
-func runVerify(out io.Writer, file, pubkey string) error {
-	f, err := os.Open(file)
+func checkSignatures(rep audit.Report, o verifyOpts) error {
+	if o.chainID != "" && rep.Records > 0 && rep.ChainID != o.chainID {
+		return fmt.Errorf("%w: chain id %q, expected %q", ErrVerify, rep.ChainID, o.chainID)
+	}
+	if o.noSignatures || rep.Records == 0 {
+		return nil
+	}
+	if rep.Checkpoints == 0 {
+		return fmt.Errorf(
+			"%w: no signed checkpoint in %d records; the chain could have been rewritten",
+			ErrVerify,
+			rep.Records,
+		)
+	}
+	if rep.UnsignedTail > o.maxUnsigned {
+		return fmt.Errorf("%w: %d records after the last signed checkpoint (seq %d) exceed --max-unsigned %d",
+			ErrVerify, rep.UnsignedTail, rep.LastSignedSeq, o.maxUnsigned)
+	}
+	return nil
+}
+
+func runVerify(out io.Writer, o verifyOpts) error {
+	if o.pubkey == "" && !o.noSignatures {
+		return fmt.Errorf("%w: pass --pubkey, or --no-signatures to check only the hash chain", ErrVerify)
+	}
+	f, err := os.Open(o.file)
 	if err != nil {
 		return fmt.Errorf("open audit log: %w", err)
 	}
 	defer f.Close()
 	var pub []byte
-	if pubkey != "" {
-		k, err := audit.LoadPublicKey(pubkey)
+	if o.pubkey != "" {
+		k, err := audit.LoadPublicKey(o.pubkey)
 		if err != nil {
 			return err
 		}
@@ -221,8 +259,20 @@ func runVerify(out io.Writer, file, pubkey string) error {
 	if err != nil {
 		return errors.Join(printf(out, "FAIL %s after %d valid records\n", err, rep.Records), err)
 	}
-	if err := printf(out, "OK chain=%s records=%d events=%d checkpoints=%d last_seq=%d last_hash=%s\n",
-		rep.ChainID, rep.Records, rep.Events, rep.Checkpoints, rep.LastSeq, rep.LastHash); err != nil {
+	if err := checkSignatures(rep, o); err != nil {
+		return errors.Join(printf(out, "FAIL %s\n", err), err)
+	}
+	if err := printf(
+		out,
+		"OK chain=%s records=%d events=%d checkpoints=%d last_seq=%d last_hash=%s unsigned_tail=%d\n",
+		rep.ChainID,
+		rep.Records,
+		rep.Events,
+		rep.Checkpoints,
+		rep.LastSeq,
+		rep.LastHash,
+		rep.UnsignedTail,
+	); err != nil {
 		return err
 	}
 	if rep.Gaps > 0 {
@@ -235,16 +285,8 @@ func runVerify(out io.Writer, file, pubkey string) error {
 			return err
 		}
 	}
-	switch {
-	case pubkey == "":
-		return printf(out, "WARN signatures not checked: pass --pubkey\n")
-	case rep.UnsignedTail > 0:
-		return printf(
-			out,
-			"WARN %d records after the last signed checkpoint (seq %d)\n",
-			rep.UnsignedTail,
-			rep.LastSignedSeq,
-		)
+	if o.noSignatures {
+		return printf(out, "WARN signatures not checked: the hash chain alone does not prove authenticity\n")
 	}
 	return nil
 }
