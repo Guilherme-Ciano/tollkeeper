@@ -1,0 +1,5 @@
+.git
+bin
+dist
+deploy/compose/data
+*.out

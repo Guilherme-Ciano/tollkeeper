@@ -1,0 +1,26 @@
+issuer: http://localhost:9000
+listen: 0.0.0.0:9000
+token_ttl: 15m
+clients:
+  - id: demo-agent
+    redirect_uris: ["http://127.0.0.1:8765/callback"]
+    resources: ["http://localhost:8080/mcp"]
+    scopes: ["mcp:tools", "files:write"]
+    grants: ["authorization_code"]
+  - id: gateway-to-files
+    secret: dev-files-secret
+    resources: ["http://files:8082/mcp"]
+    scopes: ["files:upstream"]
+    grants: ["client_credentials"]
+  - id: bench
+    secret: dev-bench-secret
+    resources: ["http://localhost:8080/mcp"]
+    scopes: ["mcp:tools"]
+    grants: ["client_credentials"]
+users:
+  - sub: alice
+    name: Alice (reader)
+    scopes: ["mcp:tools"]
+  - sub: bob
+    name: Bob (operator)
+    scopes: ["mcp:tools", "files:write"]
