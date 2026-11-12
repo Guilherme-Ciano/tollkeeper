@@ -1,0 +1,80 @@
+version: 2
+
+project_name: tollkeeper
+
+before:
+  hooks:
+    - go mod tidy
+    - go mod verify
+
+builds:
+  - id: tollkeeper
+    main: ./cmd/tollkeeper
+    binary: tollkeeper
+    env: [CGO_ENABLED=0]
+    goos: [linux, darwin, windows]
+    goarch: [amd64, arm64]
+    flags: [-trimpath]
+    ldflags:
+      - -s -w -X main.version={{ .Version }} -X main.commit={{ .FullCommit }} -X main.date={{ .CommitDate }}
+    mod_timestamp: "{{ .CommitTimestamp }}"
+
+archives:
+  - formats: [tar.gz]
+    format_overrides:
+      - goos: windows
+        formats: [zip]
+    name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+    files: [LICENSE, README.md]
+
+checksum:
+  name_template: checksums.txt
+
+sboms:
+  - artifacts: archive
+
+signs:
+  - cmd: cosign
+    signature: "${artifact}.sigstore.json"
+    args: ["sign-blob", "--bundle=${signature}", "${artifact}", "--yes"]
+    artifacts: checksum
+
+dockers_v2:
+  - images: ["ghcr.io/guilherme-ciano/{{ .ProjectName }}"]
+    tags: ["{{ .Version }}", "v{{ .Major }}.{{ .Minor }}", "latest"]
+    dockerfile: Dockerfile.release
+    platforms: [linux/amd64, linux/arm64]
+    sbom: true
+    labels:
+      org.opencontainers.image.source: "{{ .GitURL }}"
+      org.opencontainers.image.version: "{{ .Version }}"
+      org.opencontainers.image.revision: "{{ .FullCommit }}"
+      org.opencontainers.image.licenses: Apache-2.0
+      org.opencontainers.image.description: "MCP gateway with OAuth resource server, CEL policies, GCRA rate limits and a verifiable audit log"
+
+docker_signs:
+  - cmd: cosign
+    artifacts: manifests
+    args: ["sign", "${artifact}@${digest}", "--yes"]
+
+changelog:
+  use: github
+  sort: asc
+  groups:
+    - title: Features
+      regexp: '^.*?feat(\(.+\))??!?:.+$'
+      order: 0
+    - title: Bug fixes
+      regexp: '^.*?fix(\(.+\))??!?:.+$'
+      order: 1
+    - title: Performance
+      regexp: '^.*?perf(\(.+\))??!?:.+$'
+      order: 2
+    - title: Others
+      order: 999
+  filters:
+    exclude: ['^docs:', '^test:', '^ci:', '^chore:']
+
+release:
+  draft: false
+  prerelease: auto

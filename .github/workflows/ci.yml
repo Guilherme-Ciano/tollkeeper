@@ -1,0 +1,74 @@
+name: ci
+on:
+  push: { branches: [main] }
+  pull_request:
+permissions:
+  contents: read
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: step-security/harden-runner@1d88384fd173af6ecb012dfd0264a306b711241a # v2.22.4
+        with: { egress-policy: audit }
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with: { go-version-file: go.mod, check-latest: true }
+      - uses: golangci/golangci-lint-action@d583c34f0599d37dbac4a198b9c83201be380893 # v9.3.0
+        with: { version: v2.15.0 }
+      - run: go run ./internal/tools/nocomments
+      - run: go mod tidy -diff
+      - run: go run golang.org/x/vuln/cmd/govulncheck@v1.1.4 ./...
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with: { go-version-file: go.mod, check-latest: true }
+      - run: go test -race -shuffle=on -count=1 -covermode=atomic -coverprofile=cover.out ./...
+      - run: go tool cover -func=cover.out | tail -1 >> "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with: { name: coverage, path: cover.out }
+  fuzz:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        target:
+          - { pkg: ./internal/gateway, fn: FuzzParseEnvelope }
+          - { pkg: ./internal/gateway, fn: FuzzRejectDuplicateKeys }
+          - { pkg: ./internal/audit, fn: FuzzVerify }
+          - { pkg: ./internal/policy, fn: FuzzPolicyArgs }
+          - { pkg: ./internal/catalog, fn: FuzzQualify }
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with: { go-version-file: go.mod }
+      - run: go test -run='^$' -fuzz='^${{ matrix.target.fn }}$' -fuzztime=30s ${{ matrix.target.pkg }}
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with: { go-version-file: go.mod }
+      - run: make build
+  compose:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with: { go-version-file: go.mod }
+      - run: docker compose up --build -d --wait
+      - run: go run ./cmd/democlient
+      - run: docker compose exec -T gateway /usr/local/bin/tollkeeper audit verify -f /var/log/tollkeeper/audit.jsonl --pubkey /var/lib/tollkeeper/keys/audit-ed25519.pub
+      - if: always()
+        run: docker compose logs --no-color | tail -200
+  docker:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: docker/setup-qemu-action@99012661954931238ded8c8b007157a8430204e1 # v4.4.0
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+      - run: docker buildx build --platform linux/amd64,linux/arm64 --target gateway .
