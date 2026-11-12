@@ -58,7 +58,7 @@ build: ## Build all binaries into ./bin
 
 .PHONY: vuln
 vuln: ## govulncheck
-	$(GO) run golang.org/x/vuln/cmd/govulncheck@v1.1.4 ./...
+	$(GO) run golang.org/x/vuln/cmd/govulncheck@v1.9.0 ./...
 
 .PHONY: up
 up: ## docker compose up the demo stack

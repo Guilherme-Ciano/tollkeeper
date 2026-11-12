@@ -32,7 +32,7 @@ func (t *Tracing) Shutdown(ctx context.Context) error {
 }
 
 func NewTracing(ctx context.Context, service, version, endpoint string, ratio float64) (*Tracing, error) {
-	prop := propagation.NewCompositeTextMapPropagator(propagation.TraceContext{}, propagation.Baggage{})
+	prop := propagation.TraceContext{}
 	otel.SetTextMapPropagator(prop)
 	if endpoint == "" {
 		return &Tracing{Provider: noop.NewTracerProvider(), Propagator: prop}, nil

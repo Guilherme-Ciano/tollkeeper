@@ -20,7 +20,7 @@ jobs:
         with: { version: v2.15.0 }
       - run: go run ./internal/tools/nocomments
       - run: go mod tidy -diff
-      - run: go run golang.org/x/vuln/cmd/govulncheck@v1.1.4 ./...
+      - run: go run golang.org/x/vuln/cmd/govulncheck@v1.9.0 ./...
   test:
     runs-on: ubuntu-latest
     steps:

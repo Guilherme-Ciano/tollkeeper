@@ -9,18 +9,15 @@ import (
 
 	"github.com/go-viper/mapstructure/v2"
 	"github.com/knadh/koanf/parsers/yaml"
+	"github.com/knadh/koanf/providers/confmap"
 	"github.com/knadh/koanf/providers/env/v2"
-	"github.com/knadh/koanf/providers/rawbytes"
 	"github.com/knadh/koanf/providers/structs"
 	"github.com/knadh/koanf/v2"
 )
 
 const EnvPrefix = "TOLLKEEPER_"
 
-var (
-	ErrMissingEnv   = errors.New("environment variable not set")
-	ErrMultilineEnv = errors.New("environment variable contains a newline")
-)
+var ErrMissingEnv = errors.New("environment variable not set")
 
 func Load(path string, lookup func(string) (string, bool)) (Config, error) {
 	raw, err := os.ReadFile(path)
@@ -31,16 +28,24 @@ func Load(path string, lookup func(string) (string, bool)) (Config, error) {
 }
 
 func Parse(raw []byte, lookup func(string) (string, bool), environ func() []string) (Config, error) {
-	expanded, err := ExpandEnv(raw, lookup)
+	parsed, err := yaml.Parser().Unmarshal(raw)
+	if err != nil {
+		return Config{}, fmt.Errorf("parse yaml: %w", err)
+	}
+	expanded, err := expandValue(parsed, lookup)
 	if err != nil {
 		return Config{}, err
+	}
+	tree, ok := expanded.(map[string]any)
+	if !ok {
+		return Config{}, fmt.Errorf("parse yaml: %w", ErrInvalid)
 	}
 	k := koanf.New(".")
 	if err := k.Load(structs.Provider(Defaults(), "koanf"), nil); err != nil {
 		return Config{}, fmt.Errorf("load defaults: %w", err)
 	}
-	if err := k.Load(rawbytes.Provider(expanded), yaml.Parser()); err != nil {
-		return Config{}, fmt.Errorf("parse yaml: %w", err)
+	if err := k.Load(confmap.Provider(tree, ""), nil); err != nil {
+		return Config{}, fmt.Errorf("load yaml: %w", err)
 	}
 	envProvider := env.Provider(".", env.Opt{
 		Prefix:        EnvPrefix,
@@ -81,23 +86,46 @@ func envKey(k, v string) (key string, value any) {
 
 var envRef = regexp.MustCompile(`\$\{([A-Za-z_][A-Za-z0-9_]*)\}`)
 
-func ExpandEnv(raw []byte, lookup func(string) (string, bool)) ([]byte, error) {
+func expandString(in string, lookup func(string) (string, bool)) (string, error) {
 	var errs []error
-	out := envRef.ReplaceAllFunc(raw, func(m []byte) []byte {
-		name := string(envRef.FindSubmatch(m)[1])
+	out := envRef.ReplaceAllStringFunc(in, func(m string) string {
+		name := envRef.FindStringSubmatch(m)[1]
 		v, ok := lookup(name)
 		if !ok {
 			errs = append(errs, fmt.Errorf("${%s}: %w", name, ErrMissingEnv))
 			return m
 		}
-		if strings.ContainsAny(v, "\r\n") {
-			errs = append(errs, fmt.Errorf("${%s}: %w", name, ErrMultilineEnv))
-			return m
-		}
-		return []byte(v)
+		return v
 	})
 	if len(errs) > 0 {
-		return nil, errors.Join(errs...)
+		return "", errors.Join(errs...)
 	}
 	return out, nil
+}
+
+func expandValue(v any, lookup func(string) (string, bool)) (any, error) {
+	switch x := v.(type) {
+	case string:
+		return expandString(x, lookup)
+	case map[string]any:
+		out := make(map[string]any, len(x))
+		var errs []error
+		for k, e := range x {
+			ev, err := expandValue(e, lookup)
+			errs = append(errs, err)
+			out[k] = ev
+		}
+		return out, errors.Join(errs...)
+	case []any:
+		out := make([]any, len(x))
+		var errs []error
+		for i, e := range x {
+			ev, err := expandValue(e, lookup)
+			errs = append(errs, err)
+			out[i] = ev
+		}
+		return out, errors.Join(errs...)
+	default:
+		return v, nil
+	}
 }

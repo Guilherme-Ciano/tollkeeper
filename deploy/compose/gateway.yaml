@@ -16,6 +16,7 @@ auth:
     allow_insecure_jwks: true
     audiences: ["http://localhost:8080/mcp"]
     algorithms: ["EdDSA", "ES256"]
+    types: ["at+jwt"]
     clock_skew: 30s
 
 upstreams:

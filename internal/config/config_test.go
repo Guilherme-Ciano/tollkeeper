@@ -57,7 +57,8 @@ func TestParseDefaultsAndEnv(t *testing.T) {
 	if cfg.Server.Listen != ":7070" || cfg.Audit.RecordArgs != RecordArgsNone {
 		t.Fatalf("env overlay not applied: %+v", cfg.Server)
 	}
-	if cfg.Server.AdminListen != ":9090" || cfg.Audit.BatchSize != 512 || cfg.Auth.JWT.ClockSkew != 30*time.Second {
+	if cfg.Server.AdminListen != "127.0.0.1:9090" || cfg.Audit.BatchSize != 512 ||
+		cfg.Auth.JWT.ClockSkew != 30*time.Second {
 		t.Fatal("defaults not applied")
 	}
 	u := cfg.Upstreams[1]
@@ -76,15 +77,13 @@ func TestParseErrors(t *testing.T) {
 	if _, err := Parse([]byte(minimal), lookup(nil), none); !errors.Is(err, ErrMissingEnv) {
 		t.Fatalf("missing env: %v", err)
 	}
-	if _, err := Parse(
-		[]byte(minimal),
-		lookup(map[string]string{"FILES_SECRET": "a\nb: c"}),
-		none,
-	); !errors.Is(
-		err,
-		ErrMultilineEnv,
-	) {
-		t.Fatalf("multiline env injection: %v", err)
+	injected, err := Parse([]byte(minimal), lookup(map[string]string{"FILES_SECRET": "x\"\n    type: none\n#"}), none)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := injected.Upstreams[1].Auth; got.Type != UpstreamAuthClientCredentials ||
+		!strings.Contains(got.ClientSecret, "type: none") {
+		t.Fatalf("env value changed the YAML structure: %+v", got)
 	}
 	if _, err := Parse(
 		[]byte("server:\n  lsiten: x\n"),
@@ -158,5 +157,39 @@ func TestComposeConfigValidates(t *testing.T) {
 	}
 	if err := cfg.Validate(); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestSeparatorMustNotOverlapUpstreamIDs(t *testing.T) {
+	t.Parallel()
+	for sep, ok := range map[string]bool{"__": true, ".": true, "--": false, "x": false, "a1": false, "::": true} {
+		cfg := Defaults()
+		cfg.Server.NamespaceSeparator = sep
+		err := cfg.Validate()
+		has := err != nil && strings.Contains(err.Error(), "server.namespace_separator")
+		if has == ok {
+			t.Fatalf("separator %q: valid=%t, err=%v", sep, ok, err)
+		}
+	}
+}
+
+func TestHardeningValidation(t *testing.T) {
+	t.Parallel()
+	cfg := Defaults()
+	cfg.Auth.JWT.JWKSMinRetry = 0
+	cfg.Server.Pprof = true
+	cfg.Server.AdminListen = "0.0.0.0:9090"
+	cfg.RateLimits.Rules = []RateRule{
+		{Name: "too-fast", Per: PerSubject, Rate: "2000000000/s", Burst: 1},
+		{Name: "huge-burst", Per: PerSubject, Rate: "1/h", Burst: 2_000_000_000},
+	}
+	err := cfg.Validate()
+	for _, field := range []string{"auth.jwt.jwks_min_retry", "server.pprof", "rate_limits.rules[0].rate", "rate_limits.rules[1].burst"} {
+		if err == nil || !strings.Contains(err.Error(), field+":") {
+			t.Errorf("missing error for %s: %v", field, err)
+		}
+	}
+	if Defaults().Server.AdminListen != "127.0.0.1:9090" {
+		t.Fatal("admin listener must default to loopback")
 	}
 }

@@ -33,6 +33,7 @@ func FromKeySet(ks *KeySet) KeySource {
 }
 
 type VerifierOptions struct {
+	Types      []string
 	Issuer     string
 	Audiences  []string
 	Algorithms []string
@@ -43,6 +44,7 @@ type VerifierOptions struct {
 type Verifier struct {
 	keys   KeySource
 	parser *jwt.Parser
+	types  []string
 }
 
 func NewVerifier(keys KeySource, o VerifierOptions) *Verifier {
@@ -58,7 +60,7 @@ func NewVerifier(keys KeySource, o VerifierOptions) *Verifier {
 	if o.Now != nil {
 		opts = append(opts, jwt.WithTimeFunc(o.Now))
 	}
-	return &Verifier{keys: keys, parser: jwt.NewParser(opts...)}
+	return &Verifier{keys: keys, parser: jwt.NewParser(opts...), types: o.Types}
 }
 
 func Fingerprint(raw string) string {
@@ -70,6 +72,9 @@ func (v *Verifier) Verify(ctx context.Context, raw string) (identity.Principal, 
 	var keyErr error
 	claims := jwt.MapClaims{}
 	_, err := v.parser.ParseWithClaims(raw, claims, func(t *jwt.Token) (any, error) {
+		if !v.typeAllowed(t) {
+			return nil, fmt.Errorf("token typ not accepted: %w", ErrInvalidToken)
+		}
 		kid, ok := t.Header["kid"].(string)
 		if !ok || kid == "" {
 			return nil, fmt.Errorf("missing kid: %w", ErrInvalidToken)
@@ -103,6 +108,23 @@ func (v *Verifier) Verify(ctx context.Context, raw string) (identity.Principal, 
 		Claims:      claims,
 		Fingerprint: Fingerprint(raw),
 	}, nil
+}
+
+func (v *Verifier) typeAllowed(t *jwt.Token) bool {
+	if len(v.types) == 0 {
+		return true
+	}
+	typ, ok := t.Header["typ"].(string)
+	if !ok {
+		return false
+	}
+	typ = strings.TrimPrefix(strings.ToLower(typ), "application/")
+	for _, want := range v.types {
+		if strings.TrimPrefix(strings.ToLower(want), "application/") == typ {
+			return true
+		}
+	}
+	return false
 }
 
 func claimString(c jwt.MapClaims, k string) string {

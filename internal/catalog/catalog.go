@@ -1,6 +1,7 @@
 package catalog
 
 import (
+	"bytes"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
@@ -142,20 +143,31 @@ func (c *Catalog) Lookup(name string) (Tool, bool) {
 	return c.snap.Load().Lookup(name)
 }
 
-func (c *Catalog) Replace(upstream string, tools []Tool) (Delta, error) {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	prev := c.snap.Load()
+func index(prev *Snapshot, upstream string, tools []Tool) (map[string]Tool, error) {
 	incoming := make(map[string]Tool, len(tools))
 	for i := range tools {
 		t := &tools[i]
 		if t.Upstream != upstream {
-			return Delta{}, fmt.Errorf("%w: %s belongs to %s", ErrBadName, t.Name, t.Upstream)
+			return nil, fmt.Errorf("%w: %s belongs to %s", ErrBadName, t.Name, t.Upstream)
 		}
 		if _, dup := incoming[t.Name]; dup {
-			return Delta{}, fmt.Errorf("%w: %s", ErrDuplicate, t.Name)
+			return nil, fmt.Errorf("%w: %s", ErrDuplicate, t.Name)
+		}
+		if old, ok := prev.Lookup(t.Name); ok && old.Upstream != upstream {
+			return nil, fmt.Errorf("%w: %s already belongs to %s", ErrDuplicate, t.Name, old.Upstream)
 		}
 		incoming[t.Name] = *t
+	}
+	return incoming, nil
+}
+
+func (c *Catalog) Replace(upstream string, tools []Tool) (Delta, error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	prev := c.snap.Load()
+	incoming, err := index(prev, upstream, tools)
+	if err != nil {
+		return Delta{}, err
 	}
 	var d Delta
 	next := make([]Tool, 0, len(prev.tools)+len(tools))
@@ -172,7 +184,7 @@ func (c *Catalog) Replace(upstream string, tools []Tool) (Delta, error) {
 	for i := range tools {
 		t := &tools[i]
 		old, existed := prev.Lookup(t.Name)
-		if !existed || old.Pin != t.Pin {
+		if !existed || old.Pin != t.Pin || !bytes.Equal(old.Descriptor, t.Descriptor) {
 			d.Upserted = append(d.Upserted, *t)
 		}
 		next = append(next, *t)
