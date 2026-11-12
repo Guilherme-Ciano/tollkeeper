@@ -113,17 +113,21 @@ type Request struct {
 
 func (s *Store) Allow(_ context.Context, reqs []Request) Result {
 	now := s.nanos()
-	committed := make([]*cell, 0, len(reqs))
+	type taken struct {
+		c        *cell
+		interval int64
+	}
+	committed := make([]taken, 0, len(reqs))
 	var tightest Result
 	for i, r := range reqs {
 		res, c := s.take(r.Key, r.Limit, now)
 		if !res.Allowed {
-			for j, done := range committed {
-				done.tat.Add(-int64(reqs[j].Limit.Interval))
+			for _, done := range committed {
+				done.c.tat.Add(-done.interval)
 			}
 			return res
 		}
-		committed = append(committed, c)
+		committed = append(committed, taken{c: c, interval: int64(r.Limit.Interval)})
 		if i == 0 || res.Remaining < tightest.Remaining {
 			tightest = res
 		}
