@@ -5,6 +5,7 @@ go 1.27.0
 toolchain go1.27.4
 
 require (
+	github.com/HdrHistogram/hdrhistogram-go v1.4.0
 	github.com/go-viper/mapstructure/v2 v2.5.0
 	github.com/golang-jwt/jwt/v5 v5.3.1
 	github.com/google/cel-go v0.30.0
@@ -29,7 +30,6 @@ require (
 
 require (
 	cel.dev/expr v0.25.2 // indirect
-	github.com/HdrHistogram/hdrhistogram-go v1.4.0 // indirect
 	github.com/antlr4-go/antlr/v4 v4.13.1 // indirect
 	github.com/beorn7/perks v1.0.1 // indirect
 	github.com/cenkalti/backoff/v5 v5.0.3 // indirect
