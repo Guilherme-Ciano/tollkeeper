@@ -24,6 +24,7 @@ type Server struct {
 	ShutdownDrainDelay time.Duration `koanf:"shutdown_drain_delay"`
 	ShutdownTimeout    time.Duration `koanf:"shutdown_timeout"`
 	AllowLocalhostHost bool          `koanf:"allow_localhost_host"`
+	Pprof              bool          `koanf:"pprof"`
 }
 
 type Auth struct {

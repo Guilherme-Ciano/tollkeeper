@@ -121,6 +121,7 @@ func gatewayConfig(dir, listen, admin, issuerURL, upstreamURL string) (string, e
   admin_listen: %q
   public_url: "http://%s/mcp"
   allow_localhost_host: true
+  pprof: true
 auth:
   resource: "http://%s/mcp"
   authorization_servers: [%q]
