@@ -1,0 +1,89 @@
+server:
+  listen: ":8080"
+  admin_listen: ":9090"
+  public_url: "http://localhost:8080/mcp"
+  shutdown_drain_delay: 2s
+
+auth:
+  mode: jwt
+  resource: "http://localhost:8080/mcp"
+  authorization_servers: ["http://localhost:9000"]
+  scopes_supported: ["mcp:tools", "files:write"]
+  required_scopes: ["mcp:tools"]
+  jwt:
+    issuer: "http://localhost:9000"
+    jwks_url: "http://devissuer:9000/jwks.json"
+    allow_insecure_jwks: true
+    audiences: ["http://localhost:8080/mcp"]
+    algorithms: ["EdDSA", "ES256"]
+    clock_skew: 30s
+
+upstreams:
+  - id: notes
+    transport: stdio
+    command: ["/usr/local/bin/notes-server", "--stdio"]
+    max_concurrency: 32
+    timeout: 10s
+  - id: weather
+    transport: streamable_http
+    url: "http://weather:8081/mcp"
+    timeout: 10s
+    breaker: { failures: 5, open_for: 30s }
+  - id: files
+    transport: streamable_http
+    url: "http://files:8082/mcp"
+    timeout: 10s
+    auth:
+      type: client_credentials
+      token_url: "http://devissuer:9000/token"
+      client_id: gateway-to-files
+      client_secret: "${FILES_CLIENT_SECRET}"
+      resource: "http://files:8082/mcp"
+      scopes: ["files:upstream"]
+
+policy:
+  default: deny
+  rules:
+    - name: readers-can-read
+      subjects: { scopes_any: ["mcp:tools"] }
+      tools: ["notes__search", "notes__get", "weather__*", "files__list_files", "files__read_file"]
+      effect: allow
+    - name: notes-create-capped
+      subjects: { scopes_any: ["mcp:tools"] }
+      tools: ["notes__create"]
+      when: "has(args.body) && size(args.body) <= 4096"
+      effect: allow
+    - name: destructive-needs-step-up
+      tools: ["files__delete_file"]
+      when: '"files:write" in principal.scopes'
+      effect: allow
+      on_deny: { step_up_scopes: ["files:write"] }
+
+rate_limits:
+  rules:
+    - name: per-subject
+      tools: ["*"]
+      per: subject
+      rate: 600/m
+      burst: 60
+    - name: weather-per-subject
+      tools: ["weather__*"]
+      per: subject_tool
+      rate: 30/m
+      burst: 5
+
+audit:
+  enabled: true
+  path: /var/log/tollkeeper/audit.jsonl
+  chain_id: compose-gateway
+  on_backpressure: fail_closed
+  record_args: hash
+  checkpoint:
+    every: 20
+    interval: 10s
+    signing_key_file: /var/lib/tollkeeper/keys/audit-ed25519.pem
+
+telemetry:
+  service_name: tollkeeper
+  log_level: info
+  log_format: json

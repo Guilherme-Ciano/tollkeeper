@@ -1,0 +1,66 @@
+name: tollkeeper
+
+services:
+  keys:
+    build: { context: ., target: gateway }
+    entrypoint: ["/usr/local/bin/tollkeeper", "audit", "keygen", "--if-missing", "--out-dir", "/var/lib/tollkeeper/keys"]
+    command: []
+    volumes: ["keys:/var/lib/tollkeeper/keys"]
+    restart: "no"
+
+  devissuer:
+    build: { context: ., target: devissuer }
+    command: ["-config", "/etc/devissuer/config.yaml", "-i-know-this-is-insecure"]
+    volumes: ["./deploy/compose/devissuer.yaml:/etc/devissuer/config.yaml:ro"]
+    ports: ["127.0.0.1:9000:9000"]
+
+  weather:
+    build: { context: ., target: weather }
+    command: ["-listen", "0.0.0.0:8081"]
+    expose: ["8081"]
+
+  files:
+    build: { context: ., target: files }
+    command: ["-listen", "0.0.0.0:8082", "-issuer", "http://localhost:9000", "-jwks", "http://devissuer:9000/jwks.json", "-audience", "http://files:8082/mcp"]
+    expose: ["8082"]
+    depends_on: [devissuer]
+
+  gateway:
+    build: { context: ., target: gateway }
+    environment:
+      FILES_CLIENT_SECRET: dev-files-secret
+    volumes:
+      - "./deploy/compose/gateway.yaml:/etc/tollkeeper/config.yaml:ro"
+      - "audit:/var/log/tollkeeper"
+      - "keys:/var/lib/tollkeeper/keys:ro"
+    ports: ["127.0.0.1:8080:8080", "127.0.0.1:9090:9090"]
+    depends_on:
+      keys: { condition: service_completed_successfully }
+      devissuer: { condition: service_started }
+      weather: { condition: service_started }
+      files: { condition: service_started }
+    healthcheck:
+      test: ["CMD", "/usr/local/bin/tollkeeper", "healthcheck", "--url", "http://127.0.0.1:9090/readyz"]
+      interval: 2s
+      timeout: 3s
+      retries: 15
+
+  noop:
+    build: { context: ., target: noop }
+    command: ["-listen", "0.0.0.0:8090"]
+    profiles: ["bench"]
+
+  jaeger:
+    image: docker.io/jaegertracing/jaeger:2.11.0
+    profiles: ["obs"]
+    ports: ["127.0.0.1:16686:16686"]
+
+  prometheus:
+    image: docker.io/prom/prometheus:v3.7.3
+    profiles: ["obs"]
+    volumes: ["./deploy/compose/prometheus.yml:/etc/prometheus/prometheus.yml:ro"]
+    ports: ["127.0.0.1:9091:9090"]
+
+volumes:
+  audit: {}
+  keys: {}
