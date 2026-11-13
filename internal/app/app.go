@@ -8,6 +8,7 @@ import (
 	"net"
 	"net/http"
 	"net/http/pprof"
+	"slices"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -43,11 +44,15 @@ type App struct {
 	upstreams []*upstream.Upstream
 	gateway   *gateway.Gateway
 	ready     atomic.Bool
+	synced    map[string]*atomic.Uint64
 	listeners sync.Map
 }
 
 func Build(ctx context.Context, cfg config.Config, log *slog.Logger, version string) (built *App, err error) {
-	a := &App{cfg: cfg, log: log, metrics: telemetry.NewMetrics(), catalog: catalog.New(maxCatalogTools)}
+	a := &App{
+		cfg: cfg, log: log, metrics: telemetry.NewMetrics(), catalog: catalog.New(maxCatalogTools),
+		synced: map[string]*atomic.Uint64{},
+	}
 	defer func() {
 		if err != nil {
 			err = errors.Join(err, a.close(ctx))
@@ -113,6 +118,7 @@ func Build(ctx context.Context, cfg config.Config, log *slog.Logger, version str
 			return nil, err
 		}
 		u := upstream.New(*uc, naming, f, log, hooks, version)
+		a.synced[uc.ID] = &atomic.Uint64{}
 		a.upstreams = append(a.upstreams, u)
 		callers[uc.ID] = u
 	}
@@ -205,16 +211,14 @@ func (a *App) adminHandler() http.Handler {
 			http.Error(w, "not ready", http.StatusServiceUnavailable)
 			return
 		}
-		for _, u := range a.upstreams {
-			if u.Up() {
-				w.WriteHeader(http.StatusOK)
-				if _, err := w.Write([]byte("ready\n")); err != nil {
-					a.log.DebugContext(r.Context(), "readyz write failed", slog.String("error", err.Error()))
-				}
-				return
-			}
+		if !slices.ContainsFunc(a.upstreams, a.serving) {
+			http.Error(w, "no upstream connected and synced", http.StatusServiceUnavailable)
+			return
 		}
-		http.Error(w, "no upstream connected", http.StatusServiceUnavailable)
+		w.WriteHeader(http.StatusOK)
+		if _, err := w.Write([]byte("ready\n")); err != nil {
+			a.log.DebugContext(r.Context(), "readyz write failed", slog.String("error", err.Error()))
+		}
 	})
 	return mux
 }
@@ -253,9 +257,16 @@ func (a *App) syncLoop(ctx context.Context, u *upstream.Upstream) {
 	}
 }
 
+func (a *App) serving(u *upstream.Upstream) bool {
+	gen := u.Generation()
+	return u.Up() && gen > 0 && a.synced[u.ID()].Load() == gen
+}
+
 func (a *App) resync(ctx context.Context, u *upstream.Upstream) {
 	var tools []catalog.Tool
-	if u.Up() {
+	gen := u.Generation()
+	up := u.Up()
+	if up {
 		var err error
 		tools, err = u.Tools(ctx)
 		if err != nil {
@@ -268,7 +279,7 @@ func (a *App) resync(ctx context.Context, u *upstream.Upstream) {
 			if u.Up() {
 				return
 			}
-			tools = nil
+			tools, up = nil, false
 		}
 	}
 	delta, err := a.catalog.Replace(u.ID(), tools)
@@ -286,6 +297,11 @@ func (a *App) resync(ctx context.Context, u *upstream.Upstream) {
 		a.log.InfoContext(ctx, "catalog updated", slog.String("upstream", u.ID()),
 			slog.Int("upserted", len(delta.Upserted)), slog.Int("removed", len(delta.Removed)),
 			slog.Uint64("version", a.catalog.Snapshot().Version))
+	}
+	if up {
+		a.synced[u.ID()].Store(gen)
+	} else {
+		a.synced[u.ID()].Store(0)
 	}
 }
 

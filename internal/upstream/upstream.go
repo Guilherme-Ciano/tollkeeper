@@ -46,6 +46,7 @@ type Upstream struct {
 	ready     chan struct{}
 	readyOnce sync.Once
 	up        atomic.Bool
+	gen       atomic.Uint64
 
 	mu sync.RWMutex
 	cs *mcp.ClientSession
@@ -100,6 +101,10 @@ func clientFault(err error) bool {
 	return false
 }
 
+func (u *Upstream) Generation() uint64 {
+	return u.gen.Load()
+}
+
 func (u *Upstream) ID() string {
 	return u.cfg.ID
 }
@@ -132,6 +137,9 @@ func (u *Upstream) session() *mcp.ClientSession {
 func (u *Upstream) setUp(cs *mcp.ClientSession) {
 	u.mu.Lock()
 	u.cs = cs
+	if cs != nil {
+		u.gen.Add(1)
+	}
 	u.mu.Unlock()
 	u.up.Store(cs != nil)
 	if u.hooks.Up != nil {
