@@ -21,5 +21,6 @@ Gateway audit logs usually live in a database or a log pipeline. Anyone with wri
 ## Consequences
 
 - Modifications, deletions, reordering and forged checkpoints are detected at the exact sequence number.
-- Truncating records after the last checkpoint cannot be detected locally. External anchoring of checkpoints is planned for v1.0.
+- Records after the last checkpoint are only hash-chained: someone with write access could rewrite or truncate that tail. `audit verify` requires a public key by default, fails when no checkpoint exists, and caps the unsigned tail with `--max-unsigned`. External anchoring of checkpoints is planned for v1.0.
+- Write or fsync failures truncate the partial batch and, in `fail_closed` mode, stop admitting calls until a write succeeds; the lost events are recorded as a gap. If truncation itself fails, the log stops writing rather than reuse sequence numbers.
 - fsync per batch bounds the window of records lost on a crash to one flush interval (50 ms by default).
