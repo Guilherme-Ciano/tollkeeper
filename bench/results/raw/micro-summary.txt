@@ -1,0 +1,10 @@
+BenchmarkAppend                                4196 ns/op    1406 B/op     8 allocs/op  min=4181 max=4285
+BenchmarkDecide/cel                            4186 ns/op    3122 B/op    42 allocs/op  min=4150 max=4212
+BenchmarkDecide/cel_args                       6296 ns/op    3578 B/op    52 allocs/op  min=6195 max=6490
+BenchmarkDecide/rbac                            102 ns/op       0 B/op     0 allocs/op  min=102.2 max=103.2
+BenchmarkGCRA/parallel                           43 ns/op       0 B/op     0 allocs/op  min=42.33 max=44.32
+BenchmarkGCRA/single                             97 ns/op       0 B/op     0 allocs/op  min=95.55 max=101.0
+BenchmarkParseEnvelope                        17098 ns/op    6586 B/op   113 allocs/op  min=16987 max=17296
+BenchmarkRejectDuplicateKeysWide            1546252 ns/op    8999 B/op    22 allocs/op  min=1536171 max=1591842
+BenchmarkSeal                                  1786 ns/op     416 B/op     5 allocs/op  min=1774 max=1811
+BenchmarkVerify                               58035 ns/op    2708 B/op    51 allocs/op  min=56625 max=58864
