@@ -8,7 +8,7 @@
 
 - Every MCP server you connect is a new door into your systems, and the spec now forbids the shortcut most proxies take: **forwarding the caller's token upstream** (the official Go proxy example forwards every inbound header, `Authorization` included). tollkeeper validates the token, then calls upstreams with its *own* credentials.
 - "Who called which tool with what, and was it allowed?" is the question compliance teams ask. Most gateways answer it with logs anyone with database access can quietly rewrite. tollkeeper writes a **SHA-256 hash chain with Ed25519-signed checkpoints**, and `tollkeeper audit verify` names the exact record that was changed or deleted.
-- Overhead is measured, not claimed: see [Benchmarks](#benchmarks).
+- Overhead is measured, not claimed: about 0.6 ms p50 and 1.3 ms p99 added at 1,000 calls/s with every feature on. See [Benchmarks](#benchmarks).
 
 ## What it does
 
@@ -185,7 +185,36 @@ CEL variables: `principal{sub, client_id, scopes, claims}`, `tool{name, upstream
 ## Benchmarks
 
 <!-- bench:start -->
-Benchmarks are being re-run on a quiet machine; see `bench/results` for the committed raw numbers.
+Added latency per `tools/call` against a no-op upstream, with every feature on: EdDSA JWT verification, a CEL rule, two GCRA rules, fsync'd audit intent and outcome records with Ed25519 checkpoints, and Prometheus metrics.
+
+| offered calls/s | added p50 | added p90 | added p99 | errors | gateway RSS |
+|---:|---:|---:|---:|---:|---:|
+| 500 | 0.62 ms | 0.69 ms | 1.03 ms | 0 | 60 MB |
+| 1,000 | 0.60 ms | 0.82 ms | 1.30 ms | 0 | 66 MB |
+| 2,000 | 0.85 ms | 1.20 ms | 4.43 ms | 0 | 101 MB |
+| 3,000 | 1.91 ms | 4.34 ms | 35.6 ms | 0 | 156 MB |
+| 4,000+ | saturated at ~3,100 completed calls/s | | | | |
+
+- **Sustainable throughput:** about 2,000 calls/s with p99 overhead under 5 ms, on 4 pinned cores (`GOMAXPROCS=4`). The ceiling is about 3,100 calls/s.
+- **Where the time goes:** a CPU profile shows tollkeeper's own work is small (admission 3.5%, envelope parse 3.2%, audit about 2% of CPU). Most of it is the second MCP hop through go-sdk, whose stateless request path decodes each body about six times, plus the GC that causes.
+- **Hot-path micro-benchmarks:**
+  - Ed25519 JWT verify: 58 µs
+  - Envelope parse: 17 µs
+  - CEL rule: 4.2 µs (6.3 µs with args)
+  - Audit append: 4.2 µs
+  - RBAC rule: 102 ns
+  - GCRA take: 97 ns (43 ns in parallel), 0 allocs
+- **Test conditions:**
+  - Hardware: AMD Ryzen 5 4600G (6C/12T), 16 GB, Linux 7.3.3-cachyos, governor `powersave` with boost on, Go 1.27.4.
+  - Network: same-host loopback, not internet latency.
+  - Pinning: gateway on CPUs 0-3, upstream on 4-5, load generator on 6-11.
+  - Memory: run in a 6 GiB, no-swap cgroup; peak use 1.49 GiB.
+- **Method:**
+  - Open-loop constant arrival rate, corrected for coordinated omission.
+  - Each rate gets a 10 s warm-up, then 3 × 30 s runs; the median run by p99 is reported.
+  - This is shorter than the planned 5 × 120 s.
+
+Full results and analysis: [bench/results/2026-11-13-ryzen-5-0773037](bench/results/2026-11-13-ryzen-5-0773037/ANALYSIS.md).
 <!-- bench:end -->
 
 Reproduce with `make bench` (micro-benchmarks, `-count=10`) and `make bench-e2e` (gateway vs. direct at constant arrival rates; methodology in [bench/README.md](bench/README.md)).
