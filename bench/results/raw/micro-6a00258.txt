@@ -1,0 +1,146 @@
+PASS
+ok  	github.com/Guilherme-Ciano/tollkeeper/internal/app	0.007s
+goos: linux
+goarch: amd64
+pkg: github.com/Guilherme-Ciano/tollkeeper/internal/audit
+cpu: AMD Ryzen 5 4600G with Radeon Graphics
+BenchmarkAppend-12    	 1000000	      4181 ns/op	    1406 B/op	       8 allocs/op
+BenchmarkAppend-12    	 1000000	      4206 ns/op	    1406 B/op	       8 allocs/op
+BenchmarkAppend-12    	 1000000	      4285 ns/op	    1406 B/op	       8 allocs/op
+BenchmarkAppend-12    	 1000000	      4229 ns/op	    1406 B/op	       8 allocs/op
+BenchmarkAppend-12    	 1000000	      4195 ns/op	    1406 B/op	       8 allocs/op
+BenchmarkAppend-12    	 1000000	      4188 ns/op	    1406 B/op	       8 allocs/op
+BenchmarkAppend-12    	 1000000	      4183 ns/op	    1406 B/op	       8 allocs/op
+BenchmarkAppend-12    	 1000000	      4181 ns/op	    1406 B/op	       8 allocs/op
+BenchmarkAppend-12    	 1000000	      4196 ns/op	    1406 B/op	       8 allocs/op
+BenchmarkAppend-12    	 1000000	      4203 ns/op	    1406 B/op	       8 allocs/op
+BenchmarkSeal-12      	  692893	      1777 ns/op	     416 B/op	       5 allocs/op
+BenchmarkSeal-12      	  657807	      1786 ns/op	     416 B/op	       5 allocs/op
+BenchmarkSeal-12      	  668470	      1779 ns/op	     416 B/op	       5 allocs/op
+BenchmarkSeal-12      	  622113	      1787 ns/op	     416 B/op	       5 allocs/op
+BenchmarkSeal-12      	  644070	      1800 ns/op	     416 B/op	       5 allocs/op
+BenchmarkSeal-12      	  641870	      1774 ns/op	     416 B/op	       5 allocs/op
+BenchmarkSeal-12      	  659782	      1779 ns/op	     416 B/op	       5 allocs/op
+BenchmarkSeal-12      	  616554	      1810 ns/op	     416 B/op	       5 allocs/op
+BenchmarkSeal-12      	  705952	      1811 ns/op	     416 B/op	       5 allocs/op
+BenchmarkSeal-12      	  580826	      1791 ns/op	     416 B/op	       5 allocs/op
+PASS
+ok  	github.com/Guilherme-Ciano/tollkeeper/internal/audit	57.681s
+goos: linux
+goarch: amd64
+pkg: github.com/Guilherme-Ciano/tollkeeper/internal/authn
+cpu: AMD Ryzen 5 4600G with Radeon Graphics
+BenchmarkVerify-12    	   21270	     56625 ns/op	    2709 B/op	      51 allocs/op
+BenchmarkVerify-12    	   21031	     57017 ns/op	    2709 B/op	      51 allocs/op
+BenchmarkVerify-12    	   21106	     56885 ns/op	    2709 B/op	      51 allocs/op
+BenchmarkVerify-12    	   20983	     57601 ns/op	    2708 B/op	      51 allocs/op
+BenchmarkVerify-12    	   20701	     57849 ns/op	    2709 B/op	      51 allocs/op
+BenchmarkVerify-12    	   20503	     58221 ns/op	    2708 B/op	      51 allocs/op
+BenchmarkVerify-12    	   20497	     58411 ns/op	    2709 B/op	      51 allocs/op
+BenchmarkVerify-12    	   20671	     58465 ns/op	    2708 B/op	      51 allocs/op
+BenchmarkVerify-12    	   20538	     58616 ns/op	    2708 B/op	      51 allocs/op
+BenchmarkVerify-12    	   20360	     58864 ns/op	    2708 B/op	      51 allocs/op
+PASS
+ok  	github.com/Guilherme-Ciano/tollkeeper/internal/authn	12.023s
+PASS
+ok  	github.com/Guilherme-Ciano/tollkeeper/internal/catalog	0.002s
+PASS
+ok  	github.com/Guilherme-Ciano/tollkeeper/internal/cli	0.007s
+PASS
+ok  	github.com/Guilherme-Ciano/tollkeeper/internal/config	0.003s
+PASS
+ok  	github.com/Guilherme-Ciano/tollkeeper/internal/devissuer	0.004s
+goos: linux
+goarch: amd64
+pkg: github.com/Guilherme-Ciano/tollkeeper/internal/gateway
+cpu: AMD Ryzen 5 4600G with Radeon Graphics
+BenchmarkRejectDuplicateKeysWide-12    	     774	   1591842 ns/op	  56.54 MB/s	    8999 B/op	      22 allocs/op
+BenchmarkRejectDuplicateKeysWide-12    	     746	   1565584 ns/op	  57.49 MB/s	    8992 B/op	      22 allocs/op
+BenchmarkRejectDuplicateKeysWide-12    	     781	   1543009 ns/op	  58.33 MB/s	    8992 B/op	      22 allocs/op
+BenchmarkRejectDuplicateKeysWide-12    	     772	   1539753 ns/op	  58.46 MB/s	    8992 B/op	      22 allocs/op
+BenchmarkRejectDuplicateKeysWide-12    	     759	   1553873 ns/op	  57.93 MB/s	    8992 B/op	      22 allocs/op
+BenchmarkRejectDuplicateKeysWide-12    	     787	   1546481 ns/op	  58.20 MB/s	    8992 B/op	      22 allocs/op
+BenchmarkRejectDuplicateKeysWide-12    	     769	   1536171 ns/op	  58.59 MB/s	    8992 B/op	      22 allocs/op
+BenchmarkRejectDuplicateKeysWide-12    	     757	   1552672 ns/op	  57.97 MB/s	    8992 B/op	      22 allocs/op
+BenchmarkRejectDuplicateKeysWide-12    	     780	   1546024 ns/op	  58.22 MB/s	    8992 B/op	      22 allocs/op
+BenchmarkRejectDuplicateKeysWide-12    	     781	   1540929 ns/op	  58.41 MB/s	    8999 B/op	      22 allocs/op
+BenchmarkParseEnvelope-12              	   70734	     17179 ns/op	  17.64 MB/s	    6585 B/op	     113 allocs/op
+BenchmarkParseEnvelope-12              	   70016	     17091 ns/op	  17.73 MB/s	    6584 B/op	     113 allocs/op
+BenchmarkParseEnvelope-12              	   69192	     17184 ns/op	  17.63 MB/s	    6585 B/op	     113 allocs/op
+BenchmarkParseEnvelope-12              	   69412	     16987 ns/op	  17.84 MB/s	    6583 B/op	     113 allocs/op
+BenchmarkParseEnvelope-12              	   70180	     17143 ns/op	  17.67 MB/s	    6584 B/op	     113 allocs/op
+BenchmarkParseEnvelope-12              	   69388	     17100 ns/op	  17.72 MB/s	    6585 B/op	     113 allocs/op
+BenchmarkParseEnvelope-12              	   70502	     17063 ns/op	  17.76 MB/s	    6585 B/op	     113 allocs/op
+BenchmarkParseEnvelope-12              	   70036	     17095 ns/op	  17.72 MB/s	    6586 B/op	     113 allocs/op
+BenchmarkParseEnvelope-12              	   70446	     17085 ns/op	  17.73 MB/s	    6584 B/op	     113 allocs/op
+BenchmarkParseEnvelope-12              	   69817	     17296 ns/op	  17.52 MB/s	    6586 B/op	     113 allocs/op
+PASS
+ok  	github.com/Guilherme-Ciano/tollkeeper/internal/gateway	23.962s
+?   	github.com/Guilherme-Ciano/tollkeeper/internal/identity	[no test files]
+goos: linux
+goarch: amd64
+pkg: github.com/Guilherme-Ciano/tollkeeper/internal/policy
+cpu: AMD Ryzen 5 4600G with Radeon Graphics
+BenchmarkDecide/rbac-12         	11712726	       102.3 ns/op	       0 B/op	       0 allocs/op
+BenchmarkDecide/rbac-12         	11623340	       103.2 ns/op	       0 B/op	       0 allocs/op
+BenchmarkDecide/rbac-12         	11640336	       103.0 ns/op	       0 B/op	       0 allocs/op
+BenchmarkDecide/rbac-12         	11683078	       102.6 ns/op	       0 B/op	       0 allocs/op
+BenchmarkDecide/rbac-12         	11727655	       102.3 ns/op	       0 B/op	       0 allocs/op
+BenchmarkDecide/rbac-12         	11762632	       102.2 ns/op	       0 B/op	       0 allocs/op
+BenchmarkDecide/rbac-12         	11752974	       102.3 ns/op	       0 B/op	       0 allocs/op
+BenchmarkDecide/rbac-12         	11767054	       102.2 ns/op	       0 B/op	       0 allocs/op
+BenchmarkDecide/rbac-12         	11712711	       102.2 ns/op	       0 B/op	       0 allocs/op
+BenchmarkDecide/rbac-12         	11519865	       103.1 ns/op	       0 B/op	       0 allocs/op
+BenchmarkDecide/cel-12          	  287434	      4169 ns/op	    3121 B/op	      42 allocs/op
+BenchmarkDecide/cel-12          	  293756	      4186 ns/op	    3121 B/op	      42 allocs/op
+BenchmarkDecide/cel-12          	  298173	      4187 ns/op	    3121 B/op	      42 allocs/op
+BenchmarkDecide/cel-12          	  297236	      4179 ns/op	    3121 B/op	      42 allocs/op
+BenchmarkDecide/cel-12          	  288525	      4204 ns/op	    3121 B/op	      42 allocs/op
+BenchmarkDecide/cel-12          	  295441	      4212 ns/op	    3122 B/op	      42 allocs/op
+BenchmarkDecide/cel-12          	  299766	      4150 ns/op	    3122 B/op	      42 allocs/op
+BenchmarkDecide/cel-12          	  288145	      4193 ns/op	    3122 B/op	      42 allocs/op
+BenchmarkDecide/cel-12          	  282507	      4199 ns/op	    3122 B/op	      42 allocs/op
+BenchmarkDecide/cel-12          	  307600	      4159 ns/op	    3122 B/op	      42 allocs/op
+BenchmarkDecide/cel_args-12     	  198567	      6272 ns/op	    3578 B/op	      52 allocs/op
+BenchmarkDecide/cel_args-12     	  190935	      6320 ns/op	    3579 B/op	      52 allocs/op
+BenchmarkDecide/cel_args-12     	  195751	      6199 ns/op	    3579 B/op	      52 allocs/op
+BenchmarkDecide/cel_args-12     	  191640	      6237 ns/op	    3578 B/op	      52 allocs/op
+BenchmarkDecide/cel_args-12     	  191371	      6195 ns/op	    3579 B/op	      52 allocs/op
+BenchmarkDecide/cel_args-12     	  189556	      6361 ns/op	    3579 B/op	      52 allocs/op
+BenchmarkDecide/cel_args-12     	  192096	      6490 ns/op	    3579 B/op	      52 allocs/op
+BenchmarkDecide/cel_args-12     	  186798	      6359 ns/op	    3578 B/op	      52 allocs/op
+BenchmarkDecide/cel_args-12     	  194532	      6328 ns/op	    3579 B/op	      52 allocs/op
+BenchmarkDecide/cel_args-12     	  190125	      6249 ns/op	    3578 B/op	      52 allocs/op
+PASS
+ok  	github.com/Guilherme-Ciano/tollkeeper/internal/policy	36.415s
+goos: linux
+goarch: amd64
+pkg: github.com/Guilherme-Ciano/tollkeeper/internal/ratelimit
+cpu: AMD Ryzen 5 4600G with Radeon Graphics
+BenchmarkGCRA/single-12         	11869900	        97.06 ns/op	       0 B/op	       0 allocs/op
+BenchmarkGCRA/single-12         	12182446	        96.61 ns/op	       0 B/op	       0 allocs/op
+BenchmarkGCRA/single-12         	12503168	        96.55 ns/op	       0 B/op	       0 allocs/op
+BenchmarkGCRA/single-12         	12514057	        97.96 ns/op	       0 B/op	       0 allocs/op
+BenchmarkGCRA/single-12         	12308557	        95.55 ns/op	       0 B/op	       0 allocs/op
+BenchmarkGCRA/single-12         	11945451	        97.17 ns/op	       0 B/op	       0 allocs/op
+BenchmarkGCRA/single-12         	11850267	       100.1 ns/op	       0 B/op	       0 allocs/op
+BenchmarkGCRA/single-12         	12149707	       101.0 ns/op	       0 B/op	       0 allocs/op
+BenchmarkGCRA/single-12         	11999092	        98.78 ns/op	       0 B/op	       0 allocs/op
+BenchmarkGCRA/single-12         	11906083	        97.73 ns/op	       0 B/op	       0 allocs/op
+BenchmarkGCRA/parallel-12       	27170143	        42.95 ns/op	       0 B/op	       0 allocs/op
+BenchmarkGCRA/parallel-12       	28217720	        42.33 ns/op	       0 B/op	       0 allocs/op
+BenchmarkGCRA/parallel-12       	28180329	        43.36 ns/op	       0 B/op	       0 allocs/op
+BenchmarkGCRA/parallel-12       	27501226	        44.16 ns/op	       0 B/op	       0 allocs/op
+BenchmarkGCRA/parallel-12       	26938183	        44.32 ns/op	       0 B/op	       0 allocs/op
+BenchmarkGCRA/parallel-12       	30489997	        43.70 ns/op	       0 B/op	       0 allocs/op
+BenchmarkGCRA/parallel-12       	27220059	        43.26 ns/op	       0 B/op	       0 allocs/op
+BenchmarkGCRA/parallel-12       	28251183	        43.77 ns/op	       0 B/op	       0 allocs/op
+BenchmarkGCRA/parallel-12       	28630792	        43.36 ns/op	       0 B/op	       0 allocs/op
+BenchmarkGCRA/parallel-12       	29207716	        43.44 ns/op	       0 B/op	       0 allocs/op
+PASS
+ok  	github.com/Guilherme-Ciano/tollkeeper/internal/ratelimit	24.566s
+?   	github.com/Guilherme-Ciano/tollkeeper/internal/telemetry	[no test files]
+PASS
+ok  	github.com/Guilherme-Ciano/tollkeeper/internal/tools/nocomments	0.003s
+PASS
+ok  	github.com/Guilherme-Ciano/tollkeeper/internal/upstream	0.004s
