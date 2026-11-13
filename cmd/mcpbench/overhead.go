@@ -148,8 +148,8 @@ policy:
       effect: allow
 rate_limits:
   rules:
-    - { name: per-subject, tools: ["*"], per: subject, rate: 100000000/s, burst: 1000000 }
-    - { name: per-tool, tools: ["noop__*"], per: subject_tool, rate: 100000000/s, burst: 1000000 }
+    - { name: per-subject, tools: ["*"], per: subject, rate: 1000000/s, burst: 1000000 }
+    - { name: per-tool, tools: ["noop__*"], per: subject_tool, rate: 1000000/s, burst: 1000000 }
 audit:
   enabled: true
   path: %q
