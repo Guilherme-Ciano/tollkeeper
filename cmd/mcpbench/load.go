@@ -15,6 +15,8 @@ import (
 	"github.com/HdrHistogram/hdrhistogram-go"
 )
 
+const maxInFlight = 2048
+
 type target struct {
 	URL   string
 	Token string
@@ -35,6 +37,7 @@ type result struct {
 	MaxUs       int64   `json:"max_us"`
 	MeanUs      float64 `json:"mean_us"`
 	Overflow    int64   `json:"histogram_overflow"`
+	Shed        int64   `json:"shed_over_inflight_cap"`
 }
 
 func newClient(conns int) *http.Client {
@@ -76,6 +79,8 @@ type attack struct {
 	mu       sync.Mutex
 	ok       atomic.Int64
 	errs     atomic.Int64
+	shed     atomic.Int64
+	inflight atomic.Int64
 	overflow atomic.Int64
 }
 
@@ -145,7 +150,16 @@ func run(ctx context.Context, t target, rate int, d time.Duration, client *http.
 			time.Sleep(wait)
 		}
 		sent++
-		wg.Go(func() { a.once(ctx, intended) })
+		if a.inflight.Add(1) > maxInFlight {
+			a.inflight.Add(-1)
+			a.errs.Add(1)
+			a.shed.Add(1)
+			continue
+		}
+		wg.Go(func() {
+			defer a.inflight.Add(-1)
+			a.once(ctx, intended)
+		})
 	}
 	wg.Wait()
 	elapsed := time.Since(start).Seconds()
@@ -163,5 +177,6 @@ func run(ctx context.Context, t target, rate int, d time.Duration, client *http.
 		MaxUs:       a.hist.Max(),
 		MeanUs:      a.hist.Mean(),
 		Overflow:    a.overflow.Load(),
+		Shed:        a.shed.Load(),
 	}, nil
 }

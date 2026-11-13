@@ -47,6 +47,25 @@ func cpuModel() string {
 	return runtime.GOARCH
 }
 
+func hostCPUs() int {
+	f, err := os.Open("/proc/cpuinfo")
+	if err != nil {
+		return runtime.NumCPU()
+	}
+	defer f.Close()
+	n := 0
+	s := bufio.NewScanner(f)
+	for s.Scan() {
+		if k, _, ok := strings.Cut(s.Text(), ":"); ok && strings.TrimSpace(k) == "processor" {
+			n++
+		}
+	}
+	if n == 0 {
+		return runtime.NumCPU()
+	}
+	return n
+}
+
 func memGB() int {
 	f, err := os.Open("/proc/meminfo")
 	if err != nil {
@@ -78,7 +97,7 @@ func gitOut(ctx context.Context, args ...string) string {
 func captureEnv(ctx context.Context, goVersion string, taskset bool) environment {
 	return environment{
 		CPU:        cpuModel(),
-		LogicalCPU: runtime.NumCPU(),
+		LogicalCPU: hostCPUs(),
 		MemGB:      memGB(),
 		Kernel:     readTrim("/proc/sys/kernel/osrelease"),
 		Governor:   readTrim("/sys/devices/system/cpu/cpu0/cpufreq/scaling_governor"),
