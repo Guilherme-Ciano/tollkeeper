@@ -22,12 +22,16 @@ type rule struct {
 	per   string
 }
 
+type Backend interface {
+	Allow(ctx context.Context, reqs []Request) Result
+}
+
 type Limiter struct {
-	store *Store
+	store Backend
 	rules []rule
 }
 
-func New(cfg config.RateLimits, store *Store) (*Limiter, error) {
+func New(cfg config.RateLimits, store Backend) (*Limiter, error) {
 	l := &Limiter{store: store}
 	for _, r := range cfg.Rules {
 		count, per, err := config.ParseRate(r.Rate)
