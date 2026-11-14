@@ -272,6 +272,17 @@ func (c *Config) validatePolicy(v *validator) {
 }
 
 func (c *Config) validateRateLimits(v *validator) {
+	v.oneOf("rate_limits.store", c.RateLimits.Store, RateStoreMemory, RateStoreRedis)
+	if c.RateLimits.Store == RateStoreRedis {
+		r := c.RateLimits.Redis
+		if len(r.Addrs) == 0 {
+			v.add("rate_limits.redis.addrs", "required when rate_limits.store is redis")
+		}
+		v.oneOf("rate_limits.redis.on_error", r.OnError, RedisOnErrorLocal, RedisOnErrorDeny)
+		if r.Timeout <= 0 || r.Timeout > 5*time.Second {
+			v.add("rate_limits.redis.timeout", "must be within (0, 5s]")
+		}
+	}
 	for i, r := range c.RateLimits.Rules {
 		f := fmt.Sprintf("rate_limits.rules[%d]", i)
 		v.require(f+".name", r.Name)

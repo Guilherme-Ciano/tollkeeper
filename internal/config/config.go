@@ -118,8 +118,29 @@ type OnDeny struct {
 	StepUpScopes []string `koanf:"step_up_scopes"`
 }
 
+const (
+	RateStoreMemory = "memory"
+	RateStoreRedis  = "redis"
+
+	RedisOnErrorLocal = "local"
+	RedisOnErrorDeny  = "deny"
+)
+
 type RateLimits struct {
-	Rules []RateRule `koanf:"rules"`
+	Store string      `koanf:"store"`
+	Redis RedisLimits `koanf:"redis"`
+	Rules []RateRule  `koanf:"rules"`
+}
+
+type RedisLimits struct {
+	Addrs     []string      `koanf:"addrs"`
+	Username  string        `koanf:"username"`
+	Password  string        `koanf:"password"`
+	DB        int           `koanf:"db"`
+	TLS       bool          `koanf:"tls"`
+	KeyPrefix string        `koanf:"key_prefix"`
+	Timeout   time.Duration `koanf:"timeout"`
+	OnError   string        `koanf:"on_error"`
 }
 
 type RateRule struct {
@@ -179,6 +200,10 @@ func Defaults() Config {
 			},
 		},
 		Policy: Policy{Default: EffectDeny},
+		RateLimits: RateLimits{
+			Store: RateStoreMemory,
+			Redis: RedisLimits{KeyPrefix: "tollkeeper:rl:", Timeout: 50 * time.Millisecond, OnError: RedisOnErrorLocal},
+		},
 		Audit: Audit{
 			Enabled:        true,
 			Path:           "audit.jsonl",

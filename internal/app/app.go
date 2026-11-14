@@ -2,6 +2,7 @@ package app
 
 import (
 	"context"
+	"crypto/tls"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -15,6 +16,7 @@ import (
 	"time"
 
 	"github.com/prometheus/client_golang/prometheus/promhttp"
+	"github.com/redis/go-redis/v9"
 	"golang.org/x/sync/errgroup"
 
 	"github.com/Guilherme-Ciano/tollkeeper/internal/audit"
@@ -41,6 +43,7 @@ type App struct {
 	tracing   *telemetry.Tracing
 	keys      *authn.KeySet
 	store     *ratelimit.Store
+	redis     redis.UniversalClient
 	auditLog  *audit.Log
 	catalog   *catalog.Catalog
 	upstreams []*upstream.Upstream
@@ -77,7 +80,7 @@ func Build(ctx context.Context, cfg config.Config, log *slog.Logger, version str
 		return nil, fmt.Errorf("compile policy: %w", err)
 	}
 	a.store = ratelimit.NewStore(nil)
-	lim, err := ratelimit.New(cfg.RateLimits, a.store)
+	lim, err := ratelimit.New(cfg.RateLimits, a.rateBackend(ctx))
 	if err != nil {
 		return nil, err
 	}
@@ -153,6 +156,42 @@ func Build(ctx context.Context, cfg config.Config, log *slog.Logger, version str
 		Pins:       pins,
 	})
 	return a, nil
+}
+
+func (a *App) rateBackend(ctx context.Context) ratelimit.Backend {
+	if a.cfg.RateLimits.Store != config.RateStoreRedis {
+		return a.store
+	}
+	rc := a.cfg.RateLimits.Redis
+	opts := &redis.UniversalOptions{
+		Addrs:        rc.Addrs,
+		Username:     rc.Username,
+		Password:     rc.Password,
+		DB:           rc.DB,
+		DialTimeout:  2 * time.Second,
+		ReadTimeout:  rc.Timeout,
+		WriteTimeout: rc.Timeout,
+		MaxRetries:   -1,
+	}
+	if rc.TLS {
+		opts.TLSConfig = &tls.Config{MinVersion: tls.VersionTLS12}
+	}
+	a.redis = redis.NewUniversalClient(opts)
+	if err := a.redis.Ping(ctx).Err(); err != nil {
+		a.log.WarnContext(ctx, "redis rate limit store unreachable at startup, using the fallback until it recovers",
+			slog.String("on_error", rc.OnError), slog.String("error", err.Error()))
+	}
+	onError := ratelimit.FallbackLocal
+	if rc.OnError == config.RedisOnErrorDeny {
+		onError = ratelimit.FallbackDeny
+	}
+	return ratelimit.NewRedis(a.redis, ratelimit.RedisOptions{
+		Prefix:  rc.KeyPrefix,
+		Timeout: rc.Timeout,
+		OnError: onError,
+		Local:   a.store,
+		Failed:  func(error) { a.metrics.RateBackendErrs.Inc() },
+	})
 }
 
 func (a *App) openAudit() error {
@@ -427,6 +466,9 @@ func (a *App) close(ctx context.Context) error {
 	var err error
 	if a.auditLog != nil {
 		err = a.auditLog.Close()
+	}
+	if a.redis != nil {
+		err = errors.Join(err, a.redis.Close())
 	}
 	if a.tracing != nil {
 		tctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
