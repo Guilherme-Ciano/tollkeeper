@@ -391,7 +391,8 @@ func (g *Gateway) forward(name string) mcp.ToolHandler {
 		if !ok {
 			return nil, fmt.Errorf("%w: %s", ErrUnknownTool, name)
 		}
-		if a, ok := AdmissionFrom(ctx); ok && a.Tool.Pin != tool.Pin {
+		if a, ok := AdmissionFrom(ctx); ok && (a.Tool.Pin != tool.Pin || a.Tool.Upstream != tool.Upstream ||
+			g.pinBlocked(tool)) {
 			return toolError("tool definition changed since the call was authorised; retry"), nil
 		}
 		up, ok := g.upstreams[tool.Upstream]

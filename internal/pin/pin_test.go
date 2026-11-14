@@ -6,6 +6,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 	"time"
 
@@ -223,5 +224,22 @@ func TestBuildReportSortsAndCarriesApprovedText(t *testing.T) {
 	}
 	if r.Tools[0].Status != StatusNew {
 		t.Fatalf("new tool status = %s", r.Tools[0].Status)
+	}
+}
+
+func TestGuardRefusesGroupWritableLockfile(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("unix permission bits")
+	}
+	t.Parallel()
+	path := filepath.Join(t.TempDir(), "pins.json")
+	if err := Write(path, Empty()); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(path, 0o664); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := NewGuard(ModeEnforce, path); !errors.Is(err, ErrExposed) {
+		t.Fatalf("NewGuard on a group-writable lockfile = %v, want ErrExposed", err)
 	}
 }

@@ -10,6 +10,7 @@ import (
 	"maps"
 	"os"
 	"path/filepath"
+	"reflect"
 	"runtime"
 	"sort"
 	"sync"
@@ -42,6 +43,7 @@ const (
 )
 
 var (
+	ErrExposed    = errors.New("pin lockfile is writable by group or others")
 	ErrVersion    = errors.New("unsupported pin lockfile version")
 	ErrEntry      = errors.New("invalid pin lockfile entry")
 	ErrConcurrent = errors.New("pin lockfile changed since it was read")
@@ -52,6 +54,8 @@ type Entry struct {
 	Pin         string          `json:"pin"`
 	Description string          `json:"description"`
 	Descriptor  json.RawMessage `json:"descriptor,omitempty"`
+	Original    string          `json:"original,omitempty"`
+	Definition  json.RawMessage `json:"definition,omitempty"`
 	ApprovedAt  time.Time       `json:"approved_at"`
 	ApprovedBy  string          `json:"approved_by,omitempty"`
 }
@@ -85,6 +89,8 @@ func (l Lockfile) Approve(t catalog.Tool, by string, at time.Time) Lockfile {
 		Pin:         t.Pin,
 		Description: t.Description,
 		Descriptor:  t.Descriptor,
+		Original:    t.Original,
+		Definition:  t.Definition,
 		ApprovedAt:  at.UTC(),
 		ApprovedBy:  by,
 	}
@@ -250,6 +256,9 @@ func (g *Guard) Reload() (bool, error) {
 	}
 	g.mu.Lock()
 	defer g.mu.Unlock()
+	if info, err := os.Stat(g.path); err == nil && runtime.GOOS != "windows" && info.Mode().Perm()&0o022 != 0 {
+		return false, fmt.Errorf("%w: %s has mode %#o", ErrExposed, g.path, info.Mode().Perm())
+	}
 	data, err := os.ReadFile(g.path)
 	if errors.Is(err, fs.ErrNotExist) {
 		data = nil
@@ -285,6 +294,9 @@ type ToolReport struct {
 	Description         string          `json:"description"`
 	ApprovedDescription string          `json:"approved_description,omitempty"`
 	Descriptor          json.RawMessage `json:"descriptor"`
+	Original            string          `json:"original"`
+	Definition          json.RawMessage `json:"definition"`
+	ApprovedDefinition  json.RawMessage `json:"approved_definition,omitempty"`
 }
 
 func BuildReport(mode Mode, l Lockfile, tools []catalog.Tool) Report {
@@ -298,10 +310,13 @@ func BuildReport(mode Mode, l Lockfile, tools []catalog.Tool) Report {
 			Pin:         t.Pin,
 			Description: t.Description,
 			Descriptor:  t.Descriptor,
+			Original:    t.Original,
+			Definition:  t.Definition,
 		}
 		if e, ok := l.Tools[t.Name]; ok {
 			tr.ApprovedPin = e.Pin
 			tr.ApprovedDescription = e.Description
+			tr.ApprovedDefinition = e.Definition
 		}
 		r.Tools = append(r.Tools, tr)
 	}
@@ -313,8 +328,37 @@ func (tr ToolReport) Tool() catalog.Tool {
 	return catalog.Tool{
 		Name:        tr.Name,
 		Upstream:    tr.Upstream,
+		Original:    tr.Original,
 		Description: tr.Description,
 		Pin:         tr.Pin,
 		Descriptor:  tr.Descriptor,
+		Definition:  tr.Definition,
 	}
+}
+
+var ErrReportMismatch = errors.New("pin report does not match the definition it carries")
+
+func (tr ToolReport) Verify() error {
+	if catalog.PinHash(tr.Original, tr.Definition) != tr.Pin {
+		return fmt.Errorf("%w: %s pin", ErrReportMismatch, tr.Name)
+	}
+	var def, served map[string]any
+	if err := json.Unmarshal(tr.Definition, &def); err != nil {
+		return fmt.Errorf("%w: %s definition: %w", ErrReportMismatch, tr.Name, err)
+	}
+	if err := json.Unmarshal(tr.Descriptor, &served); err != nil {
+		return fmt.Errorf("%w: %s descriptor: %w", ErrReportMismatch, tr.Name, err)
+	}
+	if def["name"] != tr.Original {
+		return fmt.Errorf("%w: %s original name", ErrReportMismatch, tr.Name)
+	}
+	delete(def, "name")
+	delete(served, "name")
+	if !reflect.DeepEqual(def, served) {
+		return fmt.Errorf("%w: %s serves a different descriptor than it pins", ErrReportMismatch, tr.Name)
+	}
+	if d, _ := def["description"].(string); d != tr.Description {
+		return fmt.Errorf("%w: %s description", ErrReportMismatch, tr.Name)
+	}
+	return nil
 }

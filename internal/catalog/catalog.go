@@ -38,6 +38,7 @@ type Tool struct {
 	Annotations Annotations
 	Pin         string
 	Descriptor  json.RawMessage
+	Definition  json.RawMessage
 }
 
 type Naming struct {

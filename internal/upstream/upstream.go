@@ -339,6 +339,7 @@ func (u *Upstream) convert(t *mcp.Tool) (catalog.Tool, error) {
 		Annotations: a,
 		Pin:         catalog.PinHash(t.Name, definition),
 		Descriptor:  desc,
+		Definition:  definition,
 	}, nil
 }
 
