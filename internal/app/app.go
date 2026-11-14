@@ -20,6 +20,7 @@ import (
 	"golang.org/x/sync/errgroup"
 
 	"github.com/Guilherme-Ciano/tollkeeper/internal/audit"
+	"github.com/Guilherme-Ciano/tollkeeper/internal/audit/pgsink"
 	"github.com/Guilherme-Ciano/tollkeeper/internal/authn"
 	"github.com/Guilherme-Ciano/tollkeeper/internal/catalog"
 	"github.com/Guilherme-Ciano/tollkeeper/internal/config"
@@ -45,6 +46,7 @@ type App struct {
 	store     *ratelimit.Store
 	redis     redis.UniversalClient
 	auditLog  *audit.Log
+	auditPG   *pgsink.Sink
 	catalog   *catalog.Catalog
 	upstreams []*upstream.Upstream
 	gateway   *gateway.Gateway
@@ -211,6 +213,17 @@ func (a *App) openAudit() error {
 			QueueDepth: func(n int) { a.metrics.AuditQueue.Set(float64(n)) },
 			Written:    func(n int) { a.metrics.AuditWritten.Add(float64(n)) },
 		},
+	}
+	if dsn := a.cfg.Audit.Postgres.DSN; dsn != "" {
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
+		sink, err := pgsink.Open(ctx, dsn)
+		if err != nil {
+			return err
+		}
+		a.auditPG = sink
+		opts.Mirror = sink
+		opts.MirrorTimeout = a.cfg.Audit.Postgres.Timeout
 	}
 	if a.cfg.Audit.Checkpoint.SigningKeyFile != "" {
 		k, err := audit.LoadPrivateKey(a.cfg.Audit.Checkpoint.SigningKeyFile)
@@ -466,6 +479,9 @@ func (a *App) close(ctx context.Context) error {
 	var err error
 	if a.auditLog != nil {
 		err = a.auditLog.Close()
+	}
+	if a.auditPG != nil {
+		a.auditPG.Close()
 	}
 	if a.redis != nil {
 		err = errors.Join(err, a.redis.Close())

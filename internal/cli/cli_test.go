@@ -3,6 +3,7 @@ package cli
 import (
 	"bytes"
 	"errors"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -91,5 +92,13 @@ func TestVerifyCLI(t *testing.T) {
 				t.Fatalf("output %q missing %q", got, tc.want)
 			}
 		})
+	}
+}
+
+func TestVerifyPostgresRequiresChainID(t *testing.T) {
+	t.Parallel()
+	err := runVerify(io.Discard, verifyOpts{postgres: "postgres://127.0.0.1:1/x", noSignatures: true})
+	if !errors.Is(err, ErrChainRequired) {
+		t.Fatalf("runVerify = %v, want ErrChainRequired", err)
 	}
 }

@@ -162,6 +162,12 @@ type Audit struct {
 	Fsync          bool          `koanf:"fsync"`
 	RecordArgs     string        `koanf:"record_args"`
 	Checkpoint     Checkpoint    `koanf:"checkpoint"`
+	Postgres       AuditPostgres `koanf:"postgres"`
+}
+
+type AuditPostgres struct {
+	DSN     string        `koanf:"dsn"`
+	Timeout time.Duration `koanf:"timeout"`
 }
 
 type Checkpoint struct {
@@ -214,6 +220,7 @@ func Defaults() Config {
 			Fsync:          true,
 			RecordArgs:     RecordArgsHash,
 			Checkpoint:     Checkpoint{Every: 1000, Interval: 30 * time.Second},
+			Postgres:       AuditPostgres{Timeout: 5 * time.Second},
 		},
 		Pinning: Pinning{Mode: PinModeWarn, ReloadInterval: 5 * time.Second},
 		Telemetry: Telemetry{

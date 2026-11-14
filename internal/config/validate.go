@@ -305,6 +305,9 @@ func (c *Config) validateAudit(v *validator) {
 	if !c.Audit.Enabled {
 		return
 	}
+	if c.Audit.Postgres.DSN != "" && (c.Audit.Postgres.Timeout <= 0 || c.Audit.Postgres.Timeout > time.Minute) {
+		v.add("audit.postgres.timeout", "must be within (0, 1m]")
+	}
 	v.require("audit.path", c.Audit.Path)
 	v.oneOf("audit.on_backpressure", c.Audit.OnBackpressure, BackpressureFailClosed, BackpressureFailOpen)
 	v.oneOf("audit.record_args", c.Audit.RecordArgs, RecordArgsNone, RecordArgsHash, RecordArgsFull)

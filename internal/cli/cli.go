@@ -15,6 +15,7 @@ import (
 
 	"github.com/Guilherme-Ciano/tollkeeper/internal/app"
 	"github.com/Guilherme-Ciano/tollkeeper/internal/audit"
+	"github.com/Guilherme-Ciano/tollkeeper/internal/audit/pgsink"
 	"github.com/Guilherme-Ciano/tollkeeper/internal/config"
 	"github.com/Guilherme-Ciano/tollkeeper/internal/devissuer"
 	"github.com/Guilherme-Ciano/tollkeeper/internal/policy"
@@ -193,6 +194,7 @@ func auditCmd() *cobra.Command {
 
 type verifyOpts struct {
 	file         string
+	postgres     string
 	pubkey       string
 	chainID      string
 	maxUnsigned  uint64
@@ -209,6 +211,8 @@ func verifyCmd() *cobra.Command {
 		},
 	}
 	verify.Flags().StringVarP(&o.file, "file", "f", "audit.jsonl", "audit JSONL file")
+	verify.Flags().StringVar(&o.postgres, "postgres", "",
+		"verify the chain stored in Postgres (DSN) instead of a file; requires --chain-id")
 	verify.Flags().StringVar(&o.pubkey, "pubkey", "", "Ed25519 public key (PEM); required unless --no-signatures")
 	verify.Flags().StringVar(&o.chainID, "chain-id", "", "expected chain id")
 	verify.Flags().
@@ -243,11 +247,11 @@ func runVerify(out io.Writer, o verifyOpts) error {
 	if o.pubkey == "" && !o.noSignatures {
 		return fmt.Errorf("%w: pass --pubkey, or --no-signatures to check only the hash chain", ErrVerify)
 	}
-	f, err := os.Open(o.file)
+	src, err := openVerifySource(o)
 	if err != nil {
-		return fmt.Errorf("open audit log: %w", err)
+		return err
 	}
-	defer f.Close()
+	defer src.Close()
 	var pub []byte
 	if o.pubkey != "" {
 		k, err := audit.LoadPublicKey(o.pubkey)
@@ -256,7 +260,7 @@ func runVerify(out io.Writer, o verifyOpts) error {
 		}
 		pub = k
 	}
-	rep, err := audit.Verify(f, pub)
+	rep, err := audit.Verify(src, pub)
 	if err != nil {
 		return errors.Join(printf(out, "FAIL %s after %d valid records\n", err, rep.Records), err)
 	}
@@ -417,4 +421,31 @@ func healthCmd() *cobra.Command {
 	}
 	cmd.Flags().StringVar(&target, "url", "http://127.0.0.1:9090/readyz", "URL to probe")
 	return cmd
+}
+
+var ErrChainRequired = errors.New("--chain-id is required with --postgres")
+
+func openVerifySource(o verifyOpts) (io.ReadCloser, error) {
+	if o.postgres == "" {
+		f, err := os.Open(o.file)
+		if err != nil {
+			return nil, fmt.Errorf("open audit log: %w", err)
+		}
+		return f, nil
+	}
+	if o.chainID == "" {
+		return nil, fmt.Errorf("%w: %w", ErrVerify, ErrChainRequired)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	sink, err := pgsink.Connect(ctx, o.postgres)
+	cancel()
+	if err != nil {
+		return nil, err
+	}
+	r, w := io.Pipe()
+	go func() {
+		defer sink.Close()
+		w.CloseWithError(sink.Export(context.Background(), o.chainID, w))
+	}()
+	return r, nil
 }
