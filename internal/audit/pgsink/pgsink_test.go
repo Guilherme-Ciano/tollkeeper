@@ -61,8 +61,10 @@ func writeMirrored(t *testing.T, s *Sink, chain string, n int) string {
 		t.Fatal(err)
 	}
 	for i := range n {
-		e := audit.Event{Phase: audit.PhaseOutcome, Method: "tools/call", Tool: "notes__search",
-			Decision: audit.DecisionAllow, LatencyMicros: int64(i)}
+		e := audit.Event{
+			Phase: audit.PhaseOutcome, Method: "tools/call", Tool: "notes__search",
+			Decision: audit.DecisionAllow, LatencyMicros: int64(i),
+		}
 		if err := l.Append(t.Context(), e); err != nil {
 			t.Fatal(err)
 		}

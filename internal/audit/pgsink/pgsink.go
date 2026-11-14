@@ -4,8 +4,10 @@ import (
 	"context"
 	_ "embed"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
+	"math"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -18,7 +20,11 @@ var schema string
 
 const migrationLock = 7_365_420_917
 
-var columns = []string{"chain_id", "seq", "ts", "kind", "hash", "prev", "body", "raw"}
+var errSeqRange = errors.New("audit sequence out of range")
+
+func columns() []string {
+	return []string{"chain_id", "seq", "ts", "kind", "hash", "prev", "body", "raw"}
+}
 
 type Sink struct {
 	pool *pgxpool.Pool
@@ -48,12 +54,14 @@ func Open(ctx context.Context, dsn string) (*Sink, error) {
 	return s, nil
 }
 
-func (s *Sink) Migrate(ctx context.Context) error {
+func (s *Sink) Migrate(ctx context.Context) (err error) {
 	tx, err := s.pool.Begin(ctx)
 	if err != nil {
 		return fmt.Errorf("migrate audit postgres: %w", err)
 	}
-	defer rollback(ctx, tx)
+	defer func() {
+		err = errors.Join(err, rollback(ctx, tx))
+	}()
 	if _, err := tx.Exec(ctx, "SELECT pg_advisory_xact_lock($1)", migrationLock); err != nil {
 		return fmt.Errorf("migrate audit postgres: %w", err)
 	}
@@ -66,8 +74,11 @@ func (s *Sink) Migrate(ctx context.Context) error {
 	return nil
 }
 
-func rollback(ctx context.Context, tx pgx.Tx) {
-	_ = tx.Rollback(context.WithoutCancel(ctx))
+func rollback(ctx context.Context, tx pgx.Tx) error {
+	if err := tx.Rollback(context.WithoutCancel(ctx)); err != nil && !errors.Is(err, pgx.ErrTxClosed) {
+		return fmt.Errorf("rollback audit transaction: %w", err)
+	}
+	return nil
 }
 
 type pending struct {
@@ -81,8 +92,8 @@ func (p *pending) Commit(ctx context.Context) error {
 	return nil
 }
 
-func (p *pending) Abort(ctx context.Context) {
-	rollback(ctx, p.tx)
+func (p *pending) Abort(ctx context.Context) error {
+	return rollback(ctx, p.tx)
 }
 
 func (s *Sink) Prepare(ctx context.Context, rows []audit.Row) (audit.Pending, error) {
@@ -92,11 +103,13 @@ func (s *Sink) Prepare(ctx context.Context, rows []audit.Row) (audit.Pending, er
 	}
 	src := pgx.CopyFromSlice(len(rows), func(i int) ([]any, error) {
 		r := &rows[i]
+		if r.Seq > math.MaxInt64 {
+			return nil, fmt.Errorf("%w: %d", errSeqRange, r.Seq)
+		}
 		return []any{r.ChainID, int64(r.Seq), r.TS, r.Kind, r.Hash, r.Prev, string(r.Raw), string(r.Raw)}, nil
 	})
-	if _, err := tx.CopyFrom(ctx, pgx.Identifier{"tollkeeper_audit"}, columns, src); err != nil {
-		rollback(ctx, tx)
-		return nil, fmt.Errorf("copy audit rows: %w", err)
+	if _, err := tx.CopyFrom(ctx, pgx.Identifier{"tollkeeper_audit"}, columns(), src); err != nil {
+		return nil, errors.Join(fmt.Errorf("copy audit rows: %w", err), rollback(ctx, tx))
 	}
 	return &pending{tx: tx}, nil
 }
@@ -107,6 +120,9 @@ func (s *Sink) LastSeq(ctx context.Context, chainID string) (uint64, error) {
 		"SELECT coalesce(max(seq), 0) FROM tollkeeper_audit WHERE chain_id = $1", chainID).Scan(&last)
 	if err != nil {
 		return 0, fmt.Errorf("read audit position: %w", err)
+	}
+	if last < 0 {
+		return 0, fmt.Errorf("%w: %d", errSeqRange, last)
 	}
 	return uint64(last), nil
 }
