@@ -163,7 +163,7 @@ func TestMirrorReceivesExactlyTheFileRecords(t *testing.T) {
 func TestMirrorCatchesUpAfterFailedCommit(t *testing.T) {
 	t.Parallel()
 	cases := map[string]func(m *memMirror, on bool){
-		"commit lost":                func(m *memMirror, on bool) { m.failCommit.Store(on) },
+		"commit lost":                 func(m *memMirror, on bool) { m.failCommit.Store(on) },
 		"commit applied but reported": func(m *memMirror, on bool) { m.lateCommit.Store(on) },
 	}
 	for name, inject := range cases {

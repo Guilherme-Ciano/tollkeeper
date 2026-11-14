@@ -221,7 +221,10 @@ func TestTempTableCannotShadowTheChainCheck(t *testing.T) {
 	}
 	defer conn.Release()
 	fakePrev := strings.Repeat("b", 64)
-	if _, err := conn.Exec(t.Context(), `CREATE TEMP TABLE tollkeeper_audit (chain_id text, seq bigint, hash text)`); err != nil {
+	if _, err := conn.Exec(
+		t.Context(),
+		`CREATE TEMP TABLE tollkeeper_audit (chain_id text, seq bigint, hash text)`,
+	); err != nil {
 		t.Fatal(err)
 	}
 	defer func() {
@@ -229,7 +232,12 @@ func TestTempTableCannotShadowTheChainCheck(t *testing.T) {
 			t.Error(err)
 		}
 	}()
-	if _, err := conn.Exec(t.Context(), `INSERT INTO pg_temp.tollkeeper_audit VALUES ($1, 41, $2)`, chain, fakePrev); err != nil {
+	if _, err := conn.Exec(
+		t.Context(),
+		`INSERT INTO pg_temp.tollkeeper_audit VALUES ($1, 41, $2)`,
+		chain,
+		fakePrev,
+	); err != nil {
 		t.Fatal(err)
 	}
 	raw := `{"seq":42,"ts":1,"chain_id":"` + chain + `","prev":"` + fakePrev + `","event":{}}`

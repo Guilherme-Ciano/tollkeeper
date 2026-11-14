@@ -111,7 +111,20 @@ func TestPinApproveRespectsDeclinedAndMissingAnswers(t *testing.T) {
 	if err != nil || !strings.Contains(out, "nothing approved") {
 		t.Fatalf("declined approval: %v\n%s", err, out)
 	}
-	if _, err := runRootIn(t, "", "pin", "approve", "--admin", url, "--file", file, "--all"); !errors.Is(err, ErrNotApproved) {
+	if _, err := runRootIn(
+		t,
+		"",
+		"pin",
+		"approve",
+		"--admin",
+		url,
+		"--file",
+		file,
+		"--all",
+	); !errors.Is(
+		err,
+		ErrNotApproved,
+	) {
 		t.Fatalf("missing answer: %v", err)
 	}
 	l, err := pin.Read(file)
@@ -147,7 +160,20 @@ func TestPinApproveRejectsTamperedReport(t *testing.T) {
 	r := pin.BuildReport(pin.ModeEnforce, pin.Empty(), []catalog.Tool{benign})
 	r.Tools[0].Pin = malicious.Pin
 	url := adminServer(t, r)
-	if _, err := runRoot(t, "pin", "approve", "--admin", url, "--file", file, "--all", "--yes"); !errors.Is(err, pin.ErrReportMismatch) {
+	if _, err := runRoot(
+		t,
+		"pin",
+		"approve",
+		"--admin",
+		url,
+		"--file",
+		file,
+		"--all",
+		"--yes",
+	); !errors.Is(
+		err,
+		pin.ErrReportMismatch,
+	) {
 		t.Fatalf("tampered report: %v", err)
 	}
 }
@@ -157,7 +183,14 @@ func TestPinReportClientDoesNotFollowRedirects(t *testing.T) {
 	target := adminServer(t, pin.BuildReport(pin.ModeEnforce, pin.Empty(), nil))
 	redirector := httptest.NewServer(http.RedirectHandler(target+"/pins", http.StatusFound))
 	t.Cleanup(redirector.Close)
-	if _, err := runRoot(t, "pin", "status", "--admin", redirector.URL); err == nil || !strings.Contains(err.Error(), "302") {
+	if _, err := runRoot(
+		t,
+		"pin",
+		"status",
+		"--admin",
+		redirector.URL,
+	); err == nil ||
+		!strings.Contains(err.Error(), "302") {
 		t.Fatalf("redirect followed: %v", err)
 	}
 }
@@ -172,7 +205,18 @@ func TestPinApproveSelectedAndPrune(t *testing.T) {
 	a := reportTool(t, "notes__a", "A")
 	b := reportTool(t, "notes__b", "B")
 	url := adminServer(t, pin.BuildReport(pin.ModeEnforce, pin.Empty(), []catalog.Tool{a, b}))
-	if _, err := runRoot(t, "pin", "approve", "--admin", url, "--file", file, "--prune", "--yes", "notes__a"); err != nil {
+	if _, err := runRoot(
+		t,
+		"pin",
+		"approve",
+		"--admin",
+		url,
+		"--file",
+		file,
+		"--prune",
+		"--yes",
+		"notes__a",
+	); err != nil {
 		t.Fatal(err)
 	}
 	got, err := pin.Read(file)
@@ -185,7 +229,19 @@ func TestPinApproveSelectedAndPrune(t *testing.T) {
 	if _, ok := got.Tools["notes__gone"]; ok {
 		t.Fatal("prune kept a tool missing from the catalog")
 	}
-	if _, err := runRoot(t, "pin", "approve", "--admin", url, "--file", file, "notes__missing"); !errors.Is(err, ErrUnknownPin) {
+	if _, err := runRoot(
+		t,
+		"pin",
+		"approve",
+		"--admin",
+		url,
+		"--file",
+		file,
+		"notes__missing",
+	); !errors.Is(
+		err,
+		ErrUnknownPin,
+	) {
 		t.Fatalf("unknown tool: %v", err)
 	}
 	if _, err := runRoot(t, "pin", "approve", "--admin", url, "--file", file); !errors.Is(err, ErrNoSelection) {

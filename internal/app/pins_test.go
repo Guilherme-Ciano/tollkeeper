@@ -36,8 +36,20 @@ func TestPinsEndpointAccess(t *testing.T) {
 		{name: "loopback without token", mode: config.PinModeWarn, want: http.StatusOK},
 		{name: "pinning off", mode: config.PinModeOff, want: http.StatusNotFound},
 		{name: "token required and missing", mode: config.PinModeWarn, token: "s3cret", want: http.StatusNotFound},
-		{name: "token required and wrong", mode: config.PinModeWarn, token: "s3cret", bearer: "guess", want: http.StatusNotFound},
-		{name: "token required and given", mode: config.PinModeWarn, token: "s3cret", bearer: "s3cret", want: http.StatusOK},
+		{
+			name:   "token required and wrong",
+			mode:   config.PinModeWarn,
+			token:  "s3cret",
+			bearer: "guess",
+			want:   http.StatusNotFound,
+		},
+		{
+			name:   "token required and given",
+			mode:   config.PinModeWarn,
+			token:  "s3cret",
+			bearer: "s3cret",
+			want:   http.StatusOK,
+		},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

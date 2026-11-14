@@ -109,20 +109,12 @@ func Build(ctx context.Context, cfg config.Config, log *slog.Logger, version str
 		}
 		auditor = a.auditLog
 	}
+	if err := a.openPins(ctx); err != nil {
+		return nil, err
+	}
 	var pins gateway.PinGuard
-	if cfg.Pinning.Mode != config.PinModeOff {
-		guard, err := pin.NewGuard(pin.Mode(cfg.Pinning.Mode), cfg.Pinning.File)
-		if err != nil {
-			return nil, err
-		}
-		a.pins, pins = guard, guard
-		if cfg.Pinning.ReportToken == "" && !config.Loopback(cfg.Server.AdminListen) {
-			log.WarnContext(ctx, "GET /pins is disabled: the admin listener is not loopback and pinning.report_token is empty")
-		}
-		log.InfoContext(ctx, "tool pinning enabled",
-			slog.String("mode", cfg.Pinning.Mode),
-			slog.String("file", cfg.Pinning.File),
-			slog.Int("approved", len(guard.Lockfile().Tools)))
+	if a.pins != nil {
+		pins = a.pins
 	}
 	naming := catalog.Naming{Separator: cfg.Server.NamespaceSeparator, Bare: !cfg.Server.NamespaceTools}
 	callers := map[string]gateway.Caller{}
@@ -163,6 +155,29 @@ func Build(ctx context.Context, cfg config.Config, log *slog.Logger, version str
 		Pins:       pins,
 	})
 	return a, nil
+}
+
+func (a *App) openPins(ctx context.Context) error {
+	cfg := a.cfg.Pinning
+	if cfg.Mode == config.PinModeOff {
+		return nil
+	}
+	guard, err := pin.NewGuard(pin.Mode(cfg.Mode), cfg.File)
+	if err != nil {
+		return err
+	}
+	a.pins = guard
+	if cfg.ReportToken == "" && !config.Loopback(a.cfg.Server.AdminListen) {
+		a.log.WarnContext(
+			ctx,
+			"GET /pins is disabled: the admin listener is not loopback and pinning.report_token is empty",
+		)
+	}
+	a.log.InfoContext(ctx, "tool pinning enabled",
+		slog.String("mode", cfg.Mode),
+		slog.String("file", cfg.File),
+		slog.Int("approved", len(guard.Lockfile().Tools)))
+	return nil
 }
 
 func (a *App) rateBackend(ctx context.Context) ratelimit.Backend {

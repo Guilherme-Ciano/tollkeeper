@@ -317,7 +317,14 @@ func pretty(raw json.RawMessage) []string {
 
 func printChange(w io.Writer, t *pin.ToolReport, lock pin.Lockfile) error {
 	status := lock.Status(t.Tool())
-	if err := printf(w, "\n%s %s (upstream %s)\n  pin %s\n", status, safe(t.Name), safe(t.Upstream), safe(t.Pin)); err != nil {
+	if err := printf(
+		w,
+		"\n%s %s (upstream %s)\n  pin %s\n",
+		status,
+		safe(t.Name),
+		safe(t.Upstream),
+		safe(t.Pin),
+	); err != nil {
 		return err
 	}
 	var before []string

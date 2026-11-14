@@ -119,7 +119,8 @@ func Parse(data []byte) (Lockfile, error) {
 	if l.Tools == nil {
 		l.Tools = map[string]Entry{}
 	}
-	for name, e := range l.Tools {
+	for name := range l.Tools {
+		e := l.Tools[name]
 		if name == "" || e.Upstream == "" || e.Pin == "" {
 			return Lockfile{}, fmt.Errorf("%w: %q", ErrEntry, name)
 		}
@@ -357,7 +358,7 @@ func (tr ToolReport) Verify() error {
 	if !reflect.DeepEqual(def, served) {
 		return fmt.Errorf("%w: %s serves a different descriptor than it pins", ErrReportMismatch, tr.Name)
 	}
-	if d, _ := def["description"].(string); d != tr.Description {
+	if d, ok := def["description"].(string); (ok || tr.Description != "") && d != tr.Description {
 		return fmt.Errorf("%w: %s description", ErrReportMismatch, tr.Name)
 	}
 	return nil

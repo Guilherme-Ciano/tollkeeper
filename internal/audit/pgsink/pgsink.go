@@ -139,7 +139,10 @@ func (s *Sink) RequireSchema(ctx context.Context) error {
 		return fmt.Errorf("check audit schema: %w", err)
 	}
 	if !exists {
-		return fmt.Errorf("%w: apply internal/audit/pgsink/schema.sql or set audit.postgres.migrate: true", ErrSchemaMissing)
+		return fmt.Errorf(
+			"%w: apply internal/audit/pgsink/schema.sql or set audit.postgres.migrate: true",
+			ErrSchemaMissing,
+		)
 	}
 	return nil
 }

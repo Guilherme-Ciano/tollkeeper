@@ -456,7 +456,10 @@ func (e *exportReader) Close() error {
 	e.cancel()
 	err := e.PipeReader.Close()
 	<-e.done
-	return err
+	if err != nil {
+		return fmt.Errorf("close audit export: %w", err)
+	}
+	return nil
 }
 
 func openVerifySource(o verifyOpts) (io.ReadCloser, error) {

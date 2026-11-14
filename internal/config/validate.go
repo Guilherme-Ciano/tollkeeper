@@ -93,12 +93,12 @@ func (c *Config) Validate() error {
 }
 
 func hashTagged(prefix string) bool {
-	open := strings.IndexByte(prefix, '{')
-	if open < 0 {
+	_, rest, ok := strings.Cut(prefix, "{")
+	if !ok {
 		return false
 	}
-	end := strings.IndexByte(prefix[open+1:], '}')
-	return end > 0
+	tag, _, ok := strings.Cut(rest, "}")
+	return ok && tag != ""
 }
 
 func (c *Config) validatePinning(v *validator) {
@@ -326,7 +326,10 @@ func (c *Config) validateAudit(v *validator) {
 		v.add("audit.chain_id", "required and unique per replica when audit.postgres.dsn is set, e.g. ${POD_NAME}")
 	}
 	if c.Audit.Postgres.DSN != "" && !c.Audit.Fsync {
-		v.add("audit.fsync", "must be true when audit.postgres.dsn is set, or a crash leaves Postgres ahead of the file")
+		v.add(
+			"audit.fsync",
+			"must be true when audit.postgres.dsn is set, or a crash leaves Postgres ahead of the file",
+		)
 	}
 	v.require("audit.path", c.Audit.Path)
 	v.oneOf("audit.on_backpressure", c.Audit.OnBackpressure, BackpressureFailClosed, BackpressureFailOpen)
