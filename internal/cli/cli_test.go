@@ -102,3 +102,14 @@ func TestVerifyPostgresRequiresChainID(t *testing.T) {
 		t.Fatalf("runVerify = %v, want ErrChainRequired", err)
 	}
 }
+
+func TestVerifyPostgresUnreachableIsASourceError(t *testing.T) {
+	t.Parallel()
+	err := runVerify(io.Discard, verifyOpts{
+		postgres: "postgres://tollkeeper@127.0.0.1:1/x?connect_timeout=1", chainID: "c", noSignatures: true,
+		timeout: time.Second,
+	})
+	if !errors.Is(err, ErrSource) {
+		t.Fatalf("runVerify = %v, want ErrSource", err)
+	}
+}

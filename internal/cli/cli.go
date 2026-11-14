@@ -204,6 +204,7 @@ func auditCmd() *cobra.Command {
 type verifyOpts struct {
 	file         string
 	postgres     string
+	timeout      time.Duration
 	pubkey       string
 	chainID      string
 	maxUnsigned  uint64
@@ -222,6 +223,7 @@ func verifyCmd() *cobra.Command {
 	verify.Flags().StringVarP(&o.file, "file", "f", "audit.jsonl", "audit JSONL file")
 	verify.Flags().StringVar(&o.postgres, "postgres", "",
 		"verify the chain stored in Postgres (DSN) instead of a file; requires --chain-id")
+	verify.Flags().DurationVar(&o.timeout, "timeout", 10*time.Minute, "maximum time to read a chain from Postgres")
 	verify.Flags().StringVar(&o.pubkey, "pubkey", "", "Ed25519 public key (PEM); required unless --no-signatures")
 	verify.Flags().StringVar(&o.chainID, "chain-id", "", "expected chain id")
 	verify.Flags().
@@ -270,8 +272,15 @@ func runVerify(out io.Writer, o verifyOpts) error {
 		pub = k
 	}
 	rep, err := audit.Verify(src, pub)
+	if errors.Is(err, ErrSource) {
+		return errors.Join(printf(out, "ERROR %s\n", err), err)
+	}
 	if err != nil {
 		return errors.Join(printf(out, "FAIL %s after %d valid records\n", err, rep.Records), err)
+	}
+	if o.postgres != "" && rep.Records == 0 {
+		err := fmt.Errorf("%w: chain %q has no records in postgres", ErrVerify, o.chainID)
+		return errors.Join(printf(out, "FAIL %s\n", err), err)
 	}
 	if err := checkSignatures(rep, o); err != nil {
 		return errors.Join(printf(out, "FAIL %s\n", err), err)
@@ -432,7 +441,23 @@ func healthCmd() *cobra.Command {
 	return cmd
 }
 
-var ErrChainRequired = errors.New("--chain-id is required with --postgres")
+var (
+	ErrChainRequired = errors.New("--chain-id is required with --postgres")
+	ErrSource        = errors.New("cannot read the audit source")
+)
+
+type exportReader struct {
+	*io.PipeReader
+	cancel context.CancelFunc
+	done   chan struct{}
+}
+
+func (e *exportReader) Close() error {
+	e.cancel()
+	err := e.PipeReader.Close()
+	<-e.done
+	return err
+}
 
 func openVerifySource(o verifyOpts) (io.ReadCloser, error) {
 	if o.postgres == "" {
@@ -449,12 +474,19 @@ func openVerifySource(o verifyOpts) (io.ReadCloser, error) {
 	sink, err := pgsink.Connect(ctx, o.postgres)
 	cancel()
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("%w: %w", ErrSource, err)
 	}
+	ctx, cancel = context.WithTimeout(context.Background(), o.timeout)
 	r, w := io.Pipe()
+	done := make(chan struct{})
 	go func() {
+		defer close(done)
 		defer sink.Close()
-		w.CloseWithError(sink.Export(context.Background(), o.chainID, w))
+		if err := sink.Export(ctx, o.chainID, w); err != nil {
+			w.CloseWithError(fmt.Errorf("%w: %w", ErrSource, err))
+			return
+		}
+		w.Close()
 	}()
-	return r, nil
+	return &exportReader{PipeReader: r, cancel: cancel, done: done}, nil
 }
