@@ -102,7 +102,7 @@ func Build(ctx context.Context, cfg config.Config, log *slog.Logger, version str
 	}
 	var auditor gateway.Auditor
 	if cfg.Audit.Enabled {
-		if err := a.openAudit(); err != nil {
+		if err := a.openAudit(ctx); err != nil {
 			return nil, err
 		}
 		auditor = a.auditLog
@@ -196,7 +196,7 @@ func (a *App) rateBackend(ctx context.Context) ratelimit.Backend {
 	})
 }
 
-func (a *App) openAudit() error {
+func (a *App) openAudit(ctx context.Context) error {
 	opts := audit.Options{
 		Path:               a.cfg.Audit.Path,
 		ChainID:            a.cfg.Audit.ChainID,
@@ -215,7 +215,7 @@ func (a *App) openAudit() error {
 		},
 	}
 	if dsn := a.cfg.Audit.Postgres.DSN; dsn != "" {
-		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
 		defer cancel()
 		connect := pgsink.Connect
 		if a.cfg.Audit.Postgres.Migrate {
@@ -236,9 +236,9 @@ func (a *App) openAudit() error {
 		}
 		opts.Signer = k
 	} else {
-		a.log.Warn("audit checkpoints disabled: no signing key configured")
+		a.log.WarnContext(ctx, "audit checkpoints disabled: no signing key configured")
 	}
-	l, err := audit.Open(opts)
+	l, err := audit.OpenContext(ctx, opts)
 	if err != nil {
 		return err
 	}

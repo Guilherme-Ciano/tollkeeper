@@ -71,6 +71,10 @@ type Log struct {
 }
 
 func Open(opts Options) (*Log, error) {
+	return OpenContext(context.Background(), opts)
+}
+
+func OpenContext(ctx context.Context, opts Options) (*Log, error) {
 	if opts.Now == nil {
 		opts.Now = time.Now
 	}
@@ -103,11 +107,11 @@ func Open(opts Options) (*Log, error) {
 		return nil, errors.Join(err, f.Close())
 	}
 	if opts.Mirror != nil {
-		if err := l.reconcile(); err != nil {
+		if err := l.reconcile(ctx); err != nil {
 			return nil, errors.Join(err, f.Close())
 		}
 	}
-	go l.run()
+	go l.run(context.WithoutCancel(ctx))
 	return l, nil
 }
 
@@ -223,11 +227,11 @@ func (l *Log) Append(ctx context.Context, e Event) error {
 	}
 }
 
-func (l *Log) flush(batch []Event) []Event {
+func (l *Log) flush(ctx context.Context, batch []Event) []Event {
 	if len(batch) == 0 && !l.checkpointDue() && l.dropped.Load() == 0 {
 		return batch
 	}
-	if err := l.write(batch); err != nil {
+	if err := l.write(ctx, batch); err != nil {
 		l.runErr = err
 		l.sinkErr.Store(&err)
 		l.dropped.Add(uint64(len(batch)))
@@ -254,8 +258,8 @@ func (l *Log) drain(batch []Event) []Event {
 	}
 }
 
-func (l *Log) shutdown(batch []Event) {
-	if err := l.write(l.drain(batch)); err != nil {
+func (l *Log) shutdown(ctx context.Context, batch []Event) {
+	if err := l.write(ctx, l.drain(batch)); err != nil {
 		l.runErr = err
 	}
 	if l.opts.Signer == nil || l.seq <= l.lastCkptSeq {
@@ -266,10 +270,10 @@ func (l *Log) shutdown(batch []Event) {
 		l.runErr = errors.Join(l.runErr, err)
 		return
 	}
-	l.runErr = errors.Join(l.runErr, l.commit())
+	l.runErr = errors.Join(l.runErr, l.commit(ctx))
 }
 
-func (l *Log) run() {
+func (l *Log) run(ctx context.Context) {
 	defer close(l.done)
 	ticker := time.NewTicker(l.opts.FlushInterval)
 	defer ticker.Stop()
@@ -279,15 +283,15 @@ func (l *Log) run() {
 		case e := <-l.ch:
 			batch = append(batch, e)
 			if len(batch) >= l.opts.BatchSize {
-				batch = l.flush(batch)
+				batch = l.flush(ctx, batch)
 			}
 		case <-ticker.C:
 			if l.opts.Hooks.QueueDepth != nil {
 				l.opts.Hooks.QueueDepth(len(l.ch))
 			}
-			batch = l.flush(batch)
+			batch = l.flush(ctx, batch)
 		case <-l.stop:
-			l.shutdown(batch)
+			l.shutdown(ctx, batch)
 			return
 		}
 	}
@@ -339,7 +343,7 @@ func (l *Log) appendCheckpoint() error {
 	return nil
 }
 
-func (l *Log) write(batch []Event) (err error) {
+func (l *Log) write(ctx context.Context, batch []Event) (err error) {
 	if l.fatal.Load() {
 		return ErrCorrupt
 	}
@@ -375,7 +379,7 @@ func (l *Log) write(batch []Event) (err error) {
 			return err
 		}
 	}
-	if err := l.commit(); err != nil {
+	if err := l.commit(ctx); err != nil {
 		return err
 	}
 	if l.opts.Hooks.Written != nil {
@@ -389,7 +393,7 @@ func (l *Log) resetBatch() {
 	l.rows = l.rows[:0]
 }
 
-func (l *Log) commit() error {
+func (l *Log) commit(ctx context.Context) error {
 	if l.buf.Len() == 0 {
 		return nil
 	}
@@ -398,7 +402,7 @@ func (l *Log) commit() error {
 		return fmt.Errorf("stat audit log: %w", err)
 	}
 	var pending Pending
-	ctx, cancel := l.mirrorContext()
+	ctx, cancel := context.WithTimeout(ctx, l.opts.MirrorTimeout)
 	defer cancel()
 	if l.opts.Mirror != nil {
 		if pending, err = l.opts.Mirror.Prepare(ctx, l.rows); err != nil {
@@ -407,7 +411,7 @@ func (l *Log) commit() error {
 	}
 	if err := l.writeFile(); err != nil {
 		if pending != nil {
-			pending.Abort(ctx)
+			err = errors.Join(err, pending.Abort(ctx))
 		}
 		return l.undo(info.Size(), err)
 	}

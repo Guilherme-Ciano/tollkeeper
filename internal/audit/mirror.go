@@ -32,7 +32,7 @@ type Row struct {
 
 type Pending interface {
 	Commit(ctx context.Context) error
-	Abort(ctx context.Context)
+	Abort(ctx context.Context) error
 }
 
 type Mirror interface {
@@ -56,12 +56,8 @@ func rowFor(b *Body, rec Record) Row {
 	}
 }
 
-func (l *Log) mirrorContext() (context.Context, context.CancelFunc) {
-	return context.WithTimeout(context.Background(), l.opts.MirrorTimeout)
-}
-
-func (l *Log) reconcile() error {
-	ctx, cancel := l.mirrorContext()
+func (l *Log) reconcile(parent context.Context) error {
+	ctx, cancel := context.WithTimeout(parent, l.opts.MirrorTimeout)
 	defer cancel()
 	last, err := l.opts.Mirror.LastSeq(ctx, l.opts.ChainID)
 	if err != nil {
@@ -77,10 +73,10 @@ func (l *Log) reconcile() error {
 	if err != nil {
 		return fmt.Errorf("stat audit log: %w", err)
 	}
-	return l.backfill(io.NewSectionReader(l.file, 0, info.Size()), last)
+	return l.backfill(parent, io.NewSectionReader(l.file, 0, info.Size()), last)
 }
 
-func (l *Log) backfill(r io.Reader, after uint64) error {
+func (l *Log) backfill(ctx context.Context, r io.Reader, after uint64) error {
 	sc := bufio.NewScanner(r)
 	sc.Buffer(make([]byte, 0, 64<<10), maxLineBytes)
 	batch := make([]Row, 0, reconcileBatch)
@@ -99,7 +95,7 @@ func (l *Log) backfill(r io.Reader, after uint64) error {
 		rec.Body = append(json.RawMessage(nil), rec.Body...)
 		batch = append(batch, rowFor(&body, rec))
 		if len(batch) == reconcileBatch {
-			if err := l.mirrorRows(batch); err != nil {
+			if err := l.mirrorRows(ctx, batch); err != nil {
 				return err
 			}
 			batch = batch[:0]
@@ -111,11 +107,11 @@ func (l *Log) backfill(r io.Reader, after uint64) error {
 	if len(batch) == 0 {
 		return nil
 	}
-	return l.mirrorRows(batch)
+	return l.mirrorRows(ctx, batch)
 }
 
-func (l *Log) mirrorRows(rows []Row) error {
-	ctx, cancel := l.mirrorContext()
+func (l *Log) mirrorRows(parent context.Context, rows []Row) error {
+	ctx, cancel := context.WithTimeout(parent, l.opts.MirrorTimeout)
 	defer cancel()
 	p, err := l.opts.Mirror.Prepare(ctx, rows)
 	if err != nil {

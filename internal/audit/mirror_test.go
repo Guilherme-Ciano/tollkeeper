@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strconv"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -54,7 +55,7 @@ func (p *memPending) Commit(context.Context) error {
 	return nil
 }
 
-func (p *memPending) Abort(context.Context) {}
+func (p *memPending) Abort(context.Context) error { return nil }
 
 func (m *memMirror) Prepare(_ context.Context, rows []Row) (Pending, error) {
 	if m.failPrepare.Load() {
@@ -83,8 +84,9 @@ func (m *memMirror) snapshot() []Row {
 
 func fileRecords(t *testing.T, path string) []Record {
 	t.Helper()
-	var out []Record
-	for _, line := range lines(t, path) {
+	ls := lines(t, path)
+	out := make([]Record, 0, len(ls))
+	for _, line := range ls {
 		var rec Record
 		if err := json.Unmarshal([]byte(line), &rec); err != nil {
 			t.Fatal(err)
@@ -127,7 +129,8 @@ func TestMirrorReceivesExactlyTheFileRecords(t *testing.T) {
 	m := &memMirror{}
 	l := openMirrored(t, path, m, priv)
 	for i := range 20 {
-		if err := l.Append(t.Context(), Event{Method: "tools/call", RequestID: fmt.Sprint(i), Decision: DecisionAllow}); err != nil {
+		e := Event{Method: "tools/call", RequestID: strconv.Itoa(i), Decision: DecisionAllow}
+		if err := l.Append(t.Context(), e); err != nil {
 			t.Fatal(err)
 		}
 	}
