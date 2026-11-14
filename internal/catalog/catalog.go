@@ -77,13 +77,10 @@ func (n Naming) Split(qualified string) (upstream, name string, ok bool) {
 	return upstream, name, true
 }
 
-func PinHash(original, description string, inputSchema, outputSchema json.RawMessage, a Annotations) string {
+func PinHash(original string, definition json.RawMessage) string {
 	h := sha256.New()
-	for _, part := range [][]byte{[]byte(original), []byte(description), inputSchema, outputSchema} {
-		fmt.Fprintf(h, "%d:", len(part))
-		h.Write(part)
-	}
-	fmt.Fprintf(h, "%q|%t|%t|%t|%t", a.Title, a.ReadOnly, a.Destructive, a.Idempotent, a.OpenWorld)
+	fmt.Fprintf(h, "tollkeeper-pin-v2:%d:%s:", len(original), original)
+	h.Write(definition)
 	return hex.EncodeToString(h.Sum(nil))
 }
 

@@ -81,7 +81,7 @@ func (f *pinFixture) publish(t *testing.T, description string) catalog.Tool {
 	}
 	tool := catalog.Tool{
 		Name: "up__t", Upstream: "up", Original: "t", Description: description,
-		Pin: catalog.PinHash("t", description, nil, nil, catalog.Annotations{}), Descriptor: desc,
+		Pin: catalog.PinHash("t", desc), Descriptor: desc,
 	}
 	d, err := f.cat.Replace("up", []catalog.Tool{tool})
 	if err != nil {
@@ -126,7 +126,7 @@ func TestEnforcedPinBlocksUntilApproved(t *testing.T) {
 	if f.caller.calls != 0 {
 		t.Fatal("unapproved tool reached the upstream")
 	}
-	if got := f.gw.Unapproved()["up__t"]; got != pin.StatusNew {
+	if got := f.gw.unapprovedTools()["up__t"]; got != pin.StatusNew {
 		t.Fatalf("unapproved status = %q, want new", got)
 	}
 	if v := testutil.ToFloat64(f.m.CatalogTools); v != 0 {
@@ -156,7 +156,7 @@ func TestEnforcedPinBlocksRugPull(t *testing.T) {
 	if f.caller.calls != 1 {
 		t.Fatalf("upstream calls = %d, want 1", f.caller.calls)
 	}
-	if got := f.gw.Unapproved()["up__t"]; got != pin.StatusChanged {
+	if got := f.gw.unapprovedTools()["up__t"]; got != pin.StatusChanged {
 		t.Fatalf("status = %q, want changed", got)
 	}
 	if v := testutil.ToFloat64(f.m.PinUnapproved.WithLabelValues("changed")); v != 1 {
@@ -171,7 +171,28 @@ func TestWarnModeReportsButServes(t *testing.T) {
 	if _, body := f.call(t); strings.Contains(body, "denied") || f.caller.calls != 1 {
 		t.Fatalf("warn mode blocked the call: %s", body)
 	}
-	if got := f.gw.Unapproved()["up__t"]; got != pin.StatusNew {
+	if got := f.gw.unapprovedTools()["up__t"]; got != pin.StatusNew {
 		t.Fatalf("warn mode did not report the unapproved tool: %q", got)
+	}
+}
+
+func TestReevaluateNeverResurrectsRemovedTools(t *testing.T) {
+	t.Parallel()
+	f := newPinFixture(t, pin.ModeEnforce)
+	tool := f.publish(t, "Search notes")
+	d, err := f.cat.Replace("up", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	f.gw.Apply(d)
+	f.approve(t, tool)
+	if _, body := f.call(t); !strings.Contains(body, "denied by policy") {
+		t.Fatalf("removed tool became callable after a lockfile reload: %s", body)
+	}
+	if f.caller.calls != 0 {
+		t.Fatal("upstream reached for a tool no longer in the catalog")
+	}
+	if len(f.gw.unapprovedTools()) != 0 {
+		t.Fatalf("stale unapproved entries: %v", f.gw.unapprovedTools())
 	}
 }

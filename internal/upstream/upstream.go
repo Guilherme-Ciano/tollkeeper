@@ -302,20 +302,6 @@ func (u *Upstream) Tools(ctx context.Context) ([]catalog.Tool, error) {
 	return out, nil
 }
 
-func rawJSON(v any) json.RawMessage {
-	if v == nil {
-		return nil
-	}
-	if r, ok := v.(json.RawMessage); ok {
-		return r
-	}
-	b, err := json.Marshal(v)
-	if err != nil {
-		return nil
-	}
-	return b
-}
-
 func (u *Upstream) convert(t *mcp.Tool) (catalog.Tool, error) {
 	name, err := u.naming.Qualify(u.cfg.ID, t.Name)
 	if err != nil {
@@ -335,7 +321,10 @@ func (u *Upstream) convert(t *mcp.Tool) (catalog.Tool, error) {
 		a.Destructive = true
 		a.OpenWorld = true
 	}
-	in, out := rawJSON(t.InputSchema), rawJSON(t.OutputSchema)
+	definition, err := json.Marshal(t)
+	if err != nil {
+		return catalog.Tool{}, fmt.Errorf("encode tool %s: %w", t.Name, err)
+	}
 	cp := *t
 	cp.Name = name
 	desc, err := json.Marshal(&cp)
@@ -348,7 +337,7 @@ func (u *Upstream) convert(t *mcp.Tool) (catalog.Tool, error) {
 		Original:    t.Name,
 		Description: t.Description,
 		Annotations: a,
-		Pin:         catalog.PinHash(t.Name, t.Description, in, out, a),
+		Pin:         catalog.PinHash(t.Name, definition),
 		Descriptor:  desc,
 	}, nil
 }

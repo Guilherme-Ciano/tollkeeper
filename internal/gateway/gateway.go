@@ -231,6 +231,10 @@ func (g *Gateway) handlePanic(ctx context.Context, w http.ResponseWriter) {
 func (g *Gateway) Apply(d catalog.Delta) {
 	g.regMu.Lock()
 	defer g.regMu.Unlock()
+	g.applyLocked(d)
+}
+
+func (g *Gateway) applyLocked(d catalog.Delta) {
 	if len(d.Removed) > 0 {
 		g.server.RemoveTools(d.Removed...)
 		for _, n := range d.Removed {
@@ -266,6 +270,7 @@ func (g *Gateway) pinHides(t *catalog.Tool) bool {
 		delete(g.unapproved, t.Name)
 		return false
 	}
+	blocked := g.pins.Mode() == pin.ModeEnforce
 	if prev, seen := g.unapproved[t.Name]; !seen || prev != status {
 		g.log.Warn("tool definition not approved",
 			slog.String("tool", t.Name),
@@ -274,7 +279,7 @@ func (g *Gateway) pinHides(t *catalog.Tool) bool {
 			slog.String("mode", string(g.pins.Mode())))
 	}
 	g.unapproved[t.Name] = status
-	return g.pins.Blocks(*t)
+	return blocked
 }
 
 func (g *Gateway) publishCatalogGauges() {
@@ -293,10 +298,27 @@ func (g *Gateway) publishCatalogGauges() {
 }
 
 func (g *Gateway) Reevaluate() {
-	g.Apply(catalog.Delta{Upserted: g.catalog.Snapshot().Tools()})
+	if g.pins == nil {
+		return
+	}
+	g.regMu.Lock()
+	defer g.regMu.Unlock()
+	var d catalog.Delta
+	tools := g.catalog.Snapshot().Tools()
+	for i := range tools {
+		t := tools[i]
+		prev, wasUnapproved := g.unapproved[t.Name]
+		now := g.pins.Status(t)
+		if (now == pin.StatusApproved) == wasUnapproved || (wasUnapproved && prev != now) {
+			d.Upserted = append(d.Upserted, t)
+		}
+	}
+	if len(d.Upserted) > 0 {
+		g.applyLocked(d)
+	}
 }
 
-func (g *Gateway) Unapproved() map[string]pin.Status {
+func (g *Gateway) unapprovedTools() map[string]pin.Status {
 	g.regMu.Lock()
 	defer g.regMu.Unlock()
 	return maps.Clone(g.unapproved)
