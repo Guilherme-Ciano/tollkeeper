@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -21,6 +22,7 @@ type memMirror struct {
 	rows          []Row
 	failPrepare   atomic.Bool
 	failCommit    atomic.Bool
+	lateCommit    atomic.Bool
 	reportLastSeq atomic.Int64
 }
 
@@ -33,6 +35,16 @@ func (p *memPending) Commit(context.Context) error {
 	if p.m.failCommit.Load() {
 		return errInjected
 	}
+	if p.m.lateCommit.Load() {
+		if err := p.apply(); err != nil {
+			return err
+		}
+		return errInjected
+	}
+	return p.apply()
+}
+
+func (p *memPending) apply() error {
 	p.m.mu.Lock()
 	defer p.m.mu.Unlock()
 	for _, r := range p.rows {
@@ -64,16 +76,17 @@ func (m *memMirror) Prepare(_ context.Context, rows []Row) (Pending, error) {
 	return &memPending{m: m, rows: append([]Row(nil), rows...)}, nil
 }
 
-func (m *memMirror) LastSeq(context.Context, string) (uint64, error) {
+func (m *memMirror) Last(context.Context, string) (seq uint64, hash string, err error) {
 	if v := m.reportLastSeq.Load(); v > 0 {
-		return uint64(v), nil
+		return uint64(v), "", nil
 	}
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	if len(m.rows) == 0 {
-		return 0, nil
+		return 0, "", nil
 	}
-	return m.rows[len(m.rows)-1].Seq, nil
+	last := m.rows[len(m.rows)-1]
+	return last.Seq, last.Hash, nil
 }
 
 func (m *memMirror) snapshot() []Row {
@@ -147,32 +160,48 @@ func TestMirrorReceivesExactlyTheFileRecords(t *testing.T) {
 	}
 }
 
-func TestMirrorCommitFailureRollsBackTheFile(t *testing.T) {
+func TestMirrorCatchesUpAfterFailedCommit(t *testing.T) {
 	t.Parallel()
-	path := filepath.Join(t.TempDir(), "audit.jsonl")
-	m := &memMirror{}
-	l := openMirrored(t, path, m, nil)
-	if err := l.Append(t.Context(), Event{Method: "first", Decision: DecisionAllow}); err != nil {
-		t.Fatal(err)
+	cases := map[string]func(m *memMirror, on bool){
+		"commit lost":                func(m *memMirror, on bool) { m.failCommit.Store(on) },
+		"commit applied but reported": func(m *memMirror, on bool) { m.lateCommit.Store(on) },
 	}
-	waitFor(t, func() bool { return len(m.snapshot()) == 1 })
-	m.failCommit.Store(true)
-	if err := l.Append(t.Context(), Event{Method: "lost", Decision: DecisionAllow}); err != nil {
-		t.Fatal(err)
+	for name, inject := range cases {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			path := filepath.Join(t.TempDir(), "audit.jsonl")
+			m := &memMirror{}
+			var sinkErrors atomic.Int64
+			l, err := Open(Options{
+				Path: path, ChainID: "c1", Buffer: 64, BatchSize: 4, FlushInterval: time.Millisecond,
+				Mirror: m, MirrorTimeout: time.Second,
+				Hooks: Hooks{SinkError: func(error) { sinkErrors.Add(1) }},
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := l.Append(t.Context(), Event{Method: "first", Decision: DecisionAllow}); err != nil {
+				t.Fatal(err)
+			}
+			waitFor(t, func() bool { return len(m.snapshot()) == 1 })
+			inject(m, true)
+			if err := l.Append(t.Context(), Event{Method: "second", Decision: DecisionAllow}); err != nil {
+				t.Fatal(err)
+			}
+			waitFor(t, func() bool { return sinkErrors.Load() > 0 })
+			if got := len(fileRecords(t, path)); got != 2 {
+				t.Fatalf("an fsynced record was removed from the file: %d records", got)
+			}
+			inject(m, false)
+			if err := l.Append(t.Context(), Event{Method: "third", Decision: DecisionAllow}); err != nil {
+				t.Fatal(err)
+			}
+			if err := l.Close(); err != nil {
+				t.Fatal(err)
+			}
+			assertSameChain(t, path, m)
+		})
 	}
-	waitFor(t, func() bool { return l.SinkErr() != nil })
-	if got := len(fileRecords(t, path)); got != 1 {
-		t.Fatalf("file kept %d records after the mirror refused the batch, want 1", got)
-	}
-	m.failCommit.Store(false)
-	waitFor(t, func() bool { return l.SinkErr() == nil })
-	if err := l.Append(t.Context(), Event{Method: "after", Decision: DecisionAllow}); err != nil {
-		t.Fatal(err)
-	}
-	if err := l.Close(); err != nil {
-		t.Fatal(err)
-	}
-	assertSameChain(t, path, m)
 }
 
 func TestMirrorPrepareFailureWritesNothing(t *testing.T) {
@@ -229,5 +258,27 @@ func TestOpenRefusesMirrorAheadOfFile(t *testing.T) {
 	_, err := Open(Options{Path: path, ChainID: "c1", Mirror: m})
 	if !errors.Is(err, ErrMirrorAhead) {
 		t.Fatalf("Open = %v, want ErrMirrorAhead", err)
+	}
+}
+
+func TestOpenRefusesDivergedMirror(t *testing.T) {
+	t.Parallel()
+	path := filepath.Join(t.TempDir(), "audit.jsonl")
+	writeLog(t, path, nil, 4)
+	recs := fileRecords(t, path)
+	m := &memMirror{}
+	for i, rec := range recs[:2] {
+		var b Body
+		if err := json.Unmarshal(rec.Body, &b); err != nil {
+			t.Fatal(err)
+		}
+		r := rowFor(&b, rec)
+		if i == 1 {
+			r.Hash = strings.Repeat("f", 64)
+		}
+		m.rows = append(m.rows, r)
+	}
+	if _, err := Open(Options{Path: path, ChainID: "c1", Mirror: m}); !errors.Is(err, ErrMirrorDiverged) {
+		t.Fatalf("Open = %v, want ErrMirrorDiverged", err)
 	}
 }

@@ -68,6 +68,7 @@ type Log struct {
 	lastCkptTime time.Time
 	buf          bytes.Buffer
 	rows         []Row
+	mirrorBehind bool
 }
 
 func Open(opts Options) (*Log, error) {
@@ -265,12 +266,17 @@ func (l *Log) shutdown(ctx context.Context, batch []Event) {
 	if l.opts.Signer == nil || l.seq <= l.lastCkptSeq {
 		return
 	}
+	seq, prev, ckSeq, ckTime := l.seq, l.prev, l.lastCkptSeq, l.lastCkptTime
 	l.resetBatch()
-	if err := l.appendCheckpoint(); err != nil {
-		l.runErr = errors.Join(l.runErr, err)
-		return
+	err := l.appendCheckpoint()
+	if err == nil {
+		err = l.commit(ctx)
 	}
-	l.runErr = errors.Join(l.runErr, l.commit(ctx))
+	if err != nil {
+		atomic.StoreUint64(&l.seq, seq)
+		l.prev, l.lastCkptSeq, l.lastCkptTime = prev, ckSeq, ckTime
+		l.runErr = errors.Join(l.runErr, err)
+	}
 }
 
 func (l *Log) run(ctx context.Context) {
@@ -401,23 +407,32 @@ func (l *Log) commit(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("stat audit log: %w", err)
 	}
+	if l.opts.Mirror != nil && l.mirrorBehind {
+		if err := l.reconcile(ctx); err != nil {
+			return fmt.Errorf("catch up audit mirror: %w", err)
+		}
+		l.mirrorBehind = false
+	}
 	var pending Pending
-	ctx, cancel := context.WithTimeout(ctx, l.opts.MirrorTimeout)
+	mctx, cancel := context.WithTimeout(ctx, l.opts.MirrorTimeout)
 	defer cancel()
 	if l.opts.Mirror != nil {
-		if pending, err = l.opts.Mirror.Prepare(ctx, l.rows); err != nil {
+		if pending, err = l.opts.Mirror.Prepare(mctx, l.rows); err != nil {
 			return fmt.Errorf("stage audit mirror: %w", err)
 		}
 	}
 	if err := l.writeFile(); err != nil {
 		if pending != nil {
-			err = errors.Join(err, pending.Abort(ctx))
+			err = errors.Join(err, pending.Abort(mctx))
 		}
 		return l.undo(info.Size(), err)
 	}
 	if pending != nil {
-		if err := pending.Commit(ctx); err != nil {
-			return l.undo(info.Size(), fmt.Errorf("commit audit mirror: %w", err))
+		if err := pending.Commit(mctx); err != nil {
+			l.mirrorBehind = true
+			if l.opts.Hooks.SinkError != nil {
+				l.opts.Hooks.SinkError(fmt.Errorf("commit audit mirror, will catch up from the file: %w", err))
+			}
 		}
 	}
 	return nil

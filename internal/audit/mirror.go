@@ -18,7 +18,10 @@ const (
 	maxLineBytes   = 16 << 20
 )
 
-var ErrMirrorAhead = errors.New("audit mirror holds records the local log does not")
+var (
+	ErrMirrorAhead    = errors.New("audit mirror holds records the local log does not")
+	ErrMirrorDiverged = errors.New("audit mirror and local log disagree")
+)
 
 type Row struct {
 	ChainID string
@@ -37,7 +40,7 @@ type Pending interface {
 
 type Mirror interface {
 	Prepare(ctx context.Context, rows []Row) (Pending, error)
-	LastSeq(ctx context.Context, chainID string) (uint64, error)
+	Last(ctx context.Context, chainID string) (seq uint64, hash string, err error)
 }
 
 func rowFor(b *Body, rec Record) Row {
@@ -59,7 +62,7 @@ func rowFor(b *Body, rec Record) Row {
 func (l *Log) reconcile(parent context.Context) error {
 	ctx, cancel := context.WithTimeout(parent, l.opts.MirrorTimeout)
 	defer cancel()
-	last, err := l.opts.Mirror.LastSeq(ctx, l.opts.ChainID)
+	last, hash, err := l.opts.Mirror.Last(ctx, l.opts.ChainID)
 	if err != nil {
 		return fmt.Errorf("read audit mirror position: %w", err)
 	}
@@ -67,16 +70,19 @@ func (l *Log) reconcile(parent context.Context) error {
 		return fmt.Errorf("%w: mirror at seq %d, log at seq %d", ErrMirrorAhead, last, l.seq)
 	}
 	if last == l.seq {
+		if last > 0 && hash != l.prev {
+			return fmt.Errorf("%w: different record at seq %d", ErrMirrorDiverged, last)
+		}
 		return nil
 	}
 	info, err := l.file.Stat()
 	if err != nil {
 		return fmt.Errorf("stat audit log: %w", err)
 	}
-	return l.backfill(parent, io.NewSectionReader(l.file, 0, info.Size()), last)
+	return l.backfill(parent, io.NewSectionReader(l.file, 0, info.Size()), last, hash)
 }
 
-func (l *Log) backfill(ctx context.Context, r io.Reader, after uint64) error {
+func (l *Log) backfill(ctx context.Context, r io.Reader, after uint64, afterHash string) error {
 	sc := bufio.NewScanner(r)
 	sc.Buffer(make([]byte, 0, 64<<10), maxLineBytes)
 	batch := make([]Row, 0, reconcileBatch)
@@ -88,6 +94,9 @@ func (l *Log) backfill(ctx context.Context, r io.Reader, after uint64) error {
 		var body Body
 		if err := json.Unmarshal(rec.Body, &body); err != nil {
 			return fmt.Errorf("backfill audit mirror: %w", ErrMalformed)
+		}
+		if body.Seq == after && rec.Hash != afterHash {
+			return fmt.Errorf("%w: different record at seq %d", ErrMirrorDiverged, after)
 		}
 		if body.Seq <= after {
 			continue
