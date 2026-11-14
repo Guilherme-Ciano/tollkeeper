@@ -3,6 +3,7 @@
 **A single Go binary between your agents and their MCP tools: OAuth 2.1 resource server, policy-as-code in CEL, GCRA rate limits, and an audit log you can cryptographically verify.**
 
 [![CI](https://github.com/Guilherme-Ciano/tollkeeper/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/Guilherme-Ciano/tollkeeper/actions/workflows/ci.yml)
+[![MCP conformance](https://github.com/Guilherme-Ciano/tollkeeper/actions/workflows/conformance.yml/badge.svg?branch=main)](conformance/README.md)
 [![Coverage](https://img.shields.io/endpoint?url=https%3A%2F%2Fraw.githubusercontent.com%2FGuilherme-Ciano%2Ftollkeeper%2Fbadges%2Fcoverage.json)](https://github.com/Guilherme-Ciano/tollkeeper/actions/workflows/ci.yml)
 [![Go Report Card](https://goreportcard.com/badge/github.com/Guilherme-Ciano/tollkeeper)](https://goreportcard.com/report/github.com/Guilherme-Ciano/tollkeeper)
 [![OpenSSF Scorecard](https://api.scorecard.dev/projects/github.com/Guilherme-Ciano/tollkeeper/badge)](https://scorecard.dev/viewer/?uri=github.com/Guilherme-Ciano/tollkeeper)
@@ -198,6 +199,7 @@ policy:
 | `rate_limits.rules[].per` | | `subject`, `subject_tool`, `client_id`, `upstream`, `tool`, `global` |
 | `audit.record_args` | `hash` | `none`, `hash`, `full` (raw arguments may be personal data) |
 | `audit.on_backpressure` | `fail_closed` | Calls are refused if their intent record cannot be queued |
+| `server.namespace_tools` | `true` | `false` exposes upstream tool names unchanged; only allowed with exactly one upstream, for deployments that front a single server for auth and audit |
 | `pinning.mode` | `warn` | `off`, `warn` (serve and report unapproved definitions) or `enforce` (hide and refuse them until approved) |
 | `pinning.file` | | Lockfile written by `tollkeeper pin approve`; required for `enforce`, reloaded every `pinning.reload_interval` (5 s) |
 
@@ -276,7 +278,8 @@ Report vulnerabilities as described in [SECURITY.md](SECURITY.md).
 - [x] v0.1: everything above, compose demo, fuzzing, published overhead numbers
 - [x] Tool pinning enforcement with `pin status` and `pin approve`
 - [ ] v0.2: Redis GCRA store with a shared conformance suite, Postgres audit sink with immutable triggers, OTLP log sink, RFC 7662 introspection, sealed MRTR state, progress forwarding, resources/prompts, hot reload
-- [ ] v1.0: RFC 8693 token exchange to upstreams, DPoP, external checkpoint anchoring, Helm chart, MCP conformance suite in CI
+- [x] Official MCP conformance suite in CI, run through the gateway ([conformance/](conformance/README.md))
+- [ ] v1.0: RFC 8693 token exchange to upstreams, DPoP, external checkpoint anchoring, Helm chart
 
 ## Development
 

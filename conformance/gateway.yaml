@@ -1,0 +1,24 @@
+server:
+  listen: "127.0.0.1:8080"
+  admin_listen: "127.0.0.1:9090"
+  public_url: "http://localhost:8080/mcp"
+  namespace_tools: false
+
+auth:
+  mode: none
+
+upstreams:
+  - id: everything
+    transport: streamable_http
+    url: "http://127.0.0.1:3001/mcp"
+    timeout: 30s
+
+policy:
+  default: allow
+
+audit:
+  path: "/tmp/tollkeeper-conformance/audit.jsonl"
+  record_args: hash
+
+pinning:
+  mode: "off"

@@ -1,0 +1,65 @@
+name: conformance
+on:
+  push: { branches: [main] }
+  pull_request:
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+env:
+  CONFORMANCE_VERSION: "0.2.0-alpha.12"
+  GO_SDK_VERSION: "v1.8.0"
+jobs:
+  server:
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    strategy:
+      fail-fast: false
+      matrix:
+        requirements: ["2026-07-28", "2025-11-25"]
+    steps:
+      - uses: step-security/harden-runner@1d88384fd173af6ecb012dfd0264a306b711241a # v2.22.4
+        with: { egress-policy: audit }
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with: { go-version-file: go.mod }
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with: { node-version: 22 }
+      - run: |
+          go build -o bin/tollkeeper ./cmd/tollkeeper
+          GOBIN="$PWD/bin" go install "github.com/modelcontextprotocol/go-sdk/conformance/everything-server@${GO_SDK_VERSION}"
+      - name: Start upstream fixture and gateway
+        run: |
+          mkdir -p /tmp/tollkeeper-conformance
+          ./bin/everything-server -http=127.0.0.1:3001 -stateless > /tmp/tollkeeper-conformance/upstream.log 2>&1 &
+          timeout 30 bash -c 'until curl -s -o /dev/null http://127.0.0.1:3001/mcp; do sleep 0.5; done'
+          ./bin/tollkeeper serve -c conformance/gateway.yaml > /tmp/tollkeeper-conformance/gateway.log 2>&1 &
+          timeout 30 bash -c 'until curl -sf http://127.0.0.1:9090/readyz; do sleep 0.5; done'
+      - name: Run conformance suite through tollkeeper
+        run: |
+          npx -y "@modelcontextprotocol/conformance@${CONFORMANCE_VERSION}" server \
+            --url http://localhost:8080/mcp \
+            --requirements "${{ matrix.requirements }}" \
+            --expected-failures conformance/baseline.yml 2>&1 | tee conformance-output.txt
+      - if: always()
+        name: Summarize
+        run: |
+          {
+            echo "### MCP conformance ${{ matrix.requirements }} through tollkeeper"
+            echo '```'
+            tail -60 conformance-output.txt || true
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+      - name: Verify the audit chain written during the run
+        run: ./bin/tollkeeper audit verify -f /tmp/tollkeeper-conformance/audit.jsonl --no-signatures
+      - if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: conformance-${{ matrix.requirements }}
+          path: |
+            results/
+            conformance-output.txt
+            /tmp/tollkeeper-conformance/*.log
+          retention-days: 14
