@@ -61,7 +61,7 @@ func Root(info BuildInfo, stdout, stderr io.Writer) *cobra.Command {
 	}
 	root.SetOut(stdout)
 	root.SetErr(stderr)
-	root.AddCommand(serveCmd(info), versionCmd(info), configCmd(), policyCmd(), auditCmd(), devIssuerCmd(), healthCmd())
+	root.AddCommand(serveCmd(info), versionCmd(info), configCmd(), policyCmd(), auditCmd(), pinCmd(), devIssuerCmd(), healthCmd())
 	return root
 }
 
