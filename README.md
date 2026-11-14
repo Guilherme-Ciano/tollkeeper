@@ -156,6 +156,8 @@ FAIL line 9 (seq 10): sequence gap: expected seq 9 after 8 valid records
 | `tollkeeper policy test -c config.yaml -f policies_test.yaml` | Table-driven policy fixtures for CI ([example](deploy/compose/policies_test.yaml)) |
 | `tollkeeper audit verify -f audit.jsonl --pubkey audit.pub` | Recompute the chain, check signatures, report the first broken record. Fails when a log has no signed checkpoint or more than `--max-unsigned` (default 1000) records after the last one; `--chain-id` pins the chain; `--no-signatures` checks only the hash chain |
 | `tollkeeper audit keygen -o dir` | Ed25519 checkpoint key pair |
+| `tollkeeper pin status [--check]` | List catalog tools as `approved`, `new` or `changed` against the lockfile; `--check` fails when anything is pending |
+| `tollkeeper pin approve [tool...] \| --all [--prune]` | Print what changed in each tool description, then record the current definitions in the lockfile the gateway reloads |
 | `tollkeeper dev-issuer -c devissuer.yaml` | DEV ONLY OAuth issuer (refuses non-loopback binds without `--i-know-this-is-insecure`) |
 | `tollkeeper healthcheck --url …` | Probe for distroless container healthchecks |
 
@@ -185,7 +187,7 @@ policy:
 
 | Key | Default | Notes |
 |---|---|---|
-| `server.listen` / `admin_listen` | `:8080` / `127.0.0.1:9090` | Admin serves `/metrics`, `/livez`, `/readyz`; `server.pprof: true` adds `/debug/pprof` and requires a loopback admin address |
+| `server.listen` / `admin_listen` | `:8080` / `127.0.0.1:9090` | Admin serves `/metrics`, `/livez`, `/readyz`, `/pins`; `server.pprof: true` adds `/debug/pprof` and requires a loopback admin address |
 | `server.public_url` | required | Canonical MCP URL; also the RFC 9728 metadata path |
 | `server.max_body_bytes` | 1 MiB | Enforced before parsing |
 | `auth.mode` | `jwt` | `none` exists for local experiments and logs a warning |
@@ -196,6 +198,8 @@ policy:
 | `rate_limits.rules[].per` | | `subject`, `subject_tool`, `client_id`, `upstream`, `tool`, `global` |
 | `audit.record_args` | `hash` | `none`, `hash`, `full` (raw arguments may be personal data) |
 | `audit.on_backpressure` | `fail_closed` | Calls are refused if their intent record cannot be queued |
+| `pinning.mode` | `warn` | `off`, `warn` (serve and report unapproved definitions) or `enforce` (hide and refuse them until approved) |
+| `pinning.file` | | Lockfile written by `tollkeeper pin approve`; required for `enforce`, reloaded every `pinning.reload_interval` (5 s) |
 
 CEL variables: `principal{sub, client_id, scopes, claims}`, `tool{name, upstream, original, pin_hash, annotations}`, `args`, `request{method, client_name}`, `now`. Programs are compiled at load time with a cost limit and a 50 ms evaluation timeout, and arguments are only decoded when a rule references `args`.
 
@@ -247,6 +251,7 @@ Reproduce with `make bench` (micro-benchmarks, `-count=10`) and `make bench-e2e`
 | Cross-server tool shadowing | Mandatory `upstream__tool` namespacing; the separator must use a character upstream IDs cannot contain; the catalog refuses a name already owned by another upstream |
 | Tool discovery through errors | Unknown tools get the same response as policy denials, and denials never name the matching rule |
 | Malicious upstream tool definitions | Tools with invalid schemas are quarantined instead of crashing the server (go-sdk `AddTool` panics); pin hashes recorded per call |
+| Tool poisoning and rug pulls | Every tool definition is pinned by hash; in `enforce` mode a new or changed definition is hidden from `tools/list` and refused until an operator reviews the diff and runs `pin approve` ([ADR 0007](docs/adr/0007-tool-pinning.md)) |
 | Audit tampering or loss | Hash chain + Ed25519 checkpoints that are themselves chain records; verifier rejects unknown fields and logs without signatures; disk failures fail closed, truncate partial batches and leave signed gap records |
 | Secret leakage to stdio servers | Subprocesses get an explicit env allowlist, never the gateway's environment (tested) |
 | DoS | Body cap, argument token cap, CEL cost limit and timeout, per-upstream semaphores that fail fast, timeouts and circuit breakers that ignore client-caused errors, rate limits applied before catalog lookups, rate-limited JWKS refetch on unknown `kid`, bounded metric labels, truncated audit fields |
@@ -258,7 +263,6 @@ Report vulnerabilities as described in [SECURITY.md](SECURITY.md).
 - **Tools only.** Resources and prompts are not aggregated yet; go-sdk has no dynamic `resources/list` handler ([go-sdk#998](https://github.com/modelcontextprotocol/go-sdk/issues/998)).
 - **Progress notifications are not forwarded**, and if they were, go-sdk may deliver them after the result ([go-sdk#1337](https://github.com/modelcontextprotocol/go-sdk/issues/1337)).
 - **MRTR `requestState` is passed through, not yet sealed**; tool names still route retries, so a client cannot redirect a retry to another upstream by name.
-- **Tool pinning** computes and records hashes but does not enforce approval yet.
 - **In-memory rate limits only**; limits are per replica. One audit chain per replica (`chain_id`).
 - Upstream results pass through unchanged, including the upstream's `_meta` server info.
 - Records written after the last checkpoint are protected only by the hash chain until the next checkpoint (`checkpoint.every`/`interval`); `audit verify --max-unsigned` bounds how many are accepted. Truncating them is not detectable without external anchoring.
@@ -270,7 +274,8 @@ Report vulnerabilities as described in [SECURITY.md](SECURITY.md).
 ## Roadmap
 
 - [x] v0.1: everything above, compose demo, fuzzing, published overhead numbers
-- [ ] v0.2: Redis GCRA store with a shared conformance suite, Postgres audit sink with immutable triggers, OTLP log sink, RFC 7662 introspection, pin enforcement and `pin approve`, sealed MRTR state, progress forwarding, resources/prompts, hot reload
+- [x] Tool pinning enforcement with `pin status` and `pin approve`
+- [ ] v0.2: Redis GCRA store with a shared conformance suite, Postgres audit sink with immutable triggers, OTLP log sink, RFC 7662 introspection, sealed MRTR state, progress forwarding, resources/prompts, hot reload
 - [ ] v1.0: RFC 8693 token exchange to upstreams, DPoP, external checkpoint anchoring, Helm chart, MCP conformance suite in CI
 
 ## Development
