@@ -163,7 +163,7 @@ FAIL line 9 (seq 10): sequence gap: expected seq 9 after 8 valid records
 | `tollkeeper audit verify -f audit.jsonl --pubkey audit.pub` | Recompute the chain, check signatures, report the first broken record. `--postgres DSN --chain-id ID` verifies a chain stored in Postgres instead. Fails when a log has no signed checkpoint or more than `--max-unsigned` (default 1000) records after the last one; `--chain-id` pins the chain; `--no-signatures` checks only the hash chain |
 | `tollkeeper audit keygen -o dir` | Ed25519 checkpoint key pair |
 | `tollkeeper pin status [--check]` | List catalog tools as `approved`, `new` or `changed` against the lockfile; `--check` fails when anything is pending |
-| `tollkeeper pin approve [tool...] \| --all [--prune]` | Print what changed in each tool description, then record the current definitions in the lockfile the gateway reloads |
+| `tollkeeper pin approve [tool...] \| --all [--prune] [--yes]` | Verify each reported pin, show a unified diff of the whole definition with hidden characters escaped, confirm per tool, then record it in the lockfile the gateway reloads |
 | `tollkeeper dev-issuer -c devissuer.yaml` | DEV ONLY OAuth issuer (refuses non-loopback binds without `--i-know-this-is-insecure`) |
 | `tollkeeper healthcheck --url …` | Probe for distroless container healthchecks |
 
@@ -208,7 +208,8 @@ policy:
 | `audit.on_backpressure` | `fail_closed` | Calls are refused if their intent record cannot be queued |
 | `server.namespace_tools` | `true` | `false` exposes upstream tool names unchanged; only allowed with exactly one upstream, for deployments that front a single server for auth and audit |
 | `pinning.mode` | `warn` | `off`, `warn` (serve and report unapproved definitions) or `enforce` (hide and refuse them until approved) |
-| `pinning.file` | | Lockfile written by `tollkeeper pin approve`; required for `enforce`, reloaded every `pinning.reload_interval` (5 s) |
+| `pinning.file` | | Lockfile written by `tollkeeper pin approve`; required for `enforce`, reloaded every `pinning.reload_interval` (5 s); refused if group or world writable |
+| `pinning.report_token` | | Bearer token for `GET /pins`; without it the report is only served on a loopback admin listener |
 
 CEL variables: `principal{sub, client_id, scopes, claims}`, `tool{name, upstream, original, pin_hash, annotations}`, `args`, `request{method, client_name}`, `now`. Programs are compiled at load time with a cost limit and a 50 ms evaluation timeout, and arguments are only decoded when a rule references `args`.
 

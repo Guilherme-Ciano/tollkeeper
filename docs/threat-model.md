@@ -77,7 +77,9 @@ Upstreams are **semi-trusted**: the operator chose them, but their tool definiti
 | S | Confused deputy via forwarded caller token | Upstream clients built from config only, no access to the inbound request ([ADR 0005](adr/0005-no-token-passthrough.md)) | `internal/upstream`, no-passthrough tests |
 | S | Upstream shadowing another server's tool | Mandatory `upstream__tool` namespacing; catalog refuses names owned by another upstream | `internal/catalog`, `FuzzQualify` |
 | T | Rug pull: an approved tool silently changes its description or schema | Tool definitions are pinned by hash; in `enforce` mode a changed tool is hidden and blocked until re-approved ([ADR 0007](adr/0007-tool-pinning.md)) | `internal/pin`, `internal/gateway/pin_test.go` |
-| T | Tool poisoning: instructions hidden in descriptions | Pinning makes every description change an explicit operator decision; the approval diff shows the new text | `tollkeeper pin` |
+| T | Tool poisoning: instructions hidden in descriptions, titles, schemas or `_meta` | The pin covers the full definition; `pin approve` shows a unified diff with hidden characters escaped, asks per tool, and rejects a report whose pin does not match its definition | `internal/cli/pin.go`, `pin_test.go` |
+| T | Lockfile rewritten to self-approve | Lockfile refused when group or world writable; deploy it on a read-only mount | `internal/pin` |
+| I | Hidden tools revealed through the pin report | `GET /pins` only on a loopback admin listener or with a bearer token; absent when pinning is off | `internal/app/pins_test.go` |
 | I | Gateway environment leaked to stdio servers | Explicit environment allowlist | `internal/upstream`, env tests |
 | I | Credentials sent to a redirected host | No redirects; static bearer bound to the configured host | `internal/upstream/transport.go` |
 | D | Slow or crashing upstream exhausting the gateway | Per-upstream semaphores that fail fast, timeouts, circuit breakers, crash-loop backoff | `internal/upstream` |
