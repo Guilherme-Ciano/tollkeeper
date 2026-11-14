@@ -2,7 +2,14 @@
 
 **A single Go binary between your agents and their MCP tools: OAuth 2.1 resource server, policy-as-code in CEL, GCRA rate limits, and an audit log you can cryptographically verify.**
 
-![Go](https://img.shields.io/badge/go-1.27-333333) ![License](https://img.shields.io/badge/license-Apache--2.0-333333) ![MCP](https://img.shields.io/badge/MCP-2026--07--28-333333) ![go-sdk](https://img.shields.io/badge/go--sdk-v1.8.0-333333)
+[![CI](https://github.com/Guilherme-Ciano/tollkeeper/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/Guilherme-Ciano/tollkeeper/actions/workflows/ci.yml)
+[![Coverage](https://img.shields.io/endpoint?url=https%3A%2F%2Fraw.githubusercontent.com%2FGuilherme-Ciano%2Ftollkeeper%2Fbadges%2Fcoverage.json)](https://github.com/Guilherme-Ciano/tollkeeper/actions/workflows/ci.yml)
+[![Go Report Card](https://goreportcard.com/badge/github.com/Guilherme-Ciano/tollkeeper)](https://goreportcard.com/report/github.com/Guilherme-Ciano/tollkeeper)
+[![OpenSSF Scorecard](https://api.scorecard.dev/projects/github.com/Guilherme-Ciano/tollkeeper/badge)](https://scorecard.dev/viewer/?uri=github.com/Guilherme-Ciano/tollkeeper)
+[![Release](https://img.shields.io/github/v/release/Guilherme-Ciano/tollkeeper?sort=semver)](https://github.com/Guilherme-Ciano/tollkeeper/releases)
+[![Go Reference](https://pkg.go.dev/badge/github.com/Guilherme-Ciano/tollkeeper.svg)](https://pkg.go.dev/github.com/Guilherme-Ciano/tollkeeper)
+[![License](https://img.shields.io/badge/license-Apache--2.0-blue)](LICENSE)
+![MCP](https://img.shields.io/badge/MCP-2026--07--28-333333)
 
 ## Why
 
@@ -67,6 +74,16 @@ sequenceDiagram
 ```
 
 The admission step runs at the HTTP layer so it can answer with real status codes (`401`, `403` step-up, `429`). The go-sdk middleware then acts as a backstop: a `tools/call` without a matching admission never reaches an upstream.
+
+## Install
+
+Signed binaries for Linux, macOS and Windows (amd64 and arm64) are on the [releases page](https://github.com/Guilherme-Ciano/tollkeeper/releases), and a multi-arch image is on GHCR:
+
+```bash
+docker pull ghcr.io/guilherme-ciano/tollkeeper:latest
+```
+
+Each release ships cosign keyless signatures, SBOMs and SLSA build provenance. [docs/verifying-releases.md](docs/verifying-releases.md) shows how to check all three before running anything.
 
 ## Quickstart
 
