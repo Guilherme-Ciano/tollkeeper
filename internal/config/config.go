@@ -12,7 +12,20 @@ type Config struct {
 	RateLimits RateLimits `koanf:"rate_limits"`
 	Audit      Audit      `koanf:"audit"`
 	Telemetry  Telemetry  `koanf:"telemetry"`
+	Pinning    Pinning    `koanf:"pinning"`
 	Digest     string     `koanf:"-"`
+}
+
+const (
+	PinModeOff     = "off"
+	PinModeWarn    = "warn"
+	PinModeEnforce = "enforce"
+)
+
+type Pinning struct {
+	Mode           string        `koanf:"mode"`
+	File           string        `koanf:"file"`
+	ReloadInterval time.Duration `koanf:"reload_interval"`
 }
 
 type Server struct {
@@ -175,6 +188,7 @@ func Defaults() Config {
 			RecordArgs:     RecordArgsHash,
 			Checkpoint:     Checkpoint{Every: 1000, Interval: 30 * time.Second},
 		},
+		Pinning: Pinning{Mode: PinModeWarn, ReloadInterval: 5 * time.Second},
 		Telemetry: Telemetry{
 			ServiceName: "tollkeeper",
 			SampleRatio: 1.0,

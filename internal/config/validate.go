@@ -80,12 +80,23 @@ func (c *Config) Validate() error {
 	c.validatePolicy(v)
 	c.validateRateLimits(v)
 	c.validateAudit(v)
+	c.validatePinning(v)
 	v.oneOf("telemetry.log_format", c.Telemetry.LogFormat, "json", "text")
 	v.oneOf("telemetry.log_level", c.Telemetry.LogLevel, "debug", "info", "warn", "error")
 	if c.Telemetry.SampleRatio < 0 || c.Telemetry.SampleRatio > 1 {
 		v.add("telemetry.sample_ratio", "must be within [0,1]")
 	}
 	return errors.Join(v.errs...)
+}
+
+func (c *Config) validatePinning(v *validator) {
+	v.oneOf("pinning.mode", c.Pinning.Mode, PinModeOff, PinModeWarn, PinModeEnforce)
+	if c.Pinning.Mode == PinModeEnforce && c.Pinning.File == "" {
+		v.add("pinning.file", "required when pinning.mode is enforce")
+	}
+	if c.Pinning.Mode != PinModeOff && c.Pinning.ReloadInterval < 100*time.Millisecond {
+		v.add("pinning.reload_interval", "must be at least 100ms")
+	}
 }
 
 func (c *Config) validateServer(v *validator) {
