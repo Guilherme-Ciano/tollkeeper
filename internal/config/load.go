@@ -92,8 +92,10 @@ func Parse(raw []byte, lookup func(string) (string, bool), environ func() []stri
 
 func envKey(k, v string) (key string, value any) {
 	k = strings.TrimPrefix(k, EnvPrefix)
-	k = strings.ToLower(strings.ReplaceAll(k, "__", "."))
-	return k, v
+	if !strings.Contains(k, "__") {
+		return "", nil
+	}
+	return strings.ToLower(strings.ReplaceAll(k, "__", ".")), v
 }
 
 var envRef = regexp.MustCompile(`\$\{([A-Za-z_][A-Za-z0-9_]*)\}`)

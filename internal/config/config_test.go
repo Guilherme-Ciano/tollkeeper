@@ -46,7 +46,10 @@ func lookup(m map[string]string) func(string) (string, bool) {
 func TestParseDefaultsAndEnv(t *testing.T) {
 	t.Parallel()
 	cfg, err := Parse([]byte(minimal), lookup(map[string]string{"FILES_SECRET": "s3cret"}), func() []string {
-		return []string{"TOLLKEEPER_SERVER__LISTEN=:7070", "TOLLKEEPER_AUDIT__RECORD_ARGS=none", "UNRELATED=1"}
+		return []string{
+			"TOLLKEEPER_SERVER__LISTEN=:7070", "TOLLKEEPER_AUDIT__RECORD_ARGS=none", "UNRELATED=1",
+			"TOLLKEEPER_ADMIN_TOKEN=cli-only", "TOLLKEEPER_TEST_REDIS_ADDR=127.0.0.1:6379",
+		}
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -198,5 +201,15 @@ func TestHardeningValidation(t *testing.T) {
 	}
 	if Defaults().Server.AdminListen != "127.0.0.1:9090" {
 		t.Fatal("admin listener must default to loopback")
+	}
+}
+
+func TestEnvOverlayStillRejectsUnknownNestedKeys(t *testing.T) {
+	t.Parallel()
+	_, err := Parse([]byte(minimal), lookup(map[string]string{"FILES_SECRET": "s"}), func() []string {
+		return []string{"TOLLKEEPER_SERVER__LISTNE=:7070"}
+	})
+	if err == nil {
+		t.Fatal("a misspelled nested env key was silently ignored")
 	}
 }
