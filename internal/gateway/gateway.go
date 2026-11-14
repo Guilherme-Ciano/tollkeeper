@@ -235,15 +235,21 @@ func (g *Gateway) Apply(d catalog.Delta) {
 }
 
 func (g *Gateway) applyLocked(d catalog.Delta) {
-	if len(d.Removed) > 0 {
-		g.server.RemoveTools(d.Removed...)
-		for _, n := range d.Removed {
-			delete(g.quarantined, n)
-			delete(g.unapproved, n)
+	live := g.catalog.Snapshot()
+	for _, n := range d.Removed {
+		if _, back := live.Lookup(n); back {
+			continue
 		}
+		g.server.RemoveTools(n)
+		delete(g.quarantined, n)
+		delete(g.unapproved, n)
 	}
 	for i := range d.Upserted {
-		t := &d.Upserted[i]
+		current, ok := live.Lookup(d.Upserted[i].Name)
+		if !ok {
+			continue
+		}
+		t := &current
 		if g.pinHides(t) {
 			g.server.RemoveTools(t.Name)
 			delete(g.quarantined, t.Name)
