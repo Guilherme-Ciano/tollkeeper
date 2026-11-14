@@ -52,7 +52,13 @@ func newPinFixture(t *testing.T, mode pin.Mode) *pinFixture {
 	if err != nil {
 		t.Fatal(err)
 	}
-	f := &pinFixture{cat: catalog.New(10), guard: guard, caller: &countingCaller{}, m: telemetry.NewMetrics(), lock: lock}
+	f := &pinFixture{
+		cat:    catalog.New(10),
+		guard:  guard,
+		caller: &countingCaller{},
+		m:      telemetry.NewMetrics(),
+		lock:   lock,
+	}
 	f.gw = New(Deps{
 		Config: cfg, Policy: pol, Limiter: lim, Catalog: f.cat, Upstreams: map[string]Caller{"up": f.caller},
 		Metrics: f.m, Tracer: noop.NewTracerProvider().Tracer("t"), Propagator: propagation.TraceContext{},
@@ -100,9 +106,13 @@ func (f *pinFixture) approve(t *testing.T, tool catalog.Tool) {
 	f.gw.Reevaluate()
 }
 
-func (f *pinFixture) call(t *testing.T) (int, string) {
+func (f *pinFixture) call(t *testing.T) (status int, body string) {
 	t.Helper()
-	return send(t, f.srv.URL+"/mcp", `{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"up__t","arguments":{}}}`)
+	return send(
+		t,
+		f.srv.URL+"/mcp",
+		`{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"up__t","arguments":{}}}`,
+	)
 }
 
 func TestEnforcedPinBlocksUntilApproved(t *testing.T) {

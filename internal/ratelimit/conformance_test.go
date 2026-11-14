@@ -62,6 +62,7 @@ func allow(ctx context.Context, b Backend, key string, lim Limit) Result {
 }
 
 func runConformance(t *testing.T, factory backendFactory) {
+	t.Helper()
 	t.Run("burst then deny with exact retry", func(t *testing.T) {
 		clk := newClock()
 		b := factory(t, clk)
@@ -168,7 +169,10 @@ func TestRedisBackendFallback(t *testing.T) {
 	t.Cleanup(func() { dead.Close() })
 	lim := NewLimit("r", 1, time.Hour, 1)
 	var failures atomic.Int64
-	local := NewRedis(dead, RedisOptions{Now: clk.Now, Timeout: 100 * time.Millisecond, Failed: func(error) { failures.Add(1) }})
+	local := NewRedis(
+		dead,
+		RedisOptions{Now: clk.Now, Timeout: 100 * time.Millisecond, Failed: func(error) { failures.Add(1) }},
+	)
 	if !allow(t.Context(), local, "k", lim).Allowed {
 		t.Fatal("local fallback denied the first request")
 	}

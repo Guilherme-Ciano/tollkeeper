@@ -19,7 +19,11 @@ func TestParseProfile(t *testing.T) {
 		{name: "empty profile", in: "mode: atomic\n", want: 0},
 		{name: "all covered", in: "mode: atomic\na.go:1.1,2.2 3 1\na.go:3.1,4.2 1 5\n", want: 100},
 		{name: "half covered", in: "mode: set\na.go:1.1,2.2 2 1\nb.go:1.1,2.2 2 0\n", want: 50},
-		{name: "duplicate block counts once and any hit wins", in: "mode: atomic\na.go:1.1,2.2 4 0\na.go:1.1,2.2 4 2\nb.go:1.1,2.2 4 0\n", want: 50},
+		{
+			name: "duplicate block counts once and any hit wins",
+			in:   "mode: atomic\na.go:1.1,2.2 4 0\na.go:1.1,2.2 4 2\nb.go:1.1,2.2 4 0\n",
+			want: 50,
+		},
 		{name: "missing field", in: "mode: atomic\na.go:1.1,2.2 4\n", wantErr: errMalformed},
 		{name: "non numeric count", in: "mode: atomic\na.go:1.1,2.2 4 x\n", wantErr: errMalformed},
 	}
@@ -60,7 +64,14 @@ func TestRender(t *testing.T) {
 
 func TestColorFor(t *testing.T) {
 	t.Parallel()
-	cases := map[float64]string{95: "brightgreen", 80: "brightgreen", 75: "green", 65: "yellowgreen", 55: "yellow", 10: "orange"}
+	cases := map[float64]string{
+		95: "brightgreen",
+		80: "brightgreen",
+		75: "green",
+		65: "yellowgreen",
+		55: "yellow",
+		10: "orange",
+	}
 	for pct, want := range cases {
 		if got := colorFor(pct); got != want {
 			t.Errorf("colorFor(%v) = %q, want %q", pct, got, want)

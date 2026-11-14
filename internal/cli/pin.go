@@ -86,7 +86,8 @@ func printStatus(w io.Writer, r pin.Report) (int, error) {
 	if _, err := fmt.Fprintf(tw, "STATUS\tTOOL\tUPSTREAM\tPIN\n"); err != nil {
 		return 0, fmt.Errorf("write output: %w", err)
 	}
-	for _, t := range r.Tools {
+	for i := range r.Tools {
+		t := &r.Tools[i]
 		if t.Status != pin.StatusApproved {
 			pending++
 		}
@@ -144,31 +145,13 @@ func approve(w io.Writer, r pin.Report, opts approveOptions) error {
 	if err != nil {
 		return err
 	}
-	byName := make(map[string]pin.ToolReport, len(r.Tools))
-	for _, t := range r.Tools {
-		byName[t.Name] = t
-	}
-	var selected []pin.ToolReport
-	switch {
-	case len(opts.tools) > 0:
-		for _, name := range opts.tools {
-			t, ok := byName[name]
-			if !ok {
-				return fmt.Errorf("%w: %s", ErrUnknownPin, name)
-			}
-			selected = append(selected, t)
-		}
-	case opts.all:
-		for _, t := range r.Tools {
-			if t.Status != pin.StatusApproved {
-				selected = append(selected, t)
-			}
-		}
-	default:
-		return ErrNoSelection
+	selected, err := selectTools(r, opts)
+	if err != nil {
+		return err
 	}
 	approved := 0
-	for _, t := range selected {
+	for i := range selected {
+		t := &selected[i]
 		if lock.Status(t.Tool()) == pin.StatusApproved {
 			continue
 		}
@@ -180,12 +163,7 @@ func approve(w io.Writer, r pin.Report, opts approveOptions) error {
 	}
 	pruned := 0
 	if opts.prune {
-		for _, name := range lock.Names() {
-			if _, ok := byName[name]; !ok {
-				delete(lock.Tools, name)
-				pruned++
-			}
-		}
+		pruned = pruneMissing(lock, r)
 	}
 	if approved == 0 && pruned == 0 {
 		return printf(w, "nothing to approve\n")
@@ -196,7 +174,50 @@ func approve(w io.Writer, r pin.Report, opts approveOptions) error {
 	return printf(w, "approved %d, pruned %d, wrote %s\n", approved, pruned, opts.file)
 }
 
-func printChange(w io.Writer, t pin.ToolReport, lock pin.Lockfile) error {
+func selectTools(r pin.Report, opts approveOptions) ([]pin.ToolReport, error) {
+	if len(opts.tools) > 0 {
+		byName := make(map[string]int, len(r.Tools))
+		for i := range r.Tools {
+			byName[r.Tools[i].Name] = i
+		}
+		out := make([]pin.ToolReport, 0, len(opts.tools))
+		for _, name := range opts.tools {
+			i, ok := byName[name]
+			if !ok {
+				return nil, fmt.Errorf("%w: %s", ErrUnknownPin, name)
+			}
+			out = append(out, r.Tools[i])
+		}
+		return out, nil
+	}
+	if !opts.all {
+		return nil, ErrNoSelection
+	}
+	var out []pin.ToolReport
+	for i := range r.Tools {
+		if r.Tools[i].Status != pin.StatusApproved {
+			out = append(out, r.Tools[i])
+		}
+	}
+	return out, nil
+}
+
+func pruneMissing(lock pin.Lockfile, r pin.Report) int {
+	present := make(map[string]bool, len(r.Tools))
+	for i := range r.Tools {
+		present[r.Tools[i].Name] = true
+	}
+	pruned := 0
+	for _, name := range lock.Names() {
+		if !present[name] {
+			delete(lock.Tools, name)
+			pruned++
+		}
+	}
+	return pruned
+}
+
+func printChange(w io.Writer, t *pin.ToolReport, lock pin.Lockfile) error {
 	status := lock.Status(t.Tool())
 	if err := printf(w, "%s %s (upstream %s)\n", status, t.Name, t.Upstream); err != nil {
 		return err

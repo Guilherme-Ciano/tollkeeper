@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
+	"maps"
 	"os"
 	"path/filepath"
 	"sort"
@@ -76,9 +77,7 @@ func (l Lockfile) Status(t catalog.Tool) Status {
 
 func (l Lockfile) Approve(t catalog.Tool, by string, at time.Time) Lockfile {
 	next := Lockfile{Version: lockfileVersion, Tools: make(map[string]Entry, len(l.Tools)+1)}
-	for k, v := range l.Tools {
-		next.Tools[k] = v
-	}
+	maps.Copy(next.Tools, l.Tools)
 	next.Tools[t.Name] = Entry{
 		Upstream:    t.Upstream,
 		Pin:         t.Pin,

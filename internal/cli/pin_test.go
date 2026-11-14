@@ -16,7 +16,13 @@ import (
 )
 
 func reportTool(name, pinHash, desc string) catalog.Tool {
-	return catalog.Tool{Name: name, Upstream: "notes", Pin: pinHash, Description: desc, Descriptor: json.RawMessage(`{}`)}
+	return catalog.Tool{
+		Name:        name,
+		Upstream:    "notes",
+		Pin:         pinHash,
+		Description: desc,
+		Descriptor:  json.RawMessage(`{}`),
+	}
 }
 
 func adminServer(t *testing.T, r pin.Report) string {
@@ -101,7 +107,19 @@ func TestPinApproveSelectedAndPrune(t *testing.T) {
 	if _, ok := got.Tools["notes__gone"]; ok {
 		t.Fatal("prune kept a tool missing from the catalog")
 	}
-	if _, err := runRoot(t, "pin", "approve", "--admin", url, "--file", file, "notes__missing"); !errors.Is(err, ErrUnknownPin) {
+	if _, err := runRoot(
+		t,
+		"pin",
+		"approve",
+		"--admin",
+		url,
+		"--file",
+		file,
+		"notes__missing",
+	); !errors.Is(
+		err,
+		ErrUnknownPin,
+	) {
 		t.Fatalf("unknown tool: %v", err)
 	}
 	if _, err := runRoot(t, "pin", "approve", "--admin", url, "--file", file); !errors.Is(err, ErrNoSelection) {
@@ -111,7 +129,10 @@ func TestPinApproveSelectedAndPrune(t *testing.T) {
 
 func TestPinStatusCheckFailsOnPending(t *testing.T) {
 	t.Parallel()
-	url := adminServer(t, pin.BuildReport(pin.ModeEnforce, pin.Empty(), []catalog.Tool{reportTool("notes__a", "1", "A")}))
+	url := adminServer(
+		t,
+		pin.BuildReport(pin.ModeEnforce, pin.Empty(), []catalog.Tool{reportTool("notes__a", "1", "A")}),
+	)
 	out, err := runRoot(t, "pin", "status", "--admin", url, "--check")
 	if !errors.Is(err, ErrPinsPending) {
 		t.Fatalf("check: %v", err)

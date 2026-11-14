@@ -40,9 +40,8 @@ return {1, bestIdx, best, nexts[bestIdx] - now}
 `
 
 var (
-	ErrBackend  = errors.New("rate limit backend unavailable")
-	errReply    = errors.New("unexpected rate limit script reply")
-	gcraProgram = redis.NewScript(gcraScript)
+	ErrBackend = errors.New("rate limit backend unavailable")
+	errReply   = errors.New("unexpected rate limit script reply")
 )
 
 type OnBackendError int
@@ -63,6 +62,7 @@ type RedisOptions struct {
 
 type Redis struct {
 	client redis.Scripter
+	script *redis.Script
 	opts   RedisOptions
 }
 
@@ -73,7 +73,7 @@ func NewRedis(client redis.Scripter, opts RedisOptions) *Redis {
 	if opts.OnError == FallbackLocal && opts.Local == nil {
 		opts.Local = NewStore(opts.Now)
 	}
-	return &Redis{client: client, opts: opts}
+	return &Redis{client: client, script: redis.NewScript(gcraScript), opts: opts}
 }
 
 func micros(d time.Duration) int64 {
@@ -112,7 +112,7 @@ func (r *Redis) eval(ctx context.Context, reqs []Request) (Result, error) {
 		interval := micros(q.Limit.Interval)
 		args = append(args, interval, interval*int64(q.Limit.Burst))
 	}
-	raw, err := gcraProgram.Run(ctx, r.client, keys, args...).Int64Slice()
+	raw, err := r.script.Run(ctx, r.client, keys, args...).Int64Slice()
 	if err != nil {
 		return Result{}, fmt.Errorf("%w: %w", ErrBackend, err)
 	}
