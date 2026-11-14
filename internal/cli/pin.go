@@ -141,7 +141,7 @@ func pinApproveCmd() *cobra.Command {
 }
 
 func approve(w io.Writer, r pin.Report, opts approveOptions) error {
-	lock, err := pin.Read(opts.file)
+	lock, version, err := pin.ReadVersioned(opts.file)
 	if err != nil {
 		return err
 	}
@@ -168,8 +168,8 @@ func approve(w io.Writer, r pin.Report, opts approveOptions) error {
 	if approved == 0 && pruned == 0 {
 		return printf(w, "nothing to approve\n")
 	}
-	if err := pin.Write(opts.file, lock); err != nil {
-		return err
+	if err := pin.WriteIfUnchanged(opts.file, lock, version); err != nil {
+		return fmt.Errorf("%w; run pin approve again", err)
 	}
 	return printf(w, "approved %d, pruned %d, wrote %s\n", approved, pruned, opts.file)
 }

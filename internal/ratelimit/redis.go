@@ -77,7 +77,7 @@ func NewRedis(client redis.Scripter, opts RedisOptions) *Redis {
 }
 
 func micros(d time.Duration) int64 {
-	return max(int64(d/time.Microsecond), 1)
+	return max((int64(d)+int64(time.Microsecond)-1)/int64(time.Microsecond), 1)
 }
 
 func (r *Redis) Allow(ctx context.Context, reqs []Request) Result {

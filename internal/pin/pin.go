@@ -10,6 +10,7 @@ import (
 	"maps"
 	"os"
 	"path/filepath"
+	"runtime"
 	"sort"
 	"sync"
 	"sync/atomic"
@@ -41,8 +42,9 @@ const (
 )
 
 var (
-	ErrVersion = errors.New("unsupported pin lockfile version")
-	ErrEntry   = errors.New("invalid pin lockfile entry")
+	ErrVersion    = errors.New("unsupported pin lockfile version")
+	ErrEntry      = errors.New("invalid pin lockfile entry")
+	ErrConcurrent = errors.New("pin lockfile changed since it was read")
 )
 
 type Entry struct {
@@ -120,14 +122,31 @@ func Parse(data []byte) (Lockfile, error) {
 }
 
 func Read(path string) (Lockfile, error) {
+	l, _, err := ReadVersioned(path)
+	return l, err
+}
+
+func ReadVersioned(path string) (Lockfile, [sha256.Size]byte, error) {
 	data, err := os.ReadFile(path)
 	if errors.Is(err, fs.ErrNotExist) {
-		return Empty(), nil
+		return Empty(), sha256.Sum256(nil), nil
 	}
 	if err != nil {
-		return Lockfile{}, fmt.Errorf("read pin lockfile: %w", err)
+		return Lockfile{}, [sha256.Size]byte{}, fmt.Errorf("read pin lockfile: %w", err)
 	}
-	return Parse(data)
+	l, err := Parse(data)
+	return l, sha256.Sum256(data), err
+}
+
+func WriteIfUnchanged(path string, l Lockfile, read [sha256.Size]byte) error {
+	_, current, err := ReadVersioned(path)
+	if err != nil && !errors.Is(err, ErrVersion) && !errors.Is(err, ErrEntry) {
+		return err
+	}
+	if current != read {
+		return ErrConcurrent
+	}
+	return Write(path, l)
 }
 
 func Encode(l Lockfile) ([]byte, error) {
@@ -171,6 +190,18 @@ func Write(path string, l Lockfile) error {
 	if err := os.Rename(name, path); err != nil {
 		return fmt.Errorf("replace pin lockfile: %w", err)
 	}
+	return syncDir(filepath.Dir(path))
+}
+
+func syncDir(dir string) error {
+	d, err := os.Open(dir)
+	if err != nil {
+		return fmt.Errorf("sync pin lockfile directory: %w", err)
+	}
+	defer d.Close()
+	if err := d.Sync(); err != nil && runtime.GOOS != "windows" {
+		return fmt.Errorf("sync pin lockfile directory: %w", err)
+	}
 	return nil
 }
 
@@ -200,7 +231,9 @@ func (g *Guard) Mode() Mode {
 }
 
 func (g *Guard) Lockfile() Lockfile {
-	return *g.lock.Load()
+	l := *g.lock.Load()
+	l.Tools = maps.Clone(l.Tools)
+	return l
 }
 
 func (g *Guard) Status(t catalog.Tool) Status {
