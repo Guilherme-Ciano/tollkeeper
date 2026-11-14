@@ -214,3 +214,13 @@ func BenchmarkParseEnvelope(b *testing.B) {
 		}
 	}
 }
+
+func TestEnvelopeRejectsControlCharsInToolName(t *testing.T) {
+	t.Parallel()
+	for _, name := range []string{`x\u0000`, `notes__search\u001b[2K`, `a\nb`} {
+		body := `{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"` + name + `","arguments":{}}}`
+		if _, err := ParseEnvelope([]byte(body)); !errors.Is(err, ErrEnvelope) {
+			t.Errorf("name %s: err = %v, want ErrEnvelope", name, err)
+		}
+	}
+}

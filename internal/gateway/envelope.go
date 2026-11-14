@@ -268,6 +268,9 @@ func (e *Envelope) readParams(p map[string]json.RawMessage) error {
 	if err != nil {
 		return err
 	}
+	if strings.ContainsFunc(e.Name, unicode.IsControl) {
+		return fmt.Errorf("%w: control character in name", ErrEnvelope)
+	}
 	if a, ok := p["arguments"]; ok && !isNull(a) {
 		t := bytes.TrimSpace(a)
 		if t[0] != '{' {
