@@ -221,7 +221,7 @@ func Defaults() Config {
 			Fsync:          true,
 			RecordArgs:     RecordArgsHash,
 			Checkpoint:     Checkpoint{Every: 1000, Interval: 30 * time.Second},
-			Postgres:       AuditPostgres{Timeout: 5 * time.Second, Migrate: true},
+			Postgres:       AuditPostgres{Timeout: 5 * time.Second},
 		},
 		Pinning: Pinning{Mode: PinModeWarn, ReloadInterval: 5 * time.Second},
 		Telemetry: Telemetry{

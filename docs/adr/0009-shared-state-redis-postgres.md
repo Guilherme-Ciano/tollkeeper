@@ -20,12 +20,16 @@ v0.1 kept all state per replica: GCRA cells in memory and the audit chain in a l
 
 ### Audit
 
-- The JSONL file stays the primary log. `audit.postgres.dsn` adds a **mirror**: each batch is staged in a Postgres transaction (`COPY`), then written and fsynced to the file, then committed. If any step fails, both sides are rolled back, and the existing `fail_closed` behaviour applies.
-- On startup the gateway backfills rows the mirror is missing (a crash between fsync and commit) and refuses to start if Postgres holds records the file does not, since that means the file was truncated or replaced.
-- The table defends itself:
+- The JSONL file stays the primary log. `audit.postgres.dsn` adds a **mirror**: each batch is staged in a Postgres transaction (`COPY`), then written and fsynced to the file, then committed.
+  - If staging or the file write fails, nothing is kept on either side and the existing `fail_closed` behaviour applies.
+  - Once the file is fsynced it is final. A failed `COMMIT` is ambiguous (the server may have committed before the connection dropped), so the gateway never truncates the file at that point. It marks the mirror as behind and, before the next batch, reads the mirror's last sequence number and hash and backfills what is missing from the file.
+- On startup the same reconciliation runs. The gateway refuses to start if Postgres holds records the file does not, or a different record at the same sequence number, since either means the file or the table was altered.
+- The table defends itself against accidents and against roles that hold only `INSERT`:
   - `BEFORE UPDATE OR DELETE` and `BEFORE TRUNCATE` triggers reject every change.
-  - A `BEFORE INSERT` trigger recomputes `sha256(prev || raw)` in SQL and requires the row to link to the previous record of its chain, so even a role with `INSERT` cannot append a forged or out-of-order record.
-- The exact bytes are stored in `raw`, next to a `jsonb` copy for queries. `tollkeeper audit verify --postgres` exports `raw` and runs the same verifier used for files.
+  - A `BEFORE INSERT` trigger recomputes `sha256(prev || raw)` in SQL, requires the row to link to the previous record of its chain, and requires `chain_id`, `seq`, `prev` and `kind` to equal the values inside `raw`. It runs with a pinned `search_path` and looks the predecessor up in its own schema, so a temporary table cannot satisfy the check.
+  - `body` is derived from `raw` by the trigger, so queries can never see content that differs from what is verified. A record `jsonb` cannot represent (for example one containing `\u0000`) is stored with a `NULL` body instead of failing the batch.
+- The hash chain is not a signature. A role that can insert can still append well-formed records at the head of a chain; only the Ed25519 checkpoints and a small `--max-unsigned` detect that. The gateway therefore runs with `audit.postgres.migrate: false` by default and logs every excess privilege its role holds.
+- The exact bytes are stored in `raw`. `tollkeeper audit verify --postgres` exports `raw` and runs the same verifier used for files, and fails on an empty chain.
 
 ## Alternatives considered
 
@@ -38,4 +42,6 @@ v0.1 kept all state per replica: GCRA cells in memory and the audit chain in a l
 
 - A tool call now waits for one Postgres transaction per audit batch, not per call; batching keeps the overhead to the flush interval.
 - The database owner can still drop the triggers. The model assumes the gateway connects as a role that only has `INSERT` and `SELECT` (see [docs/operations/postgres.md](../operations/postgres.md)), and external anchoring of checkpoints (v1.0) is the answer to a malicious DBA.
-- Redis Cluster requires all keys of one call in the same slot. Setting `key_prefix` to a hash tag such as `{tollkeeper}:` does that, at the cost of concentrating rate limit traffic on one shard.
+- A foreign writer that appends at the head of a chain makes the gateway's next batch conflict, which fails closed. That is a denial of service by someone who already holds write access to the audit database, and it is visible in `mcpgw_audit_sink_errors_total`.
+- Redis Cluster requires all keys of one call in the same slot. Validation refuses several addresses unless `key_prefix` carries a hash tag such as `{tollkeeper}:`, which concentrates rate limit traffic on one shard.
+- The scripts use `TIME` before writing, which needs Redis 7 or later (or Valkey).

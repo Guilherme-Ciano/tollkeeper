@@ -92,6 +92,15 @@ func (c *Config) Validate() error {
 	return errors.Join(v.errs...)
 }
 
+func hashTagged(prefix string) bool {
+	open := strings.IndexByte(prefix, '{')
+	if open < 0 {
+		return false
+	}
+	end := strings.IndexByte(prefix[open+1:], '}')
+	return end > 0
+}
+
 func (c *Config) validatePinning(v *validator) {
 	v.oneOf("pinning.mode", c.Pinning.Mode, PinModeOff, PinModeWarn, PinModeEnforce)
 	if c.Pinning.Mode == PinModeEnforce && c.Pinning.File == "" {
@@ -279,6 +288,11 @@ func (c *Config) validateRateLimits(v *validator) {
 			v.add("rate_limits.redis.addrs", "required when rate_limits.store is redis")
 		}
 		v.oneOf("rate_limits.redis.on_error", r.OnError, RedisOnErrorLocal, RedisOnErrorDeny)
+		if len(r.Addrs) > 1 && !hashTagged(r.KeyPrefix) {
+			v.add("rate_limits.redis.key_prefix",
+				"must contain a hash tag such as {tollkeeper}: when several addresses select Redis Cluster, "+
+					"so all keys of one call share a slot")
+		}
 		if r.Timeout <= 0 || r.Timeout > 5*time.Second {
 			v.add("rate_limits.redis.timeout", "must be within (0, 5s]")
 		}
@@ -307,6 +321,12 @@ func (c *Config) validateAudit(v *validator) {
 	}
 	if c.Audit.Postgres.DSN != "" && (c.Audit.Postgres.Timeout <= 0 || c.Audit.Postgres.Timeout > time.Minute) {
 		v.add("audit.postgres.timeout", "must be within (0, 1m]")
+	}
+	if c.Audit.Postgres.DSN != "" && c.Audit.ChainID == "" {
+		v.add("audit.chain_id", "required and unique per replica when audit.postgres.dsn is set, e.g. ${POD_NAME}")
+	}
+	if c.Audit.Postgres.DSN != "" && !c.Audit.Fsync {
+		v.add("audit.fsync", "must be true when audit.postgres.dsn is set, or a crash leaves Postgres ahead of the file")
 	}
 	v.require("audit.path", c.Audit.Path)
 	v.oneOf("audit.on_backpressure", c.Audit.OnBackpressure, BackpressureFailClosed, BackpressureFailOpen)

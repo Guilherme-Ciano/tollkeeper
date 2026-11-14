@@ -226,6 +226,18 @@ func (a *App) openAudit(ctx context.Context) error {
 			return err
 		}
 		a.auditPG = sink
+		if err := sink.RequireSchema(ctx); err != nil {
+			return err
+		}
+		privs, err := sink.ExcessPrivileges(ctx)
+		if err != nil {
+			return err
+		}
+		if len(privs) > 0 {
+			a.log.WarnContext(ctx,
+				"the audit database role can modify or disable the audit table; grant it only INSERT and SELECT",
+				slog.Any("excess_privileges", privs))
+		}
 		opts.Mirror = sink
 		opts.MirrorTimeout = a.cfg.Audit.Postgres.Timeout
 	}

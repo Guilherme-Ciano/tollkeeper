@@ -120,6 +120,10 @@ func TestValidateReportsEveryField(t *testing.T) {
 	cfg.RateLimits.Rules = []RateRule{{Name: "x", Per: "galaxy", Rate: "10/fortnight"}}
 	cfg.Server.NamespaceTools = false
 	cfg.Pinning.Mode = PinModeEnforce
+	cfg.RateLimits.Store = RateStoreRedis
+	cfg.RateLimits.Redis.Addrs = []string{"a:6379", "b:6379"}
+	cfg.Audit.Postgres.DSN = "postgres://x"
+	cfg.Audit.Fsync = false
 	err := cfg.Validate()
 	if !errors.Is(err, ErrInvalid) {
 		t.Fatalf("expected ErrInvalid, got %v", err)
@@ -130,6 +134,7 @@ func TestValidateReportsEveryField(t *testing.T) {
 		"upstreams[2].url", "upstreams[2].auth.token", "policy.rules[0].tools[0]", "policy.rules[0].effect",
 		"policy.rules[1].name", "policy.rules[1].tools", "rate_limits.rules[0].per", "rate_limits.rules[0].rate",
 		"rate_limits.rules[0].burst", "server.namespace_tools", "pinning.file",
+		"rate_limits.redis.key_prefix", "audit.fsync", "audit.chain_id",
 	} {
 		if !strings.Contains(err.Error(), field+":") {
 			t.Errorf("missing error for %s in:\n%v", field, err)

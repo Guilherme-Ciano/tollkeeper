@@ -25,7 +25,9 @@ GRANT SELECT ON tollkeeper.tollkeeper_audit TO tollkeeper_auditor;
 REVOKE UPDATE, DELETE, TRUNCATE ON tollkeeper.tollkeeper_audit FROM PUBLIC, tollkeeper_gateway, tollkeeper_auditor;
 ```
 
-Set `audit.postgres.migrate: false` so the gateway only connects and never runs DDL. The default (`true`) suits development, where the gateway role owns the table: the migration is idempotent and guarded by an advisory lock, so concurrent replicas never race.
+By default (`audit.postgres.migrate: false`) the gateway only connects and never runs DDL; it refuses to start if the table is missing, and logs a warning naming every excess privilege (`UPDATE`, `DELETE`, `TRUNCATE`, `TRIGGER`, ownership) its role holds. `migrate: true` is meant for development, where one role owns everything: the migration is idempotent and guarded by an advisory lock, so concurrent replicas never race.
+
+Each replica needs its own `audit.chain_id` (for example `${POD_NAME}`); validation rejects an empty one when a DSN is set.
 
 Auditors verify a chain without the gateway:
 
