@@ -2,6 +2,7 @@ package app
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -21,6 +22,7 @@ import (
 	"github.com/Guilherme-Ciano/tollkeeper/internal/catalog"
 	"github.com/Guilherme-Ciano/tollkeeper/internal/config"
 	"github.com/Guilherme-Ciano/tollkeeper/internal/gateway"
+	"github.com/Guilherme-Ciano/tollkeeper/internal/pin"
 	"github.com/Guilherme-Ciano/tollkeeper/internal/policy"
 	"github.com/Guilherme-Ciano/tollkeeper/internal/ratelimit"
 	"github.com/Guilherme-Ciano/tollkeeper/internal/telemetry"
@@ -43,6 +45,7 @@ type App struct {
 	catalog   *catalog.Catalog
 	upstreams []*upstream.Upstream
 	gateway   *gateway.Gateway
+	pins      *pin.Guard
 	ready     atomic.Bool
 	synced    map[string]*atomic.Uint64
 	listeners sync.Map
@@ -99,6 +102,18 @@ func Build(ctx context.Context, cfg config.Config, log *slog.Logger, version str
 		}
 		auditor = a.auditLog
 	}
+	var pins gateway.PinGuard
+	if cfg.Pinning.Mode != config.PinModeOff {
+		guard, err := pin.NewGuard(pin.Mode(cfg.Pinning.Mode), cfg.Pinning.File)
+		if err != nil {
+			return nil, err
+		}
+		a.pins, pins = guard, guard
+		log.InfoContext(ctx, "tool pinning enabled",
+			slog.String("mode", cfg.Pinning.Mode),
+			slog.String("file", cfg.Pinning.File),
+			slog.Int("approved", len(guard.Lockfile().Tools)))
+	}
 	naming := catalog.Naming{Separator: cfg.Server.NamespaceSeparator}
 	callers := map[string]gateway.Caller{}
 	hooks := upstream.Hooks{
@@ -135,6 +150,7 @@ func Build(ctx context.Context, cfg config.Config, log *slog.Logger, version str
 		Propagator: tr.Propagator,
 		Log:        log,
 		Version:    version,
+		Pins:       pins,
 	})
 	return a, nil
 }
@@ -203,6 +219,7 @@ func (a *App) adminHandler() http.Handler {
 		mux.HandleFunc("GET /debug/pprof/trace", pprof.Trace)
 		mux.HandleFunc("GET /debug/pprof/symbol", pprof.Symbol)
 	}
+	mux.HandleFunc("GET /pins", a.pinReport)
 	mux.HandleFunc("GET /livez", func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusOK)
 	})
@@ -221,6 +238,41 @@ func (a *App) adminHandler() http.Handler {
 		}
 	})
 	return mux
+}
+
+func (a *App) pinReport(w http.ResponseWriter, r *http.Request) {
+	mode, lock := pin.ModeOff, pin.Empty()
+	if a.pins != nil {
+		mode, lock = a.pins.Mode(), a.pins.Lockfile()
+	}
+	report := pin.BuildReport(mode, lock, a.catalog.Snapshot().Tools())
+	w.Header().Set("Content-Type", "application/json")
+	if err := json.NewEncoder(w).Encode(report); err != nil {
+		a.log.DebugContext(r.Context(), "pin report write failed", slog.String("error", err.Error()))
+	}
+}
+
+func (a *App) pinLoop(ctx context.Context) {
+	t := time.NewTicker(a.cfg.Pinning.ReloadInterval)
+	defer t.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-t.C:
+		}
+		changed, err := a.pins.Reload()
+		if err != nil {
+			a.log.WarnContext(ctx, "pin lockfile reload failed, keeping previous approvals",
+				slog.String("error", err.Error()))
+			continue
+		}
+		if !changed {
+			continue
+		}
+		a.log.InfoContext(ctx, "pin lockfile reloaded", slog.Int("approved", len(a.pins.Lockfile().Tools)))
+		a.gateway.Reevaluate()
+	}
 }
 
 func newServer(ctx context.Context, h http.Handler) *http.Server {
@@ -333,6 +385,9 @@ func (a *App) Run(ctx context.Context) error {
 			a.log.WarnContext(ctx, "initial jwks fetch failed, will retry on demand", slog.String("error", err.Error()))
 		}
 		bg.Go(func() { a.keys.Run(bgCtx, a.cfg.Auth.JWT.JWKSRefresh) })
+	}
+	if a.pins != nil && a.cfg.Pinning.File != "" {
+		bg.Go(func() { a.pinLoop(bgCtx) })
 	}
 	for _, u := range a.upstreams {
 		bg.Go(func() { u.Run(bgCtx) })
