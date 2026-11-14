@@ -205,7 +205,9 @@ func (f *pinFixture) listed(t *testing.T) bool {
 
 func (f *pinFixture) replace(t *testing.T, description string) catalog.Delta {
 	t.Helper()
-	desc, err := json.Marshal(&mcp.Tool{Name: "up__t", Description: description, InputSchema: map[string]any{"type": "object"}})
+	desc, err := json.Marshal(
+		&mcp.Tool{Name: "up__t", Description: description, InputSchema: map[string]any{"type": "object"}},
+	)
 	if err != nil {
 		t.Fatal(err)
 	}

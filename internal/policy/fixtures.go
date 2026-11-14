@@ -60,8 +60,8 @@ func ParseFixtures(r io.Reader) (FixtureFile, error) {
 	return f, nil
 }
 
-func (fx *Fixture) input(sep string) (Input, error) {
-	upstream, original, _ := catalog.Naming{Separator: sep}.Split(fx.Tool)
+func (fx *Fixture) input(naming catalog.Naming) (Input, error) {
+	upstream, original, _ := naming.Split(fx.Tool)
 	in := Input{
 		Principal: identity.Principal{
 			Subject:  fx.Principal.Sub,
@@ -93,11 +93,11 @@ func (fx *Fixture) input(sep string) (Input, error) {
 	return in, nil
 }
 
-func (e *Engine) RunFixtures(ctx context.Context, f FixtureFile, sep string) ([]FixtureResult, error) {
+func (e *Engine) RunFixtures(ctx context.Context, f FixtureFile, naming catalog.Naming) ([]FixtureResult, error) {
 	out := make([]FixtureResult, 0, len(f.Cases))
 	for i := range f.Cases {
 		fx := &f.Cases[i]
-		in, err := fx.input(sep)
+		in, err := fx.input(naming)
 		if err != nil {
 			return nil, err
 		}

@@ -102,6 +102,9 @@ func Build(ctx context.Context, cfg config.Config, log *slog.Logger, version str
 	} else {
 		log.WarnContext(ctx, "authentication disabled: every caller is anonymous")
 	}
+	for _, w := range cfg.Warnings() {
+		log.WarnContext(ctx, "config warning", slog.String("detail", w))
+	}
 	var auditor gateway.Auditor
 	if cfg.Audit.Enabled {
 		if err := a.openAudit(ctx); err != nil {
@@ -116,7 +119,7 @@ func Build(ctx context.Context, cfg config.Config, log *slog.Logger, version str
 	if a.pins != nil {
 		pins = a.pins
 	}
-	naming := catalog.Naming{Separator: cfg.Server.NamespaceSeparator, Bare: !cfg.Server.NamespaceTools}
+	naming := cfg.Naming()
 	callers := map[string]gateway.Caller{}
 	hooks := upstream.Hooks{
 		Up: func(id string, up bool) {

@@ -188,7 +188,7 @@ func TestFixtures(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	res, err := e.RunFixtures(t.Context(), f, "__")
+	res, err := e.RunFixtures(t.Context(), f, catalog.Naming{Separator: "__"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -244,4 +244,27 @@ func BenchmarkDecide(b *testing.B) {
 			e.Decide(b.Context(), x)
 		}
 	})
+}
+
+func TestPolicyFixturesUseConfiguredUpstreamInBareMode(t *testing.T) {
+	t.Parallel()
+	e := engine(t, config.Policy{Default: config.EffectDeny, Rules: []config.Rule{{
+		Name: "notes-only", Tools: []string{"*"}, When: `tool.upstream == "notes"`, Effect: config.EffectAllow,
+	}}})
+	f, err := ParseFixtures(strings.NewReader(`cases:
+  - name: bare name with the separator inside
+    tool: search__all
+    expect: allow
+    rule: notes-only
+`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	res, err := e.RunFixtures(t.Context(), f, catalog.Naming{Separator: "__", Bare: true, Upstream: "notes"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !res[0].Pass {
+		t.Fatalf("fixture saw a different upstream than runtime would: %+v", res[0])
+	}
 }

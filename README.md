@@ -206,7 +206,7 @@ policy:
 | `audit.postgres.dsn` | | Mirror the audit chain to Postgres ([roles and grants](docs/operations/postgres.md)); `audit.postgres.migrate: true` only in development; requires `audit.chain_id` and `audit.fsync` |
 | `audit.record_args` | `hash` | `none`, `hash`, `full` (raw arguments may be personal data) |
 | `audit.on_backpressure` | `fail_closed` | Calls are refused if their intent record cannot be queued |
-| `server.namespace_tools` | `true` | `false` exposes upstream tool names unchanged; only allowed with exactly one upstream, for deployments that front a single server for auth and audit |
+| `server.namespace_tools` | `true` | `false` exposes upstream tool names unchanged; only allowed with exactly one upstream, for deployments that front a single server for auth and audit. Policy and rate-limit globs then match bare names, so `config validate` warns about globs that still contain the separator |
 | `pinning.mode` | `warn` | `off`, `warn` (serve and report unapproved definitions) or `enforce` (hide and refuse them until approved) |
 | `pinning.file` | | Lockfile written by `tollkeeper pin approve`; required for `enforce`, reloaded every `pinning.reload_interval` (5 s); refused if group or world writable |
 | `pinning.report_token` | | Bearer token for `GET /pins`; without it the report is only served on a loopback admin listener |

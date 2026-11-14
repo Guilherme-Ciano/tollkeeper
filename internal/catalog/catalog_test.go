@@ -201,3 +201,19 @@ func TestQualifyBare(t *testing.T) {
 		}
 	}
 }
+
+func TestBareSplitReturnsConfiguredUpstream(t *testing.T) {
+	t.Parallel()
+	n := Naming{Separator: "__", Bare: true, Upstream: "notes"}
+	up, name, ok := n.Split("search__all")
+	if !ok || up != "notes" || name != "search__all" {
+		t.Fatalf("bare split = %q %q %t", up, name, ok)
+	}
+	if _, _, ok := (Naming{Separator: "__", Bare: true}).Split("search"); ok {
+		t.Fatal("bare split without an upstream succeeded")
+	}
+	up, name, ok = Naming{Separator: "__"}.Split("notes__search")
+	if !ok || up != "notes" || name != "search" {
+		t.Fatalf("namespaced split = %q %q %t", up, name, ok)
+	}
+}
