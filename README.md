@@ -27,8 +27,9 @@
 | Authentication | RFC 9728 protected-resource metadata, JWT via JWKS (`iss`, `aud` = canonical URI per RFC 8707, `exp`, algorithm allowlist), RFC 6750 challenges with `error=` and all required scopes |
 | No passthrough | Upstream HTTP clients are built from config only and never see the inbound request; covered by tests |
 | Authorization | First-match rules: static RBAC fast path plus optional CEL `when` over principal, tool annotations, arguments and time; default deny; `tools/list` filtered per caller; step-up challenges (`403 insufficient_scope`) |
-| Rate limiting | GCRA, lock-free CAS on one `int64` per key, per subject / subject+tool / client / upstream / tool / global, all-or-nothing across rules, `429` + `Retry-After` + IETF `RateLimit` headers |
-| Audit | Intent + outcome records, hashed arguments by default (GDPR data minimisation), batched fsync, Ed25519 checkpoints, chain continuity across restarts. `fail_closed` refuses calls when the buffer is full *or* the disk is failing; lost events become signed gap records |
+| Tool pinning | Lockfile of approved tool definitions; `enforce` hides and refuses new or changed tools until `tollkeeper pin approve` (defends against tool poisoning and rug pulls) |
+| Rate limiting | GCRA, lock-free CAS on one `int64` per key, per subject / subject+tool / client / upstream / tool / global, all-or-nothing across rules, `429` + `Retry-After` + IETF `RateLimit` headers. Optional Redis backend shares limits across replicas with one atomic Lua script per call |
+| Audit | Intent + outcome records, hashed arguments by default (GDPR data minimisation), batched fsync, Ed25519 checkpoints, chain continuity across restarts. `fail_closed` refuses calls when the buffer is full *or* the disk is failing; lost events become signed gap records. Optional Postgres mirror, committed in the same step as the file, whose triggers reject changes and recompute every hash |
 | Request hygiene | Strict JSON-RPC envelope parsing that rejects batches and duplicate or Unicode case-folded keys at any depth of `arguments` (closing parser-differential policy bypasses), a 100k-token complexity cap, `Mcp-Method`/`Mcp-Name` header agreement (`-32020`), body cap |
 | Observability | OTel traces with W3C context from headers or `_meta` (SEP-414), Prometheus metrics including `mcpgw_gateway_overhead_seconds` |
 | Dev tooling | Built-in **DEV ONLY** OAuth issuer (client_credentials, authorization_code + PKCE S256, RFC 9207 `iss`), three demo MCP servers, a demo client and a benchmark harness, all in Go |
@@ -155,7 +156,7 @@ FAIL line 9 (seq 10): sequence gap: expected seq 9 after 8 valid records
 | `tollkeeper serve -c config.yaml` | Run the gateway |
 | `tollkeeper config validate -c config.yaml` | Validate config, compile CEL rules and rate limits, report every bad field with its path |
 | `tollkeeper policy test -c config.yaml -f policies_test.yaml` | Table-driven policy fixtures for CI ([example](deploy/compose/policies_test.yaml)) |
-| `tollkeeper audit verify -f audit.jsonl --pubkey audit.pub` | Recompute the chain, check signatures, report the first broken record. Fails when a log has no signed checkpoint or more than `--max-unsigned` (default 1000) records after the last one; `--chain-id` pins the chain; `--no-signatures` checks only the hash chain |
+| `tollkeeper audit verify -f audit.jsonl --pubkey audit.pub` | Recompute the chain, check signatures, report the first broken record. `--postgres DSN --chain-id ID` verifies a chain stored in Postgres instead. Fails when a log has no signed checkpoint or more than `--max-unsigned` (default 1000) records after the last one; `--chain-id` pins the chain; `--no-signatures` checks only the hash chain |
 | `tollkeeper audit keygen -o dir` | Ed25519 checkpoint key pair |
 | `tollkeeper pin status [--check]` | List catalog tools as `approved`, `new` or `changed` against the lockfile; `--check` fails when anything is pending |
 | `tollkeeper pin approve [tool...] \| --all [--prune]` | Print what changed in each tool description, then record the current definitions in the lockfile the gateway reloads |
@@ -197,6 +198,8 @@ policy:
 | `upstreams[].transport` | | `stdio` (explicit env allowlist, process-group kill) or `streamable_http` |
 | `upstreams[].auth.type` | `none` | `bearer` or `client_credentials` with RFC 8707 `resource` |
 | `rate_limits.rules[].per` | | `subject`, `subject_tool`, `client_id`, `upstream`, `tool`, `global` |
+| `rate_limits.store` | `memory` | `redis` shares limits across replicas; set `rate_limits.redis.addrs`, `key_prefix`, `timeout` (50 ms) and `on_error` (`local` fallback or `deny`) |
+| `audit.postgres.dsn` | | Mirror the audit chain to Postgres ([roles and grants](docs/operations/postgres.md)); `audit.postgres.migrate: false` when the gateway role has no DDL rights |
 | `audit.record_args` | `hash` | `none`, `hash`, `full` (raw arguments may be personal data) |
 | `audit.on_backpressure` | `fail_closed` | Calls are refused if their intent record cannot be queued |
 | `server.namespace_tools` | `true` | `false` exposes upstream tool names unchanged; only allowed with exactly one upstream, for deployments that front a single server for auth and audit |
@@ -258,6 +261,8 @@ Reproduce with `make bench` (micro-benchmarks, `-count=10`) and `make bench-e2e`
 | Secret leakage to stdio servers | Subprocesses get an explicit env allowlist, never the gateway's environment (tested) |
 | DoS | Body cap, argument token cap, CEL cost limit and timeout, per-upstream semaphores that fail fast, timeouts and circuit breakers that ignore client-caused errors, rate limits applied before catalog lookups, rate-limited JWKS refetch on unknown `kid`, bounded metric labels, truncated audit fields |
 
+The full STRIDE analysis with trust boundaries is in [docs/threat-model.md](docs/threat-model.md), and every design decision has an [ADR](docs/adr/README.md).
+
 Report vulnerabilities as described in [SECURITY.md](SECURITY.md).
 
 ## Known limitations (v0.1)
@@ -265,7 +270,7 @@ Report vulnerabilities as described in [SECURITY.md](SECURITY.md).
 - **Tools only.** Resources and prompts are not aggregated yet; go-sdk has no dynamic `resources/list` handler ([go-sdk#998](https://github.com/modelcontextprotocol/go-sdk/issues/998)).
 - **Progress notifications are not forwarded**, and if they were, go-sdk may deliver them after the result ([go-sdk#1337](https://github.com/modelcontextprotocol/go-sdk/issues/1337)).
 - **MRTR `requestState` is passed through, not yet sealed**; tool names still route retries, so a client cannot redirect a retry to another upstream by name.
-- **In-memory rate limits only**; limits are per replica. One audit chain per replica (`chain_id`).
+- Rate limits are per replica unless `rate_limits.store: redis` is set. Each replica writes its own audit chain (`chain_id`), also when they share one Postgres table.
 - Upstream results pass through unchanged, including the upstream's `_meta` server info.
 - Records written after the last checkpoint are protected only by the hash chain until the next checkpoint (`checkpoint.every`/`interval`); `audit verify --max-unsigned` bounds how many are accepted. Truncating them is not detectable without external anchoring.
 - `subscriptions/listen` is not offered and `tools.listChanged` is not advertised; clients re-list tools.
@@ -276,9 +281,10 @@ Report vulnerabilities as described in [SECURITY.md](SECURITY.md).
 ## Roadmap
 
 - [x] v0.1: everything above, compose demo, fuzzing, published overhead numbers
-- [x] Tool pinning enforcement with `pin status` and `pin approve`
-- [ ] v0.2: Redis GCRA store with a shared conformance suite, Postgres audit sink with immutable triggers, OTLP log sink, RFC 7662 introspection, sealed MRTR state, progress forwarding, resources/prompts, hot reload
+- [x] Tool pinning enforcement with `pin status` and `pin approve` ([ADR 0007](docs/adr/0007-tool-pinning.md))
 - [x] Official MCP conformance suite in CI, run through the gateway ([conformance/](conformance/README.md))
+- [x] Redis GCRA store with a shared conformance suite, Postgres audit sink with immutable triggers ([ADR 0009](docs/adr/0009-shared-state-redis-postgres.md))
+- [ ] v0.2: OTLP log sink, RFC 7662 introspection, sealed MRTR state, progress forwarding, resources/prompts, hot reload
 - [ ] v1.0: RFC 8693 token exchange to upstreams, DPoP, external checkpoint anchoring, Helm chart
 
 ## Development
