@@ -34,7 +34,7 @@ for i = 1, #KEYS do
   end
 end
 for i = 1, #KEYS do
-  redis.call('SET', KEYS[i], nexts[i], 'PX', math.ceil((nexts[i] - now) / 1000) + 1)
+  redis.call('SET', KEYS[i], string.format('%.0f', nexts[i]), 'PX', math.ceil((nexts[i] - now) / 1000) + 1)
 end
 return {1, bestIdx, best, nexts[bestIdx] - now}
 `

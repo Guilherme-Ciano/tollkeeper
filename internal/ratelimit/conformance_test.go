@@ -206,3 +206,23 @@ func TestRedisUsesServerTimeWithoutClock(t *testing.T) {
 		t.Fatalf("key ttl %v, want within (0, 1h]", ttl)
 	}
 }
+
+func TestRedisStoresExactIntegerTAT(t *testing.T) {
+	t.Parallel()
+	mr := miniredis.RunT(t)
+	client := redis.NewClient(&redis.Options{Addr: mr.Addr()})
+	t.Cleanup(func() { client.Close() })
+	clk := newClock()
+	b := NewRedis(client, RedisOptions{Prefix: "p:", Now: clk.Now, Timeout: time.Second, OnError: FallbackDeny})
+	if !allow(t.Context(), b, "k", NewLimit("r", 3, time.Second, 2)).Allowed {
+		t.Fatal("first request denied")
+	}
+	got, err := mr.Get("p:k")
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := strconv.FormatInt(clk.Now().UnixMicro()+micros(time.Second/3), 10)
+	if got != want {
+		t.Fatalf("stored TAT %q, want the exact integer %q", got, want)
+	}
+}
