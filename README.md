@@ -149,6 +149,10 @@ FAIL line 7 (seq 7): hash mismatch: record content was modified after 6 valid re
 FAIL line 9 (seq 10): sequence gap: expected seq 9 after 8 valid records
 ```
 
+## Using it with popular MCP servers
+
+[examples/configs](examples/configs/README.md) has validated configurations for the [GitHub MCP server](examples/configs/github.yaml) (read-only tools for every agent, scoped writes with step-up, write-specific rate limits, enforced pinning) and the [reference filesystem server](examples/configs/filesystem.yaml) (reads anywhere in a share, writes only under one directory). A test keeps every example valid.
+
 ## CLI
 
 | Command | Purpose |

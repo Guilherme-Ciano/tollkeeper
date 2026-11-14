@@ -1,0 +1,40 @@
+server:
+  listen: "127.0.0.1:8080"
+  admin_listen: "127.0.0.1:9090"
+  public_url: "http://localhost:8080/mcp"
+  namespace_tools: false
+
+auth:
+  mode: none
+
+upstreams:
+  - id: fs
+    transport: stdio
+    command: ["npx", "-y", "@modelcontextprotocol/server-filesystem", "/srv/shared"]
+    env_passthrough: ["PATH", "HOME"]
+    timeout: 15s
+
+policy:
+  default: deny
+  rules:
+    - name: reads-anywhere-in-the-share
+      tools: ["read_text_file", "read_multiple_files", "list_directory", "directory_tree", "search_files", "get_file_info"]
+      effect: allow
+    - name: writes-only-under-drafts
+      tools: ["write_file", "edit_file", "create_directory"]
+      when: 'has(args.path) && args.path.startsWith("/srv/shared/drafts/") && !args.path.contains("..")'
+      effect: allow
+
+rate_limits:
+  rules:
+    - name: local-agent
+      per: global
+      rate: "300/m"
+      burst: 50
+
+audit:
+  path: "./audit.jsonl"
+  record_args: full
+
+pinning:
+  mode: warn

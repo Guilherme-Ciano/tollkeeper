@@ -1,0 +1,64 @@
+server:
+  listen: ":8080"
+  admin_listen: "127.0.0.1:9090"
+  public_url: "https://mcp.example.com/mcp"
+
+auth:
+  mode: jwt
+  resource: "https://mcp.example.com/mcp"
+  authorization_servers: ["https://login.example.com"]
+  scopes_supported: ["mcp:tools", "github:write"]
+  required_scopes: ["mcp:tools"]
+  jwt:
+    issuer: "https://login.example.com"
+    jwks_url: "https://login.example.com/.well-known/jwks.json"
+    audiences: ["https://mcp.example.com/mcp"]
+    algorithms: ["RS256", "ES256"]
+
+upstreams:
+  - id: github
+    transport: stdio
+    command: ["github-mcp-server", "stdio", "--toolsets", "repos,issues,pull_requests"]
+    env:
+      GITHUB_PERSONAL_ACCESS_TOKEN: "${GITHUB_PAT}"
+    timeout: 30s
+    max_concurrency: 16
+
+policy:
+  default: deny
+  rules:
+    - name: read-only-tools-for-every-agent
+      subjects: { scopes_any: ["mcp:tools"] }
+      tools: ["github__*"]
+      when: "tool.annotations.readOnlyHint == true"
+      effect: allow
+    - name: issue-comments-only-on-our-org
+      subjects: { scopes_any: ["github:write"] }
+      tools: ["github__add_issue_comment", "github__create_issue"]
+      when: 'has(args.owner) && args.owner == "example-org"'
+      effect: allow
+      on_deny: { step_up_scopes: ["github:write"] }
+
+rate_limits:
+  rules:
+    - name: per-agent-per-tool
+      tools: ["github__*"]
+      per: subject_tool
+      rate: "60/m"
+      burst: 10
+    - name: writes-are-scarce
+      tools: ["github__create_issue", "github__add_issue_comment"]
+      per: subject
+      rate: "20/h"
+      burst: 2
+
+audit:
+  path: "/var/log/tollkeeper/audit.jsonl"
+  chain_id: "github-gw-1"
+  record_args: hash
+  checkpoint:
+    signing_key_file: "/var/lib/tollkeeper/keys/audit-ed25519.pem"
+
+pinning:
+  mode: enforce
+  file: "/etc/tollkeeper/pins.json"
