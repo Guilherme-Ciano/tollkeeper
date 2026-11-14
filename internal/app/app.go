@@ -114,7 +114,7 @@ func Build(ctx context.Context, cfg config.Config, log *slog.Logger, version str
 			slog.String("file", cfg.Pinning.File),
 			slog.Int("approved", len(guard.Lockfile().Tools)))
 	}
-	naming := catalog.Naming{Separator: cfg.Server.NamespaceSeparator}
+	naming := catalog.Naming{Separator: cfg.Server.NamespaceSeparator, Bare: !cfg.Server.NamespaceTools}
 	callers := map[string]gateway.Caller{}
 	hooks := upstream.Hooks{
 		Up: func(id string, up bool) {

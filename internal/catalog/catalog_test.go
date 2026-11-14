@@ -173,3 +173,24 @@ func TestDescriptorChangeIsUpserted(t *testing.T) {
 		t.Fatalf("descriptor-only change not propagated: %+v %v", d, err)
 	}
 }
+
+func TestQualifyBare(t *testing.T) {
+	t.Parallel()
+	n := Naming{Separator: "__", Bare: true}
+	cases := []struct {
+		name, want string
+		err        bool
+	}{
+		{"test_simple_text", "test_simple_text", false},
+		{"a__b", "a__b", false},
+		{"", "", true},
+		{"bad name", "", true},
+		{strings.Repeat("x", MaxNameLen+1), "", true},
+	}
+	for _, tc := range cases {
+		got, err := n.Qualify("everything", tc.name)
+		if (err != nil) != tc.err || got != tc.want {
+			t.Fatalf("Qualify(%q) = %q, %v", tc.name, got, err)
+		}
+	}
+}

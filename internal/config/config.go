@@ -34,6 +34,7 @@ type Server struct {
 	PublicURL          string        `koanf:"public_url"`
 	MaxBodyBytes       int64         `koanf:"max_body_bytes"`
 	NamespaceSeparator string        `koanf:"namespace_separator"`
+	NamespaceTools     bool          `koanf:"namespace_tools"`
 	ResyncDebounce     time.Duration `koanf:"resync_debounce"`
 	ShutdownDrainDelay time.Duration `koanf:"shutdown_drain_delay"`
 	ShutdownTimeout    time.Duration `koanf:"shutdown_timeout"`
@@ -163,6 +164,7 @@ func Defaults() Config {
 			AdminListen:        "127.0.0.1:9090",
 			MaxBodyBytes:       1 << 20,
 			NamespaceSeparator: "__",
+			NamespaceTools:     true,
 			ResyncDebounce:     250 * time.Millisecond,
 			ShutdownDrainDelay: 0,
 			ShutdownTimeout:    20 * time.Second,

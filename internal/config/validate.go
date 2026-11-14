@@ -81,6 +81,9 @@ func (c *Config) Validate() error {
 	c.validateRateLimits(v)
 	c.validateAudit(v)
 	c.validatePinning(v)
+	if !c.Server.NamespaceTools && len(c.Upstreams) != 1 {
+		v.add("server.namespace_tools", "false is only allowed with exactly one upstream, got %d", len(c.Upstreams))
+	}
 	v.oneOf("telemetry.log_format", c.Telemetry.LogFormat, "json", "text")
 	v.oneOf("telemetry.log_level", c.Telemetry.LogLevel, "debug", "info", "warn", "error")
 	if c.Telemetry.SampleRatio < 0 || c.Telemetry.SampleRatio > 1 {

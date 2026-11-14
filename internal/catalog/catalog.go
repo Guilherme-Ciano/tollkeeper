@@ -42,6 +42,7 @@ type Tool struct {
 
 type Naming struct {
 	Separator string
+	Bare      bool
 }
 
 func validChar(r rune) bool {
@@ -50,7 +51,7 @@ func validChar(r rune) bool {
 }
 
 func (n Naming) Qualify(upstream, name string) (string, error) {
-	if name == "" || strings.Contains(name, n.Separator) {
+	if name == "" || (!n.Bare && strings.Contains(name, n.Separator)) {
 		return "", fmt.Errorf("%w: %q from %s", ErrBadName, name, upstream)
 	}
 	for _, r := range name {
@@ -59,6 +60,9 @@ func (n Naming) Qualify(upstream, name string) (string, error) {
 		}
 	}
 	q := upstream + n.Separator + name
+	if n.Bare {
+		q = name
+	}
 	if len(q) > MaxNameLen {
 		return "", fmt.Errorf("%w: %q exceeds %d characters", ErrBadName, q, MaxNameLen)
 	}

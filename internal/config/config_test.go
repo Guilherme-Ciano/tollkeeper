@@ -118,6 +118,8 @@ func TestValidateReportsEveryField(t *testing.T) {
 	}
 	cfg.Policy.Rules = []Rule{{Name: "r", Tools: []string{"[bad"}, Effect: "maybe"}, {Name: "r"}}
 	cfg.RateLimits.Rules = []RateRule{{Name: "x", Per: "galaxy", Rate: "10/fortnight"}}
+	cfg.Server.NamespaceTools = false
+	cfg.Pinning.Mode = PinModeEnforce
 	err := cfg.Validate()
 	if !errors.Is(err, ErrInvalid) {
 		t.Fatalf("expected ErrInvalid, got %v", err)
@@ -127,7 +129,7 @@ func TestValidateReportsEveryField(t *testing.T) {
 		"upstreams[0].id", "upstreams[0].transport", "upstreams[1].command", "upstreams[1].url", "upstreams[2].id",
 		"upstreams[2].url", "upstreams[2].auth.token", "policy.rules[0].tools[0]", "policy.rules[0].effect",
 		"policy.rules[1].name", "policy.rules[1].tools", "rate_limits.rules[0].per", "rate_limits.rules[0].rate",
-		"rate_limits.rules[0].burst",
+		"rate_limits.rules[0].burst", "server.namespace_tools", "pinning.file",
 	} {
 		if !strings.Contains(err.Error(), field+":") {
 			t.Errorf("missing error for %s in:\n%v", field, err)
