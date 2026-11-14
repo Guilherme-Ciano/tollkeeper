@@ -1,0 +1,30 @@
+name: Bug report
+description: Something does not behave as documented
+labels: [bug]
+body:
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened
+      description: Include the request, the response and the relevant gateway log lines. Remove tokens and personal data.
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: What you expected
+    validations:
+      required: true
+  - type: textarea
+    id: config
+    attributes:
+      label: Configuration
+      description: The relevant parts of your config, with secrets removed.
+      render: yaml
+  - type: input
+    id: version
+    attributes:
+      label: tollkeeper version
+      description: Output of `tollkeeper version`
+    validations:
+      required: true
