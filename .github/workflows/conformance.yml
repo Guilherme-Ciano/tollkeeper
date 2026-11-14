@@ -13,7 +13,7 @@ env:
   GO_SDK_VERSION: "v1.8.0"
 jobs:
   server:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     continue-on-error: ${{ matrix.advisory }}
     strategy:
       fail-fast: false

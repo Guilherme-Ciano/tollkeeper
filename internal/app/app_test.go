@@ -219,8 +219,23 @@ func TestAuditChainVerifies(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	time.Sleep(50 * time.Millisecond)
-	f, err := os.Open(cfg.Audit.Path)
+	var rep audit.Report
+	deadline := time.Now().Add(10 * time.Second)
+	for {
+		rep = verifyAuditFile(t, cfg.Audit.Path)
+		if rep.Events >= 10 || time.Now().After(deadline) {
+			break
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	if rep.Events < 10 {
+		t.Fatalf("expected intent+outcome per call, got %d events", rep.Events)
+	}
+}
+
+func verifyAuditFile(t *testing.T, path string) audit.Report {
+	t.Helper()
+	f, err := os.Open(path)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -229,9 +244,7 @@ func TestAuditChainVerifies(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if rep.Events < 10 {
-		t.Fatalf("expected intent+outcome per call, got %d events", rep.Events)
-	}
+	return rep
 }
 
 func TestRateLimitReturns429(t *testing.T) {

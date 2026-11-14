@@ -45,7 +45,7 @@ func chainID(t *testing.T) string {
 func writeMirrored(t *testing.T, s *Sink, chain string, n int) string {
 	t.Helper()
 	path := filepath.Join(t.TempDir(), "audit.jsonl")
-	_, priv, err := audit.GenerateKeyPair()
+	priv, _, err := audit.GenerateKeyPair()
 	if err != nil {
 		t.Fatal(err)
 	}
