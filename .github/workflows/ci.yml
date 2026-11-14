@@ -56,6 +56,7 @@ jobs:
     permissions: { contents: write }
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with: { persist-credentials: false }
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with: { go-version-file: go.mod }
       - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
@@ -73,7 +74,9 @@ jobs:
           cp "$RUNNER_TEMP/coverage.json" coverage.json
           git add coverage.json
           git diff --cached --quiet || git commit -m "ci: update coverage badge"
-          git push origin badges
+          git push "https://x-access-token:${GITHUB_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" badges
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
   fuzz:
     runs-on: ubuntu-latest
     strategy:
