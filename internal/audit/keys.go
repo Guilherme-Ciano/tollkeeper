@@ -7,7 +7,9 @@ import (
 	"encoding/pem"
 	"errors"
 	"fmt"
+	"io/fs"
 	"os"
+	"runtime"
 )
 
 var (
@@ -17,6 +19,7 @@ var (
 	ErrClosed       = errors.New("audit log closed")
 	ErrSinkFailed   = errors.New("audit sink failing")
 	ErrCorrupt      = errors.New("audit log tail may be inconsistent; writes stopped")
+	ErrKeyExposed   = errors.New("signing key is readable by group or others")
 )
 
 func GenerateKeyPair() (privPEM, pubPEM []byte, err error) {
@@ -69,7 +72,21 @@ func ParsePublicKey(data []byte) (ed25519.PublicKey, error) {
 	return pub, nil
 }
 
+func checkKeyMode(mode fs.FileMode, goos string) error {
+	if goos == "windows" || mode.Perm()&0o077 == 0 {
+		return nil
+	}
+	return fmt.Errorf("%w: mode %#o, want 0600 or stricter", ErrKeyExposed, mode.Perm())
+}
+
 func LoadPrivateKey(path string) (ed25519.PrivateKey, error) {
+	info, err := os.Stat(path)
+	if err != nil {
+		return nil, fmt.Errorf("stat signing key: %w", err)
+	}
+	if err := checkKeyMode(info.Mode(), runtime.GOOS); err != nil {
+		return nil, fmt.Errorf("%s: %w", path, err)
+	}
 	data, err := os.ReadFile(path)
 	if err != nil {
 		return nil, fmt.Errorf("read signing key: %w", err)
