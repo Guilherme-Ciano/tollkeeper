@@ -35,6 +35,8 @@ type Options struct {
 	CheckpointInterval time.Duration
 	Now                func() time.Time
 	Hooks              Hooks
+	Mirror             Mirror
+	MirrorTimeout      time.Duration
 }
 
 type logFile interface {
@@ -65,6 +67,7 @@ type Log struct {
 	lastCkptSeq  uint64
 	lastCkptTime time.Time
 	buf          bytes.Buffer
+	rows         []Row
 }
 
 func Open(opts Options) (*Log, error) {
@@ -79,6 +82,9 @@ func Open(opts Options) (*Log, error) {
 	}
 	if opts.FlushInterval <= 0 {
 		opts.FlushInterval = 50 * time.Millisecond
+	}
+	if opts.MirrorTimeout <= 0 {
+		opts.MirrorTimeout = 5 * time.Second
 	}
 	f, err := os.OpenFile(opts.Path, os.O_RDWR|os.O_CREATE|os.O_APPEND, 0o600)
 	if err != nil {
@@ -95,6 +101,11 @@ func Open(opts Options) (*Log, error) {
 	}
 	if err := l.recover(); err != nil {
 		return nil, errors.Join(err, f.Close())
+	}
+	if opts.Mirror != nil {
+		if err := l.reconcile(); err != nil {
+			return nil, errors.Join(err, f.Close())
+		}
 	}
 	go l.run()
 	return l, nil
@@ -250,7 +261,7 @@ func (l *Log) shutdown(batch []Event) {
 	if l.opts.Signer == nil || l.seq <= l.lastCkptSeq {
 		return
 	}
-	l.buf.Reset()
+	l.resetBatch()
 	if err := l.appendCheckpoint(); err != nil {
 		l.runErr = errors.Join(l.runErr, err)
 		return
@@ -307,6 +318,9 @@ func (l *Log) appendBody(b *Body) error {
 	}
 	l.buf.Write(line)
 	l.buf.WriteByte('\n')
+	if l.opts.Mirror != nil {
+		l.rows = append(l.rows, rowFor(b, rec))
+	}
 	atomic.StoreUint64(&l.seq, b.Seq)
 	l.prev = rec.Hash
 	return nil
@@ -338,7 +352,7 @@ func (l *Log) write(batch []Event) (err error) {
 			l.dropped.Add(d)
 		}
 	}()
-	l.buf.Reset()
+	l.resetBatch()
 	if d > 0 {
 		if err := l.appendBody(
 			&Body{Event: &Event{Phase: PhaseDecision, Method: "audit", Decision: DecisionGap, Dropped: d}},
@@ -370,6 +384,11 @@ func (l *Log) write(batch []Event) (err error) {
 	return nil
 }
 
+func (l *Log) resetBatch() {
+	l.buf.Reset()
+	l.rows = l.rows[:0]
+}
+
 func (l *Log) commit() error {
 	if l.buf.Len() == 0 {
 		return nil
@@ -378,12 +397,35 @@ func (l *Log) commit() error {
 	if err != nil {
 		return fmt.Errorf("stat audit log: %w", err)
 	}
+	var pending Pending
+	ctx, cancel := l.mirrorContext()
+	defer cancel()
+	if l.opts.Mirror != nil {
+		if pending, err = l.opts.Mirror.Prepare(ctx, l.rows); err != nil {
+			return fmt.Errorf("stage audit mirror: %w", err)
+		}
+	}
+	if err := l.writeFile(); err != nil {
+		if pending != nil {
+			pending.Abort(ctx)
+		}
+		return l.undo(info.Size(), err)
+	}
+	if pending != nil {
+		if err := pending.Commit(ctx); err != nil {
+			return l.undo(info.Size(), fmt.Errorf("commit audit mirror: %w", err))
+		}
+	}
+	return nil
+}
+
+func (l *Log) writeFile() error {
 	if _, err := l.file.Write(l.buf.Bytes()); err != nil {
-		return l.undo(info.Size(), fmt.Errorf("write audit batch: %w", err))
+		return fmt.Errorf("write audit batch: %w", err)
 	}
 	if l.opts.Fsync {
 		if err := l.file.Sync(); err != nil {
-			return l.undo(info.Size(), fmt.Errorf("fsync audit log: %w", err))
+			return fmt.Errorf("fsync audit log: %w", err)
 		}
 	}
 	return nil
