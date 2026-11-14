@@ -23,6 +23,24 @@ jobs:
       - run: go run golang.org/x/vuln/cmd/govulncheck@v1.9.0 ./...
   test:
     runs-on: ubuntu-latest
+    services:
+      redis:
+        image: redis:7.4-alpine
+        ports: ["6379:6379"]
+        options: >-
+          --health-cmd "redis-cli ping" --health-interval 2s --health-timeout 2s --health-retries 15
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_USER: tollkeeper
+          POSTGRES_PASSWORD: tollkeeper
+          POSTGRES_DB: tollkeeper
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U tollkeeper" --health-interval 2s --health-timeout 2s --health-retries 15
+    env:
+      TOLLKEEPER_TEST_REDIS_ADDR: 127.0.0.1:6379
+      TOLLKEEPER_TEST_POSTGRES_DSN: postgres://tollkeeper:tollkeeper@127.0.0.1:5432/tollkeeper?sslmode=disable
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
