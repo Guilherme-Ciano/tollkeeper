@@ -12,6 +12,7 @@ type Config struct {
 	RateLimits RateLimits `koanf:"rate_limits"`
 	Audit      Audit      `koanf:"audit"`
 	Telemetry  Telemetry  `koanf:"telemetry"`
+	Digest     string     `koanf:"-"`
 }
 
 type Server struct {

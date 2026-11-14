@@ -1,6 +1,8 @@
 package config
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"os"
@@ -24,7 +26,17 @@ func Load(path string, lookup func(string) (string, bool)) (Config, error) {
 	if err != nil {
 		return Config{}, fmt.Errorf("read config: %w", err)
 	}
-	return Parse(raw, lookup, os.Environ)
+	cfg, err := Parse(raw, lookup, os.Environ)
+	if err != nil {
+		return cfg, err
+	}
+	cfg.Digest = Digest(raw)
+	return cfg, nil
+}
+
+func Digest(raw []byte) string {
+	sum := sha256.Sum256(raw)
+	return hex.EncodeToString(sum[:])
 }
 
 func Parse(raw []byte, lookup func(string) (string, bool), environ func() []string) (Config, error) {

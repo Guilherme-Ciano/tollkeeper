@@ -93,6 +93,7 @@ func serveCmd(info BuildInfo) *cobra.Command {
 			}
 			log := telemetry.NewLogger(cmd.ErrOrStderr(), cfg.Telemetry.LogLevel, cfg.Telemetry.LogFormat)
 			slog.SetDefault(log)
+			log.Info("config loaded", slog.String("path", path), slog.String("sha256", cfg.Digest))
 			if cfg.Audit.RecordArgs == config.RecordArgsFull {
 				log.Warn("audit.record_args=full stores raw tool arguments, which may contain personal data")
 			}
