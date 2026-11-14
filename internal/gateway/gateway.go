@@ -26,6 +26,7 @@ import (
 	"github.com/Guilherme-Ciano/tollkeeper/internal/catalog"
 	"github.com/Guilherme-Ciano/tollkeeper/internal/config"
 	"github.com/Guilherme-Ciano/tollkeeper/internal/identity"
+	"github.com/Guilherme-Ciano/tollkeeper/internal/pin"
 	"github.com/Guilherme-Ciano/tollkeeper/internal/policy"
 	"github.com/Guilherme-Ciano/tollkeeper/internal/ratelimit"
 	"github.com/Guilherme-Ciano/tollkeeper/internal/telemetry"
@@ -59,6 +60,13 @@ type Deps struct {
 	Log        *slog.Logger
 	Version    string
 	Now        func() time.Time
+	Pins       PinGuard
+}
+
+type PinGuard interface {
+	Mode() pin.Mode
+	Status(t catalog.Tool) pin.Status
+	Blocks(t catalog.Tool) bool
 }
 
 type Gateway struct {
@@ -83,8 +91,11 @@ type Gateway struct {
 	prm            *oauthex.ProtectedResourceMetadata
 	prmPath        string
 
+	pins PinGuard
+
 	regMu       sync.Mutex
 	quarantined map[string]string
+	unapproved  map[string]pin.Status
 }
 
 func ResourceMetadataPath(publicURL string) string {
@@ -125,6 +136,8 @@ func New(d Deps) *Gateway {
 		recordArgs:     d.Config.Audit.RecordArgs,
 		cfg:            d.Config,
 		quarantined:    map[string]string{},
+		unapproved:     map[string]pin.Status{},
+		pins:           d.Pins,
 	}
 	if !d.Config.Audit.Enabled {
 		g.recordArgs = config.RecordArgsNone
@@ -222,10 +235,16 @@ func (g *Gateway) Apply(d catalog.Delta) {
 		g.server.RemoveTools(d.Removed...)
 		for _, n := range d.Removed {
 			delete(g.quarantined, n)
+			delete(g.unapproved, n)
 		}
 	}
 	for i := range d.Upserted {
 		t := &d.Upserted[i]
+		if g.pinHides(t) {
+			g.server.RemoveTools(t.Name)
+			delete(g.quarantined, t.Name)
+			continue
+		}
 		if err := g.addTool(t); err != nil {
 			g.quarantined[t.Name] = err.Error()
 			g.server.RemoveTools(t.Name)
@@ -235,7 +254,56 @@ func (g *Gateway) Apply(d catalog.Delta) {
 		}
 		delete(g.quarantined, t.Name)
 	}
-	g.metrics.CatalogTools.Set(float64(g.catalog.Snapshot().Len() - len(g.quarantined)))
+	g.publishCatalogGauges()
+}
+
+func (g *Gateway) pinHides(t *catalog.Tool) bool {
+	if g.pins == nil || g.pins.Mode() == pin.ModeOff {
+		return false
+	}
+	status := g.pins.Status(*t)
+	if status == pin.StatusApproved {
+		delete(g.unapproved, t.Name)
+		return false
+	}
+	if prev, seen := g.unapproved[t.Name]; !seen || prev != status {
+		g.log.Warn("tool definition not approved",
+			slog.String("tool", t.Name),
+			slog.String("status", string(status)),
+			slog.String("pin", t.Pin),
+			slog.String("mode", string(g.pins.Mode())))
+	}
+	g.unapproved[t.Name] = status
+	return g.pins.Blocks(*t)
+}
+
+func (g *Gateway) publishCatalogGauges() {
+	hidden := len(g.quarantined)
+	counts := map[pin.Status]int{pin.StatusNew: 0, pin.StatusChanged: 0}
+	for _, s := range g.unapproved {
+		counts[s]++
+	}
+	if g.pins != nil && g.pins.Mode() == pin.ModeEnforce {
+		hidden += len(g.unapproved)
+	}
+	for s, n := range counts {
+		g.metrics.PinUnapproved.WithLabelValues(string(s)).Set(float64(n))
+	}
+	g.metrics.CatalogTools.Set(float64(g.catalog.Snapshot().Len() - hidden))
+}
+
+func (g *Gateway) Reevaluate() {
+	g.Apply(catalog.Delta{Upserted: g.catalog.Snapshot().Tools()})
+}
+
+func (g *Gateway) Unapproved() map[string]pin.Status {
+	g.regMu.Lock()
+	defer g.regMu.Unlock()
+	return maps.Clone(g.unapproved)
+}
+
+func (g *Gateway) pinBlocked(t catalog.Tool) bool {
+	return g.pins != nil && g.pins.Blocks(t)
 }
 
 func (g *Gateway) Quarantined() map[string]string {

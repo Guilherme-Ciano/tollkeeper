@@ -234,6 +234,12 @@ func (g *Gateway) admitCall(w http.ResponseWriter, r *http.Request, a *Admission
 		writeRPCError(w, http.StatusOK, env.ID, CodePolicyDenied, "denied by policy", nil)
 		return false
 	}
+	if g.pinBlocked(tool) {
+		g.metrics.Requests.WithLabelValues(env.Method, tool.Name, tool.Upstream, "unapproved_tool").Inc()
+		g.recordDecision(ctx, a, audit.DecisionRejected, "", "tool definition not approved")
+		writeRPCError(w, http.StatusOK, env.ID, CodePolicyDenied, "denied by policy", nil)
+		return false
+	}
 	d := g.policy.Decide(ctx, policy.Input{
 		Principal:  a.Principal,
 		Method:     env.Method,

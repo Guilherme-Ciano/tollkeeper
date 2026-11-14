@@ -24,6 +24,7 @@ type Metrics struct {
 	BreakerState    *prometheus.GaugeVec
 	CatalogTools    prometheus.Gauge
 	CatalogRejected *prometheus.CounterVec
+	PinUnapproved   *prometheus.GaugeVec
 }
 
 func latencyBuckets() []float64 {
@@ -100,13 +101,17 @@ func NewMetrics() *Metrics {
 		CatalogRejected: prometheus.NewCounterVec(prometheus.CounterOpts{
 			Name: "mcpgw_catalog_rejected_tools_total", Help: "Upstream tools rejected at registration.",
 		}, []string{labelUpstream}),
+		PinUnapproved: prometheus.NewGaugeVec(prometheus.GaugeOpts{
+			Name: "mcpgw_pin_unapproved_tools",
+			Help: "Catalog tools whose definition is new or differs from the approved pin.",
+		}, []string{"status"}),
 	}
 	reg.MustRegister(
 		collectors.NewGoCollector(),
 		collectors.NewProcessCollector(collectors.ProcessCollectorOpts{}),
 		m.Requests, m.Duration, m.Overhead, m.UpstreamLatency, m.PolicyDecisions, m.RateLimited, m.AuthFailures,
 		m.AuditQueue, m.AuditDropped, m.AuditErrors, m.AuditWritten, m.UpstreamUp, m.BreakerState,
-		m.CatalogTools, m.CatalogRejected,
+		m.CatalogTools, m.CatalogRejected, m.PinUnapproved,
 	)
 	return m
 }
