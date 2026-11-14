@@ -26,6 +26,7 @@ type Pinning struct {
 	Mode           string        `koanf:"mode"`
 	File           string        `koanf:"file"`
 	ReloadInterval time.Duration `koanf:"reload_interval"`
+	ReportToken    string        `koanf:"report_token"`
 }
 
 type Server struct {

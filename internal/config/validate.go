@@ -114,7 +114,7 @@ func (c *Config) validatePinning(v *validator) {
 func (c *Config) validateServer(v *validator) {
 	v.require("server.listen", c.Server.Listen)
 	v.require("server.admin_listen", c.Server.AdminListen)
-	if c.Server.Pprof && !loopback(c.Server.AdminListen) {
+	if c.Server.Pprof && !Loopback(c.Server.AdminListen) {
 		v.add("server.pprof", "only allowed when server.admin_listen is a loopback address")
 	}
 	if c.Server.Listen != "" && c.Server.Listen == c.Server.AdminListen {
@@ -345,7 +345,7 @@ func (c *Config) validateAudit(v *validator) {
 	}
 }
 
-func loopback(addr string) bool {
+func Loopback(addr string) bool {
 	host, _, err := net.SplitHostPort(addr)
 	if err != nil {
 		return false

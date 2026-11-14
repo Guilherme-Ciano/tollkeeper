@@ -2,6 +2,7 @@ package app
 
 import (
 	"context"
+	"crypto/subtle"
 	"crypto/tls"
 	"encoding/json"
 	"errors"
@@ -11,6 +12,7 @@ import (
 	"net/http"
 	"net/http/pprof"
 	"slices"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -114,6 +116,9 @@ func Build(ctx context.Context, cfg config.Config, log *slog.Logger, version str
 			return nil, err
 		}
 		a.pins, pins = guard, guard
+		if cfg.Pinning.ReportToken == "" && !config.Loopback(cfg.Server.AdminListen) {
+			log.WarnContext(ctx, "GET /pins is disabled: the admin listener is not loopback and pinning.report_token is empty")
+		}
 		log.InfoContext(ctx, "tool pinning enabled",
 			slog.String("mode", cfg.Pinning.Mode),
 			slog.String("file", cfg.Pinning.File),
@@ -308,12 +313,24 @@ func (a *App) adminHandler() http.Handler {
 	return mux
 }
 
-func (a *App) pinReport(w http.ResponseWriter, r *http.Request) {
-	mode, lock := pin.ModeOff, pin.Empty()
-	if a.pins != nil {
-		mode, lock = a.pins.Mode(), a.pins.Lockfile()
+func (a *App) pinReportAllowed(r *http.Request) bool {
+	if a.pins == nil {
+		return false
 	}
-	report := pin.BuildReport(mode, lock, a.catalog.Snapshot().Tools())
+	token := a.cfg.Pinning.ReportToken
+	if token == "" {
+		return config.Loopback(a.cfg.Server.AdminListen)
+	}
+	got, ok := strings.CutPrefix(r.Header.Get("Authorization"), "Bearer ")
+	return ok && subtle.ConstantTimeCompare([]byte(got), []byte(token)) == 1
+}
+
+func (a *App) pinReport(w http.ResponseWriter, r *http.Request) {
+	if !a.pinReportAllowed(r) {
+		http.NotFound(w, r)
+		return
+	}
+	report := pin.BuildReport(a.pins.Mode(), a.pins.Lockfile(), a.catalog.Snapshot().Tools())
 	w.Header().Set("Content-Type", "application/json")
 	if err := json.NewEncoder(w).Encode(report); err != nil {
 		a.log.DebugContext(r.Context(), "pin report write failed", slog.String("error", err.Error()))
