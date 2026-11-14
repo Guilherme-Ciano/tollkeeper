@@ -217,7 +217,11 @@ func (a *App) openAudit() error {
 	if dsn := a.cfg.Audit.Postgres.DSN; dsn != "" {
 		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 		defer cancel()
-		sink, err := pgsink.Open(ctx, dsn)
+		connect := pgsink.Connect
+		if a.cfg.Audit.Postgres.Migrate {
+			connect = pgsink.Open
+		}
+		sink, err := connect(ctx, dsn)
 		if err != nil {
 			return err
 		}

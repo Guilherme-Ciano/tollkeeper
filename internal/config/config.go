@@ -168,6 +168,7 @@ type Audit struct {
 type AuditPostgres struct {
 	DSN     string        `koanf:"dsn"`
 	Timeout time.Duration `koanf:"timeout"`
+	Migrate bool          `koanf:"migrate"`
 }
 
 type Checkpoint struct {
@@ -220,7 +221,7 @@ func Defaults() Config {
 			Fsync:          true,
 			RecordArgs:     RecordArgsHash,
 			Checkpoint:     Checkpoint{Every: 1000, Interval: 30 * time.Second},
-			Postgres:       AuditPostgres{Timeout: 5 * time.Second},
+			Postgres:       AuditPostgres{Timeout: 5 * time.Second, Migrate: true},
 		},
 		Pinning: Pinning{Mode: PinModeWarn, ReloadInterval: 5 * time.Second},
 		Telemetry: Telemetry{
