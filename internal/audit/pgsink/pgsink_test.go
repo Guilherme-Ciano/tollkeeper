@@ -120,7 +120,7 @@ func TestDatabaseRejectsTampering(t *testing.T) {
 			t.Errorf("%s was not rejected: %v", name, err)
 		}
 	}
-	last, err := s.LastSeq(t.Context(), chain)
+	last, _, err := s.Last(t.Context(), chain)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -146,8 +146,113 @@ func TestDatabaseRejectsTampering(t *testing.T) {
 func TestLastSeqForUnknownChainIsZero(t *testing.T) {
 	t.Parallel()
 	s := sinkForTest(t)
-	last, err := s.LastSeq(t.Context(), chainID(t))
+	last, _, err := s.Last(t.Context(), chainID(t))
 	if err != nil || last != 0 {
 		t.Fatalf("LastSeq = %d, %v", last, err)
+	}
+}
+
+func TestNulInCallerDataDoesNotPoisonTheBatch(t *testing.T) {
+	t.Parallel()
+	s := sinkForTest(t)
+	chain := chainID(t)
+	path := filepath.Join(t.TempDir(), "audit.jsonl")
+	l, err := audit.Open(audit.Options{
+		Path: path, ChainID: chain, BatchSize: 8, FlushInterval: time.Millisecond,
+		Mirror: s, MirrorTimeout: 5 * time.Second,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range []string{"before", "a\x00b", "after"} {
+		e := audit.Event{Method: "tools/call", ClientName: name, Decision: audit.DecisionAllow}
+		if err := l.Append(t.Context(), e); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := l.Close(); err != nil {
+		t.Fatal(err)
+	}
+	last, _, err := s.Last(t.Context(), chain)
+	if err != nil || last != 3 {
+		t.Fatalf("mirror holds %d records (%v), want 3", last, err)
+	}
+	var nullBodies int
+	err = s.pool.QueryRow(t.Context(),
+		"SELECT count(*) FROM tollkeeper_audit WHERE chain_id = $1 AND body IS NULL", chain).Scan(&nullBodies)
+	if err != nil || nullBodies != 1 {
+		t.Fatalf("rows with unparseable body = %d (%v), want 1", nullBodies, err)
+	}
+}
+
+func TestColumnsMustAgreeWithRaw(t *testing.T) {
+	t.Parallel()
+	s := sinkForTest(t)
+	chain := chainID(t)
+	raw := `{"seq":1,"ts":1,"chain_id":"` + chain + `","prev":"` + audit.ZeroHash + `","event":{}}`
+	hash, err := audit.ChainHash(audit.ZeroHash, []byte(raw))
+	if err != nil {
+		t.Fatal(err)
+	}
+	insert := func(chainCol, kind string) error {
+		_, err := s.pool.Exec(t.Context(),
+			`INSERT INTO tollkeeper_audit (chain_id, seq, ts, kind, hash, prev, raw)
+			 VALUES ($1, 1, now(), $2, $3, $4, $5)`, chainCol, kind, hash, audit.ZeroHash, raw)
+		return err
+	}
+	if err := insert(chain+"-copy", "event"); err == nil {
+		t.Fatal("record replayed under another chain_id was accepted")
+	}
+	if err := insert(chain, "checkpoint"); err == nil {
+		t.Fatal("record with a kind that contradicts raw was accepted")
+	}
+	if err := insert(chain, "event"); err != nil {
+		t.Fatalf("consistent record rejected: %v", err)
+	}
+}
+
+func TestTempTableCannotShadowTheChainCheck(t *testing.T) {
+	t.Parallel()
+	s := sinkForTest(t)
+	chain := chainID(t)
+	conn, err := s.pool.Acquire(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.Release()
+	fakePrev := strings.Repeat("b", 64)
+	if _, err := conn.Exec(t.Context(), `CREATE TEMP TABLE tollkeeper_audit (chain_id text, seq bigint, hash text)`); err != nil {
+		t.Fatal(err)
+	}
+	defer func() {
+		if _, err := conn.Exec(context.WithoutCancel(t.Context()), "DROP TABLE pg_temp.tollkeeper_audit"); err != nil {
+			t.Error(err)
+		}
+	}()
+	if _, err := conn.Exec(t.Context(), `INSERT INTO pg_temp.tollkeeper_audit VALUES ($1, 41, $2)`, chain, fakePrev); err != nil {
+		t.Fatal(err)
+	}
+	raw := `{"seq":42,"ts":1,"chain_id":"` + chain + `","prev":"` + fakePrev + `","event":{}}`
+	hash, err := audit.ChainHash(fakePrev, []byte(raw))
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = conn.Exec(t.Context(),
+		`INSERT INTO public.tollkeeper_audit (chain_id, seq, ts, kind, hash, prev, raw)
+		 VALUES ($1, 42, now(), 'event', $2, $3, $4)`, chain, hash, fakePrev, raw)
+	if err == nil {
+		t.Fatal("a temporary table satisfied the chain link check")
+	}
+}
+
+func TestExcessPrivilegesReportsOwner(t *testing.T) {
+	t.Parallel()
+	s := sinkForTest(t)
+	privs, err := s.ExcessPrivileges(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(privs) == 0 {
+		t.Fatal("the test role owns the table but no excess privilege was reported")
 	}
 }

@@ -106,7 +106,7 @@ func (s *Sink) Prepare(ctx context.Context, rows []audit.Row) (audit.Pending, er
 		if r.Seq > math.MaxInt64 {
 			return nil, fmt.Errorf("%w: %d", errSeqRange, r.Seq)
 		}
-		return []any{r.ChainID, int64(r.Seq), r.TS, r.Kind, r.Hash, r.Prev, string(r.Raw), string(r.Raw)}, nil
+		return []any{r.ChainID, int64(r.Seq), r.TS, r.Kind, r.Hash, r.Prev, nil, string(r.Raw)}, nil
 	})
 	if _, err := tx.CopyFrom(ctx, pgx.Identifier{"tollkeeper_audit"}, columns(), src); err != nil {
 		return nil, errors.Join(fmt.Errorf("copy audit rows: %w", err), rollback(ctx, tx))
@@ -114,17 +114,51 @@ func (s *Sink) Prepare(ctx context.Context, rows []audit.Row) (audit.Pending, er
 	return &pending{tx: tx}, nil
 }
 
-func (s *Sink) LastSeq(ctx context.Context, chainID string) (uint64, error) {
+func (s *Sink) Last(ctx context.Context, chainID string) (seq uint64, hash string, err error) {
 	var last int64
-	err := s.pool.QueryRow(ctx,
-		"SELECT coalesce(max(seq), 0) FROM tollkeeper_audit WHERE chain_id = $1", chainID).Scan(&last)
+	err = s.pool.QueryRow(ctx,
+		"SELECT seq, hash FROM tollkeeper_audit WHERE chain_id = $1 ORDER BY seq DESC LIMIT 1", chainID,
+	).Scan(&last, &hash)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return 0, "", nil
+	}
 	if err != nil {
-		return 0, fmt.Errorf("read audit position: %w", err)
+		return 0, "", fmt.Errorf("read audit position: %w", err)
 	}
 	if last < 0 {
-		return 0, fmt.Errorf("%w: %d", errSeqRange, last)
+		return 0, "", fmt.Errorf("%w: %d", errSeqRange, last)
 	}
-	return uint64(last), nil
+	return uint64(last), hash, nil
+}
+
+var ErrSchemaMissing = errors.New("audit table tollkeeper_audit does not exist")
+
+func (s *Sink) RequireSchema(ctx context.Context) error {
+	var exists bool
+	if err := s.pool.QueryRow(ctx, "SELECT to_regclass('tollkeeper_audit') IS NOT NULL").Scan(&exists); err != nil {
+		return fmt.Errorf("check audit schema: %w", err)
+	}
+	if !exists {
+		return fmt.Errorf("%w: apply internal/audit/pgsink/schema.sql or set audit.postgres.migrate: true", ErrSchemaMissing)
+	}
+	return nil
+}
+
+func (s *Sink) ExcessPrivileges(ctx context.Context) ([]string, error) {
+	rows, err := s.pool.Query(ctx, `
+		SELECT p FROM unnest(ARRAY['UPDATE', 'DELETE', 'TRUNCATE', 'TRIGGER']) AS p
+		WHERE has_table_privilege(current_user, 'tollkeeper_audit', p)
+		UNION ALL
+		SELECT 'OWNER' FROM pg_class
+		WHERE oid = 'tollkeeper_audit'::regclass AND pg_get_userbyid(relowner) = current_user`)
+	if err != nil {
+		return nil, fmt.Errorf("check audit privileges: %w", err)
+	}
+	privs, err := pgx.CollectRows(rows, pgx.RowTo[string])
+	if err != nil {
+		return nil, fmt.Errorf("check audit privileges: %w", err)
+	}
+	return privs, nil
 }
 
 func (s *Sink) Export(ctx context.Context, chainID string, w io.Writer) error {
