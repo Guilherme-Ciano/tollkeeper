@@ -1,6 +1,6 @@
 # Threat model
 
-Scope: tollkeeper v0.1 deployed as a gateway between MCP clients (agents, IDEs, applications) and a set of MCP servers. Method: data-flow diagram with trust boundaries, then STRIDE per element. Each threat lists its mitigation and where it is enforced or tested, so the model can be checked against the code rather than taken on trust.
+Scope: tollkeeper v1.0 deployed as a gateway between MCP clients (agents, IDEs, applications) and a set of MCP servers. Method: data-flow diagram with trust boundaries, then STRIDE per element. Each threat lists its mitigation and where it is enforced or tested, so the model can be checked against the code rather than taken on trust.
 
 ## Assets
 
@@ -101,7 +101,7 @@ Upstreams are **semi-trusted**: the operator chose them, but their tool definiti
 |---|---|---|
 | T | Malicious policy change | Policy lives in version control; `policy test` fixtures run in CI; the SHA-256 of the loaded config file is logged at startup |
 | I | Signing key read from disk | The gateway refuses to load a signing key readable by group or others; distroless non-root image; keys belong in a secret mount |
-| E | Container escape from a stdio server | Out of scope for v0.1; stdio sandboxing (rlimits, Landlock) is on the roadmap |
+| E | Container escape from a stdio server | Out of scope for v1.0; stdio sandboxing (rlimits, Landlock) is on the roadmap |
 
 ## Residual risks
 
