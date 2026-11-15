@@ -264,3 +264,72 @@ func TestExcessPrivilegesReportsOwner(t *testing.T) {
 		t.Fatal("the test role owns the table but no excess privilege was reported")
 	}
 }
+
+func TestMirrorAcceptsAnchorRows(t *testing.T) {
+	t.Parallel()
+	s := sinkForTest(t)
+	if err := s.RequireAnchorKind(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	chain := chainID(t)
+	path := filepath.Join(t.TempDir(), "audit.jsonl")
+	privPEM, _, err := audit.GenerateKeyPair()
+	if err != nil {
+		t.Fatal(err)
+	}
+	key, err := audit.ParsePrivateKey(privPEM)
+	if err != nil {
+		t.Fatal(err)
+	}
+	refs := make(chan audit.CheckpointRef, 8)
+	l, err := audit.Open(audit.Options{
+		Path: path, ChainID: chain, BatchSize: 2, FlushInterval: time.Millisecond, Signer: key, CheckpointEvery: 2,
+		Mirror: s, MirrorTimeout: 5 * time.Second, CheckpointCommitted: func(r audit.CheckpointRef) { refs <- r },
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for range 2 {
+		if err := l.Append(
+			t.Context(),
+			audit.Event{Phase: audit.PhaseOutcome, Method: "m", Decision: "allow"},
+		); err != nil {
+			t.Fatal(err)
+		}
+	}
+	ref := <-refs
+	if err := l.AppendAnchor(ref, &audit.Anchor{
+		CoversSeq: ref.Seq, CoversHash: ref.Hash, KeyID: "k", Log: "log.example", Entry: []byte("{}"),
+		Checkpoint: "log.example\n1\nAAAA\n",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := l.Append(
+		t.Context(),
+		audit.Event{Phase: audit.PhaseOutcome, Method: "m", Decision: "allow"},
+	); err != nil {
+		t.Fatal(err)
+	}
+	if err := l.Close(); err != nil {
+		t.Fatal(err)
+	}
+	var exported bytes.Buffer
+	if err := s.Export(t.Context(), chain, &exported); err != nil {
+		t.Fatal(err)
+	}
+	file, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(file, exported.Bytes()) || !strings.Contains(exported.String(), `"anchor":{`) {
+		t.Fatal("anchor row missing from the postgres mirror")
+	}
+	var kind string
+	if err := s.pool.QueryRow(t.Context(),
+		"SELECT kind FROM tollkeeper_audit WHERE chain_id = $1 AND body ? 'anchor'", chain).Scan(&kind); err != nil {
+		t.Fatal(err)
+	}
+	if kind != audit.KindAnchor {
+		t.Fatalf("anchor stored with kind %q", kind)
+	}
+}

@@ -213,3 +213,36 @@ func TestEnvOverlayStillRejectsUnknownNestedKeys(t *testing.T) {
 		t.Fatal("a misspelled nested env key was silently ignored")
 	}
 }
+
+func TestValidateAuditAnchor(t *testing.T) {
+	t.Parallel()
+	if Defaults().Audit.Anchor.Enabled {
+		t.Fatal("anchoring must be opt-in")
+	}
+	cfg := Defaults()
+	cfg.Audit.Anchor = AuditAnchor{
+		Enabled: true, RekorURL: "http://rekor.example.com", Every: -1, Interval: time.Second,
+		Timeout: time.Second, MaxBackoff: 2 * time.Hour,
+	}
+	err := cfg.Validate()
+	for _, field := range []string{
+		"audit.anchor.rekor_url", "audit.checkpoint.signing_key_file", "audit.anchor.trust_files",
+		"audit.anchor.every", "audit.anchor.interval", "audit.anchor.timeout", "audit.anchor.max_backoff",
+	} {
+		if err == nil || !strings.Contains(err.Error(), field+":") {
+			t.Errorf("missing error for %s in: %v", field, err)
+		}
+	}
+	ok := Defaults()
+	ok.Audit.Checkpoint.SigningKeyFile = "/keys/audit.pem"
+	ok.Audit.Anchor.Enabled = true
+	ok.Audit.Anchor.RekorURL = "https://log2025-1.rekor.sigstore.dev"
+	ok.Audit.Anchor.TrustFiles = []string{"/etc/tollkeeper/trusted_root.json"}
+	if err := ok.Validate(); err != nil && strings.Contains(err.Error(), "audit.anchor") {
+		t.Fatalf("valid anchor config rejected: %v", err)
+	}
+	ok.Audit.Anchor.RekorURL = "http://127.0.0.1:3000"
+	if err := ok.Validate(); err != nil && strings.Contains(err.Error(), "audit.anchor.rekor_url") {
+		t.Fatalf("loopback http rejected: %v", err)
+	}
+}

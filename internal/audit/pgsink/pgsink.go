@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"math"
+	"strings"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -141,6 +142,24 @@ func (s *Sink) RequireSchema(ctx context.Context) error {
 	if !exists {
 		return fmt.Errorf(
 			"%w: apply internal/audit/pgsink/schema.sql or set audit.postgres.migrate: true",
+			ErrSchemaMissing,
+		)
+	}
+	return nil
+}
+
+func (s *Sink) RequireAnchorKind(ctx context.Context) error {
+	var def string
+	err := s.pool.QueryRow(ctx, `
+		SELECT coalesce(string_agg(pg_get_constraintdef(oid), ' '), '') FROM pg_constraint
+		WHERE conrelid = 'tollkeeper_audit'::regclass AND contype = 'c'`).Scan(&def)
+	if err != nil {
+		return fmt.Errorf("check audit schema: %w", err)
+	}
+	if !strings.Contains(def, "'anchor'") {
+		return fmt.Errorf(
+			"%w: the audit table does not accept anchor records; apply the current schema.sql or set "+
+				"audit.postgres.migrate: true",
 			ErrSchemaMissing,
 		)
 	}

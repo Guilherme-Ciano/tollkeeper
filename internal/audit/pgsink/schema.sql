@@ -2,7 +2,8 @@ CREATE TABLE IF NOT EXISTS tollkeeper_audit (
     chain_id text        NOT NULL,
     seq      bigint      NOT NULL CHECK (seq > 0),
     ts       timestamptz NOT NULL,
-    kind     text        NOT NULL CHECK (kind IN ('event', 'checkpoint')),
+    kind     text        NOT NULL CONSTRAINT tollkeeper_audit_kind_check
+                         CHECK (kind IN ('event', 'checkpoint', 'anchor')),
     hash     char(64)    NOT NULL,
     prev     char(64)    NOT NULL,
     body     jsonb,
@@ -11,6 +12,20 @@ CREATE TABLE IF NOT EXISTS tollkeeper_audit (
 );
 
 CREATE INDEX IF NOT EXISTS tollkeeper_audit_ts ON tollkeeper_audit (ts);
+
+DO $$
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1 FROM pg_constraint
+        WHERE conrelid = 'tollkeeper_audit'::regclass AND contype = 'c'
+          AND pg_get_constraintdef(oid) LIKE '%''anchor''%'
+    ) THEN
+        ALTER TABLE tollkeeper_audit DROP CONSTRAINT IF EXISTS tollkeeper_audit_kind_check;
+        ALTER TABLE tollkeeper_audit ADD CONSTRAINT tollkeeper_audit_kind_check
+            CHECK (kind IN ('event', 'checkpoint', 'anchor'));
+    END IF;
+END
+$$;
 
 CREATE OR REPLACE FUNCTION tollkeeper_audit_reject_change() RETURNS trigger
 LANGUAGE plpgsql
@@ -45,6 +60,7 @@ BEGIN
         OR (parsed->>'seq')::numeric IS DISTINCT FROM NEW.seq
         OR parsed->>'prev' IS DISTINCT FROM NEW.prev
         OR (parsed ? 'checkpoint') IS DISTINCT FROM (NEW.kind = 'checkpoint')
+        OR (parsed ? 'anchor') IS DISTINCT FROM (NEW.kind = 'anchor')
     ) THEN
         RAISE EXCEPTION 'chain % record %: columns disagree with the stored record', NEW.chain_id, NEW.seq
             USING ERRCODE = 'check_violation';
