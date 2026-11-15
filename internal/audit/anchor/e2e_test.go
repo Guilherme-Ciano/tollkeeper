@@ -96,8 +96,10 @@ func TestEndToEndLogAnchorVerify(t *testing.T) {
 		!rep.LastAnchorTime.Equal(at.Truncate(time.Second)) {
 		t.Fatalf("report %+v", rep)
 	}
-	if rep.Anchors != uint64(s.Entries()) {
-		t.Fatalf("%d anchors in the file, %d entries in the log", rep.Anchors, s.Entries())
+	entries := uint64(s.Entries())
+	if rep.Anchors > entries || entries-rep.Anchors > 1 {
+		t.Fatalf("%d anchors in the file, %d entries in the log; only a submission cut short by shutdown may "+
+			"leave an entry without a receipt", rep.Anchors, entries)
 	}
 }
 
