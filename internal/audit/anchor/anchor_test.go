@@ -6,6 +6,7 @@ import (
 	"crypto/ed25519"
 	"crypto/rand"
 	"encoding/base64"
+	"encoding/json"
 	"errors"
 	"io"
 	"net/http"
@@ -586,4 +587,48 @@ func TestNewRejectsMissingSchedule(t *testing.T) {
 	if !errors.Is(err, anchor.ErrNoSchedule) {
 		t.Fatalf("no schedule: %v", err)
 	}
+}
+
+func FuzzReceiptVerifier(f *testing.F) {
+	s := rekortest.New(f, rekortest.WithWitness("w1.example"))
+	k := key(f)
+	pub := pubOf(f, k)
+	c, err := anchor.NewClient(s.URL, "", nil)
+	if err != nil {
+		f.Fatal(err)
+	}
+	var good []byte
+	for i := range 5 {
+		sub, err := anchor.Sign(k, ref(uint64(i+1)))
+		if err != nil {
+			f.Fatal(err)
+		}
+		rec, err := c.Submit(f.Context(), sub)
+		if err != nil {
+			f.Fatal(err)
+		}
+		good, err = json.Marshal(anchor.NewAnchor(ref(uint64(i+1)), pub, s.Origin, rec))
+		if err != nil {
+			f.Fatal(err)
+		}
+	}
+	f.Add(good)
+	f.Add([]byte(`{}`))
+	v := anchor.NewReceiptVerifier(trustFor(f, s, 1))
+	f.Fuzz(func(t *testing.T, data []byte) {
+		var a audit.Anchor
+		if json.Unmarshal(data, &a) != nil {
+			return
+		}
+		_, err := v.VerifyAnchor(chainID, &a, ref(5), pub)
+		if err == nil && !bytes.Equal(data, good) {
+			canonical, merr := json.Marshal(&a)
+			if merr != nil {
+				t.Fatal(merr)
+			}
+			if !bytes.Equal(canonical, good) {
+				t.Fatalf("mutated receipt verified: %s", data)
+			}
+		}
+	})
 }
