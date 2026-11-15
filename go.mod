@@ -7,6 +7,8 @@ toolchain go1.27.4
 require (
 	github.com/HdrHistogram/hdrhistogram-go v1.4.0
 	github.com/alicebob/miniredis/v2 v2.40.0
+	github.com/digitorus/pkcs7 v0.0.0-20260914070511-d678ea5ea03f
+	github.com/digitorus/timestamp v0.0.0-20260914073129-b4b58b92aa51
 	github.com/go-viper/mapstructure/v2 v2.5.0
 	github.com/golang-jwt/jwt/v5 v5.3.1
 	github.com/google/cel-go v0.30.0

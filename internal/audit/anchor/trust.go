@@ -54,8 +54,10 @@ func (k LogKey) validAt(t time.Time) bool {
 
 type Trust struct {
 	logs         map[string][]LogKey
+	tsas         []TimestampAuthority
 	witnesses    []note.Verifier
 	minWitnesses int
+	requireTime  bool
 }
 
 type trustedRoot struct {
@@ -70,6 +72,18 @@ type trustedRoot struct {
 			} `json:"validFor"`
 		} `json:"publicKey"`
 	} `json:"tlogs"`
+	TimestampAuthorities []struct {
+		URI       string `json:"uri"`
+		CertChain struct {
+			Certificates []struct {
+				RawBytes []byte `json:"rawBytes"`
+			} `json:"certificates"`
+		} `json:"certChain"`
+		ValidFor struct {
+			Start time.Time `json:"start"`
+			End   time.Time `json:"end"`
+		} `json:"validFor"`
+	} `json:"timestampAuthorities"`
 }
 
 func LoadTrust(paths []string, origin string) (*Trust, error) {
@@ -103,25 +117,44 @@ func ParseTrust(data []byte, origin string) (*Trust, error) {
 	return t, nil
 }
 
-func (t *Trust) add(data []byte, origin string) error {
-	if bytes.HasPrefix(bytes.TrimSpace(data), []byte("-----BEGIN")) {
-		if origin == "" {
-			return fmt.Errorf("%w: a PEM log key needs the log origin", ErrBadTrust)
-		}
-		block, _ := pem.Decode(data)
-		if block == nil {
-			return fmt.Errorf("%w: unreadable PEM", ErrBadTrust)
-		}
-		v, err := logVerifier(origin, block.Bytes)
+func (t *Trust) addPEM(data []byte, origin string) error {
+	if bytes.HasPrefix(bytes.TrimSpace(data), []byte("-----BEGIN CERTIFICATE")) {
+		chain, err := parseCertChain(data)
 		if err != nil {
 			return err
 		}
-		t.logs[origin] = append(t.logs[origin], LogKey{Origin: origin, Verifier: v})
+		a, err := newAuthority("pem", chain, time.Time{}, time.Time{})
+		if err != nil {
+			return err
+		}
+		t.tsas = append(t.tsas, a)
 		return nil
+	}
+	if origin == "" {
+		return fmt.Errorf("%w: a PEM log key needs the log origin", ErrBadTrust)
+	}
+	block, _ := pem.Decode(data)
+	if block == nil {
+		return fmt.Errorf("%w: unreadable PEM", ErrBadTrust)
+	}
+	v, err := logVerifier(origin, block.Bytes)
+	if err != nil {
+		return err
+	}
+	t.logs[origin] = append(t.logs[origin], LogKey{Origin: origin, Verifier: v})
+	return nil
+}
+
+func (t *Trust) add(data []byte, origin string) error {
+	if bytes.HasPrefix(bytes.TrimSpace(data), []byte("-----BEGIN")) {
+		return t.addPEM(data, origin)
 	}
 	var root trustedRoot
 	if err := json.Unmarshal(data, &root); err != nil {
 		return fmt.Errorf("%w: trusted root: %w", ErrBadTrust, err)
+	}
+	if err := t.addAuthorities(&root); err != nil {
+		return err
 	}
 	for i := range root.Tlogs {
 		tl := &root.Tlogs[i]
@@ -147,11 +180,31 @@ func (t *Trust) add(data []byte, origin string) error {
 	return nil
 }
 
+func (t *Trust) addAuthorities(root *trustedRoot) error {
+	for i := range root.TimestampAuthorities {
+		ta := &root.TimestampAuthorities[i]
+		chain := make([]*x509.Certificate, 0, len(ta.CertChain.Certificates))
+		for _, c := range ta.CertChain.Certificates {
+			cert, err := x509.ParseCertificate(c.RawBytes)
+			if err != nil {
+				return fmt.Errorf("%w: timestampAuthorities[%d]: %w", ErrBadTrust, i, err)
+			}
+			chain = append(chain, cert)
+		}
+		a, err := newAuthority(ta.URI, chain, ta.ValidFor.Start, ta.ValidFor.End)
+		if err != nil {
+			return fmt.Errorf("timestampAuthorities[%d]: %w", i, err)
+		}
+		t.tsas = append(t.tsas, a)
+	}
+	return nil
+}
+
 func (t *Trust) WithWitnesses(vkeys []string, minWitnesses int) (*Trust, error) {
 	if minWitnesses < 0 || minWitnesses > len(vkeys) {
 		return nil, fmt.Errorf("%w: need %d witnesses but %d keys were given", ErrBadTrust, minWitnesses, len(vkeys))
 	}
-	out := &Trust{logs: t.logs, minWitnesses: minWitnesses}
+	out := &Trust{logs: t.logs, tsas: t.tsas, minWitnesses: minWitnesses, requireTime: t.requireTime}
 	seen := map[string]bool{}
 	for _, k := range vkeys {
 		v, err := NewCosignatureVerifier(k)

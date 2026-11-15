@@ -26,7 +26,7 @@ type anchoredLog struct {
 	witnesses       []string
 }
 
-func writeAnchoredLog(t *testing.T, witnessDelay time.Duration) anchoredLog {
+func writeAnchoredLog(t *testing.T, witnessDelay time.Duration, extra ...rekortest.Option) anchoredLog {
 	t.Helper()
 	dir := t.TempDir()
 	privPEM, pubPEM, err := audit.GenerateKeyPair()
@@ -37,8 +37,11 @@ func writeAnchoredLog(t *testing.T, witnessDelay time.Duration) anchoredLog {
 	if err != nil {
 		t.Fatal(err)
 	}
-	s := rekortest.New(t, rekortest.WithClock(func() time.Time { return time.Now().Add(witnessDelay) }),
-		rekortest.WithWitness("w1.example"))
+	opts := append([]rekortest.Option{
+		rekortest.WithClock(func() time.Time { return time.Now().Add(witnessDelay) }),
+		rekortest.WithWitness("w1.example"),
+	}, extra...)
+	s := rekortest.New(t, opts...)
 	al := anchoredLog{
 		path: filepath.Join(dir, "audit.jsonl"), pub: filepath.Join(dir, "k.pub"),
 		root: filepath.Join(dir, "trusted_root.json"), witnesses: s.WitnessVKeys(),
@@ -56,16 +59,25 @@ func writeAnchoredLog(t *testing.T, witnessDelay time.Duration) anchoredLog {
 	if err != nil {
 		t.Fatal(err)
 	}
+	var stamper anchor.Timestamper
+	if s.TSAURL != "" {
+		tc, err := anchor.NewTimestampClient(s.TSAURL, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		stamper = tc
+	}
 	sink := &logSink{}
 	got := make(chan struct{}, 16)
 	an, err := anchor.New(anchor.Options{
-		ChainID:    "c",
-		Key:        priv,
-		Every:      1,
-		Timeout:    5 * time.Second,
-		MinSpacing: time.Nanosecond,
-		Verifier:   anchor.NewReceiptVerifier(trust),
-		Hooks:      anchor.Hooks{Anchored: func(uint64, time.Time) { got <- struct{}{} }},
+		ChainID:     "c",
+		Key:         priv,
+		Every:       1,
+		Timestamper: stamper,
+		Timeout:     5 * time.Second,
+		MinSpacing:  time.Nanosecond,
+		Verifier:    anchor.NewReceiptVerifier(trust),
+		Hooks:       anchor.Hooks{Anchored: func(uint64, time.Time) { got <- struct{}{} }},
 	}, c, sink)
 	if err != nil {
 		t.Fatal(err)
@@ -159,7 +171,7 @@ func TestVerifyAnchorsCLI(t *testing.T) {
 			"delay needs witnesses",
 			func() verifyOpts { o := base(al); o.maxAnchorDelay = time.Minute; return o }(),
 			false,
-			"need --witness keys",
+			"need a time source",
 		},
 		{
 			"require needs trust",
@@ -183,7 +195,7 @@ func TestVerifyAnchorsCLI(t *testing.T) {
 			"witness implies quorum of one",
 			func() verifyOpts { o := base(al); o.witnesses = al.witnesses; return o }(),
 			true,
-			"witnessed_at=20",
+			"anchor_time=20",
 		},
 		{
 			"fresh anchor age",
@@ -237,5 +249,24 @@ func TestVerifyAnchorsFailAgainstOtherLog(t *testing.T) {
 	})
 	if err == nil || !strings.Contains(out.String(), "FAIL") {
 		t.Fatalf("anchors from an untrusted log passed: %v %s", err, out.String())
+	}
+}
+
+func TestVerifyAnchorDelayWithTimestampAuthority(t *testing.T) {
+	t.Parallel()
+	al := writeAnchoredLog(t, 0, rekortest.WithTSA())
+	late := writeAnchoredLog(t, 3*time.Hour, rekortest.WithTSA())
+	for name, tc := range map[string]struct {
+		a  anchoredLog
+		ok bool
+	}{"timely": {al, true}, "late": {late, false}} {
+		var out bytes.Buffer
+		err := runVerify(&out, verifyOpts{
+			file: tc.a.path, pubkey: tc.a.pub, maxUnsigned: 1000, rekorTrust: []string{tc.a.root}, chainID: "c",
+			maxAnchorDelay: time.Hour, maxAnchorAge: 4 * time.Hour,
+		})
+		if (err == nil) != tc.ok {
+			t.Errorf("%s: err=%v out=%s", name, err, out.String())
+		}
 	}
 }

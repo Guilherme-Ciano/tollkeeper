@@ -93,7 +93,7 @@ func TestEndToEndLogAnchorVerify(t *testing.T) {
 	}
 	if rep.Anchors == 0 || rep.UnverifiedAnchors != 0 || rep.LastAnchoredSeq == 0 ||
 		rep.RecordsAfterAnchor != rep.LastSeq-rep.LastAnchoredSeq || rep.LastAnchorLog != s.Origin ||
-		!rep.LastWitnessedAt.Equal(at.Truncate(time.Second)) {
+		!rep.LastAnchorTime.Equal(at.Truncate(time.Second)) {
 		t.Fatalf("report %+v", rep)
 	}
 	if rep.Anchors != uint64(s.Entries()) {

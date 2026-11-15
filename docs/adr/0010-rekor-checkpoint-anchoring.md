@@ -30,8 +30,9 @@ An external, append-only witness of what the chain looked like at a given time c
   - Anchor records do not count as content: they never make a checkpoint due, so an idle gateway stops anchoring.
   - It verifies the receipt before handing it to the sequencer through a bounded, non-blocking queue.
   - A slow or unavailable Rekor lowers the anchoring rate. It never delays, blocks or drops audit writes.
-- **Time.** Rekor v2 records no integration time. Time comes only from timestamped witness cosignatures (C2SP `tlog-cosignature`) on the checkpoint returned with the receipt.
-  - Sigstore's client guidance says checkpoints of the initial Rekor v2 launch are not witnessed, and that co-signed checkpoints in upload responses are planned. Until they arrive, receipts from the public instance prove inclusion, not time.
+- **Time.** Rekor v2 records no integration time. Two sources can prove when an anchor existed, and the verifier uses the earlier of the two:
+  - **RFC 3161 timestamp** (`audit.anchor.tsa_url`, for example `https://timestamp.sigstore.dev/api/v1/timestamp`). Before submitting to Rekor, the gateway asks the timestamp authority to sign `SHA-512(statement)`, checks the nonce, and stores the token in the anchor record. Verification checks the CMS signature, a certificate chain to a timestamp authority in `trusted_root.json` with the `timeStamping` extended key usage, the authority's validity window, and that the token covers the digest recomputed from the chain. The library is `digitorus/timestamp`, the one Sigstore's own clients use.
+  - **Witness cosignatures** (C2SP `tlog-cosignature`) on the checkpoint returned with the receipt. Sigstore's client guidance says checkpoints of the initial Rekor v2 launch are not witnessed, and that co-signed checkpoints in upload responses are planned, so on the public instance the timestamp authority is the time source today.
   - `audit verify --witness` checks the cosignatures that are present. The witnessed time of an anchor is the k-th earliest trusted cosignature, where k is `--min-witnesses`, so one early or dishonest witness cannot backdate it.
   - Record timestamps may not go back by more than one minute. `--max-anchor-delay` measures from the oldest record an anchor newly covers, not from the checkpoint's own timestamp, so a key holder who rebuilds a suffix today must date the forged records within that delay.
   - `--max-anchor-age` fails when the newest witnessed anchor is older than a bound. That detects a log cut back to an old anchor, which no in-file check can see.
@@ -42,7 +43,7 @@ An external, append-only witness of what the chain looked like at a given time c
 ## Alternatives considered
 
 - **Rekor v1.** It is the public default, but the SET it relies on is what Sigstore is moving away from, and v1 entries are verified with a separate API and key type. The signed-note format of v2 verifies with the Go standard library plus `x/mod`.
-- **RFC 3161 timestamp authority.** It gives a signed time without witnesses, but proves no append-only property and needs CMS parsing. Given the witnessing gap above, it is the next step: a timestamp from `timestamp.sigstore.dev` over the anchor digest, stored in the anchor record.
+- **RFC 3161 timestamps alone, without Rekor.** They prove time but not an append-only history, and nobody else can audit which timestamps were issued. They complement the log instead of replacing it.
 - **A sidecar file of receipts.** Simpler sequencer, but it is one more mutable file whose deletions cannot be detected, and it would not reach Postgres.
 - **Synchronous anchoring.** It would bound the unanchored tail to zero, but it ties every tool call to a public service's latency and availability.
 
@@ -56,5 +57,6 @@ An external, append-only witness of what the chain looked like at a given time c
   - one stream of entries per replica, so the replica count;
   - to anyone who holds a chain hash, the `chain_id`, which is often a pod name.
   Interval-only scheduling is recommended on the public instance. Requests carry the generic User-Agent `tollkeeper`.
-- Without witnessed checkpoints an anchor proves inclusion, not time. The README and the threat model state this.
+- Without a timestamp authority or witnessed checkpoints, an anchor proves inclusion, not time. The README and the threat model state this.
+- With a timestamp authority configured, anchoring depends on two services. A failure of either is retried and never blocks audit writes.
 - The public instance is rate limited by IP and publishes no numbers. The 1 minute minimum interval and the latest-wins policy keep a replica to about 100 entries a day at the default.

@@ -171,6 +171,7 @@ type AuditAnchor struct {
 	Enabled    bool          `koanf:"enabled"`
 	RekorURL   string        `koanf:"rekor_url"`
 	TrustFiles []string      `koanf:"trust_files"`
+	TSAURL     string        `koanf:"tsa_url"`
 	Origin     string        `koanf:"origin"`
 	Every      int           `koanf:"every"`
 	Interval   time.Duration `koanf:"interval"`

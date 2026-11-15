@@ -49,3 +49,35 @@ func TestRekorPublicInstanceRoundTrip(t *testing.T) {
 	t.Logf("anchored at %s#%d in a tree of %d, %d witnesses, witnessed at %s",
 		ev.Log, ev.LogIndex, ev.TreeSize, ev.Witnesses, ev.WitnessedAt)
 }
+
+func TestSigstoreTimestampAuthorityRoundTrip(t *testing.T) {
+	url := os.Getenv("TOLLKEEPER_TEST_TSA_URL")
+	if url == "" {
+		t.Skip("TOLLKEEPER_TEST_TSA_URL not set")
+	}
+	trust, err := anchor.LoadTrust([]string{"testdata/trusted_root.json"}, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !trust.HasTimestampAuthority() {
+		t.Fatal("trusted root has no timestamp authority")
+	}
+	tc, err := anchor.NewTimestampClient(url, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	r := audit.CheckpointRef{ChainID: "tollkeeper-integration-test", Seq: 1, Hash: audit.HashBytes([]byte(t.Name()))}
+	statement, err := audit.AnchorStatement(r.ChainID, r.Seq, r.Hash)
+	if err != nil {
+		t.Fatal(err)
+	}
+	token, err := tc.Timestamp(t.Context(), statement)
+	if err != nil {
+		t.Fatal(err)
+	}
+	at, err := anchor.VerifyTimestampToken(trust, token, r)
+	if err != nil {
+		t.Fatalf("token from %s does not verify against the trusted root: %v", url, err)
+	}
+	t.Logf("timestamped at %s", at)
+}

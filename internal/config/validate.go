@@ -358,6 +358,10 @@ func (c *Config) validateAnchor(v *validator) {
 		v.add("audit.anchor.rekor_url", "must be an https URL (http only for loopback) without credentials, "+
 			"query or fragment")
 	}
+	if u, err := url.Parse(a.TSAURL); a.TSAURL != "" && (err != nil || !safeLogURL(u)) {
+		v.add("audit.anchor.tsa_url", "must be an https URL (http only for loopback) without credentials, "+
+			"query or fragment")
+	}
 	if c.Audit.Checkpoint.SigningKeyFile == "" {
 		v.add("audit.checkpoint.signing_key_file", "required when audit.anchor.enabled is true")
 	}

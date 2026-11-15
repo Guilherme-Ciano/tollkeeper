@@ -131,7 +131,19 @@ func (v *ReceiptVerifier) VerifyAnchor(
 	if err := v.witness(n, &ev); err != nil {
 		return ev, err
 	}
-	at := ev.WitnessedAt
+	if len(a.Timestamp) > 0 {
+		digest, err := audit.AnchorDigest(chainID, covered.Seq, covered.Hash)
+		if err != nil {
+			return ev, err
+		}
+		if ev.TimestampedAt, err = v.verifyTimestamp(a.Timestamp, digest[:]); err != nil {
+			return ev, err
+		}
+	}
+	at := ev.ProvenAt()
+	if at.IsZero() && v.trust.requireTime {
+		return ev, ErrNoProvenTime
+	}
 	if at.IsZero() {
 		at = time.Unix(0, covered.TS)
 	}

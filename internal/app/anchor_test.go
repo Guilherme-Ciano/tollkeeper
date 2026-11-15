@@ -103,3 +103,65 @@ func TestRequiredAnchoringFailsFastOnUntrustedLog(t *testing.T) {
 		t.Fatal("gateway started against a transparency log missing from the trust material")
 	}
 }
+
+func TestAnchoringWithTimestampAuthority(t *testing.T) {
+	s := rekortest.New(t, rekortest.WithTSA())
+	cfg, pubPath := anchoredConfig(t, fakeUpstream(t, &headerLog{}).URL, s)
+	cfg.Audit.Anchor.TSAURL = s.TSAURL
+	url := startApp(t, cfg)
+	cs := connect(t, url, "")
+	for range 3 {
+		if _, err := cs.CallTool(t.Context(),
+			&mcp.CallToolParams{Name: "fake__echo", Arguments: map[string]any{"text": "x"}}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	pub, err := audit.LoadPublicKey(pubPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	trust, err := anchor.ParseTrust(s.TrustedRootJSON(), "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	v := anchor.NewReceiptVerifier(trust.RequireTime())
+	deadline := time.Now().Add(10 * time.Second)
+	var rep audit.Report
+	for time.Now().Before(deadline) {
+		f, err := os.Open(cfg.Audit.Path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		rep, err = audit.VerifyWith(f, audit.VerifyOptions{PublicKey: pub, Anchors: v})
+		if cerr := f.Close(); cerr != nil {
+			t.Fatal(cerr)
+		}
+		if err != nil {
+			t.Fatal(err)
+		}
+		if rep.Anchors > 0 {
+			break
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	if rep.Anchors == 0 || rep.LastAnchorTime.IsZero() {
+		t.Fatalf("no timestamped anchor: %+v", rep)
+	}
+}
+
+func TestTimestampURLNeedsAuthorityInTrust(t *testing.T) {
+	s := rekortest.New(t)
+	cfg, _ := anchoredConfig(t, fakeUpstream(t, &headerLog{}).URL, s)
+	cfg.Audit.Anchor.TSAURL = "http://127.0.0.1:1/api/v1/timestamp"
+	cfg.Audit.Anchor.Required = false
+	a, err := Build(t.Context(), cfg, slog.New(slog.DiscardHandler), "test")
+	if err == nil {
+		if cerr := a.close(t.Context()); cerr != nil {
+			t.Error(cerr)
+		}
+		t.Fatal("gateway started with a timestamp authority it cannot verify")
+	}
+	if !errors.Is(err, anchor.ErrBadTrust) {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}

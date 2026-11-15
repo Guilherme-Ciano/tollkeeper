@@ -275,3 +275,20 @@ func TestAnchorURLAndSpacingRules(t *testing.T) {
 		t.Fatalf("sub-minute spacing against a public log accepted: %v", err)
 	}
 }
+
+func TestAnchorTimestampURL(t *testing.T) {
+	t.Parallel()
+	cfg := Defaults()
+	cfg.Audit.Checkpoint.SigningKeyFile = "/k.pem"
+	cfg.Audit.Anchor.Enabled = true
+	cfg.Audit.Anchor.RekorURL = "https://log2025-1.rekor.sigstore.dev"
+	cfg.Audit.Anchor.TrustFiles = []string{"/root.json"}
+	cfg.Audit.Anchor.TSAURL = "http://tsa.example.com"
+	if err := cfg.Validate(); err == nil || !strings.Contains(err.Error(), "audit.anchor.tsa_url:") {
+		t.Fatalf("plain http timestamp authority accepted: %v", err)
+	}
+	cfg.Audit.Anchor.TSAURL = "https://timestamp.sigstore.dev/api/v1/timestamp"
+	if err := cfg.Validate(); err != nil && strings.Contains(err.Error(), "audit.anchor.tsa_url") {
+		t.Fatalf("sigstore TSA rejected: %v", err)
+	}
+}

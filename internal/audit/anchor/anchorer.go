@@ -29,6 +29,10 @@ type Submitter interface {
 	Submit(ctx context.Context, s Submission) (Receipt, error)
 }
 
+type Timestamper interface {
+	Timestamp(ctx context.Context, statement []byte) ([]byte, error)
+}
+
 type ReceiptSink interface {
 	AppendAnchor(ref audit.CheckpointRef, a *audit.Anchor) error
 }
@@ -49,6 +53,7 @@ type Options struct {
 	MaxBackoff  time.Duration
 	MinSpacing  time.Duration
 	Verifier    *ReceiptVerifier
+	Timestamper Timestamper
 	Logger      *slog.Logger
 	Hooks       Hooks
 	Now         func() time.Time
@@ -248,6 +253,7 @@ func (a *Anchorer) backoff(attempt int, err error) time.Duration {
 func (a *Anchorer) reject(ref audit.CheckpointRef, err error) {
 	outcome := OutcomeRejected
 	if errors.Is(err, ErrInvalidReceipt) || errors.Is(err, ErrUntrustedLog) || errors.Is(err, ErrDigestMismatch) ||
+		errors.Is(err, ErrUntrustedTimestamp) || errors.Is(err, ErrNoProvenTime) ||
 		errors.Is(err, ErrWitnessQuorum) {
 		outcome = OutcomeInvalidReceipt
 	}
@@ -293,6 +299,16 @@ func (a *Anchorer) AnchorNow(ctx context.Context, ref audit.CheckpointRef) (*aud
 	}
 	ctx, cancel := context.WithTimeout(ctx, a.opts.Timeout)
 	defer cancel()
+	var token []byte
+	if a.opts.Timestamper != nil {
+		statement, err := audit.AnchorStatement(ref.ChainID, ref.Seq, ref.Hash)
+		if err != nil {
+			return nil, err
+		}
+		if token, err = a.opts.Timestamper.Timestamp(ctx, statement); err != nil {
+			return nil, err
+		}
+	}
 	start := time.Now()
 	rec, err := a.submit.Submit(ctx, sub)
 	if a.opts.Hooks.Duration != nil {
@@ -303,6 +319,7 @@ func (a *Anchorer) AnchorNow(ctx context.Context, ref audit.CheckpointRef) (*aud
 	}
 	origin, _, _ := strings.Cut(rec.Checkpoint, "\n")
 	an := NewAnchor(ref, a.pub, origin, rec)
+	an.Timestamp = token
 	if _, err := a.opts.Verifier.VerifyAnchor(a.opts.ChainID, an, ref, a.pub); err != nil {
 		return nil, err
 	}

@@ -73,6 +73,7 @@ type Anchor struct {
 	Entry      []byte   `json:"entry"`
 	Proof      [][]byte `json:"proof"`
 	Checkpoint string   `json:"checkpoint"`
+	Timestamp  []byte   `json:"timestamp,omitempty"`
 }
 
 type CheckpointRef struct {

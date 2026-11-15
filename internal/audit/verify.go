@@ -31,16 +31,28 @@ type Report struct {
 	RecordsAfterAnchor uint64
 	LastAnchorLog      string
 	LastAnchorIndex    uint64
-	LastWitnessedAt    time.Time
+	LastAnchorTime     time.Time
 	MaxAnchorDelay     time.Duration
 }
 
 type AnchorEvidence struct {
-	Log         string
-	LogIndex    uint64
-	TreeSize    uint64
-	Witnesses   int
-	WitnessedAt time.Time
+	Log           string
+	LogIndex      uint64
+	TreeSize      uint64
+	Witnesses     int
+	WitnessedAt   time.Time
+	TimestampedAt time.Time
+}
+
+func (e AnchorEvidence) ProvenAt() time.Time {
+	switch {
+	case e.WitnessedAt.IsZero():
+		return e.TimestampedAt
+	case e.TimestampedAt.IsZero(), e.WitnessedAt.Before(e.TimestampedAt):
+		return e.WitnessedAt
+	default:
+		return e.TimestampedAt
+	}
 }
 
 type AnchorVerifier interface {
@@ -266,15 +278,15 @@ func (v *verifier) anchor(body *Body) error {
 		v.rep.LastAnchorLog = ev.Log
 		v.rep.LastAnchorIndex = ev.LogIndex
 	}
-	if !ev.WitnessedAt.IsZero() {
-		return v.witnessed(body.Seq, covered, ev.WitnessedAt)
+	if at := ev.ProvenAt(); !at.IsZero() {
+		return v.witnessed(body.Seq, covered, at)
 	}
 	return nil
 }
 
 func (v *verifier) witnessed(seq uint64, covered CheckpointRef, at time.Time) error {
 	if at.UnixNano() < covered.TS-int64(MaxClockStep) {
-		return v.fail(seq, "checkpoint at seq %d is dated after it was witnessed", covered.Seq)
+		return v.fail(seq, "checkpoint at seq %d is dated after its anchor time", covered.Seq)
 	}
 	if covered.Seq <= v.witSeq {
 		return nil
@@ -286,8 +298,8 @@ func (v *verifier) witnessed(seq uint64, covered CheckpointRef, at time.Time) er
 		}
 	}
 	v.witSeq = covered.Seq
-	if at.After(v.rep.LastWitnessedAt) {
-		v.rep.LastWitnessedAt = at
+	if at.After(v.rep.LastAnchorTime) {
+		v.rep.LastAnchorTime = at
 	}
 	v.rep.MaxAnchorDelay = max(v.rep.MaxAnchorDelay, at.Sub(time.Unix(0, start)))
 	return nil

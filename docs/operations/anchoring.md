@@ -2,7 +2,7 @@
 
 Anchoring publishes a commitment to each signed checkpoint in a Rekor v2 transparency log and stores the receipt in the audit chain. `tollkeeper audit verify` can then prove that each anchored checkpoint is in the log. When the log returns witnessed checkpoints, it can also prove *when*, and that the chain was not rewritten afterwards. The design is in [ADR 0010](../adr/0010-rekor-checkpoint-anchoring.md).
 
-> **Time on the public instance.** Sigstore's client guidance says checkpoints of the initial Rekor v2 launch are not witnessed; co-signed checkpoints in upload responses are planned. Until then, anchors from `log2025-1` prove inclusion only, and `--min-witnesses`, `--max-anchor-delay` and `--max-anchor-age` fail on them. An RFC 3161 timestamp is the planned fallback.
+> **Time on the public instance.** Sigstore's client guidance says checkpoints of the initial Rekor v2 launch are not witnessed; co-signed checkpoints in upload responses are planned. Set `tsa_url` so each anchor also carries an RFC 3161 timestamp from Sigstore's timestamp authority. Without it, anchors from `log2025-1` prove inclusion only, and `--max-anchor-delay` and `--max-anchor-age` fail on them.
 
 ## Prerequisites
 
@@ -21,6 +21,7 @@ audit:
     enabled: true
     rekor_url: https://log2025-1.rekor.sigstore.dev
     trust_files: [/etc/tollkeeper/trusted_root.json]
+    tsa_url: https://timestamp.sigstore.dev/api/v1/timestamp
     interval: 15m
     required: false
 ```
@@ -30,6 +31,7 @@ audit:
 | `rekor_url` | | `https`; `http` only for loopback test instances |
 | `trust_files` | | One or more `trusted_root.json` files or PEM log keys |
 | `origin` | | Log origin for a PEM key; taken from `baseUrl` in a trusted root |
+| `tsa_url` | | RFC 3161 timestamp authority; its certificate chain must be in `trust_files` (the Sigstore trusted root lists it, or add a PEM chain) |
 | `every` | `0` | Anchor after this many checkpoints |
 | `interval` | `15m` | Anchor at most this often; `0` or at least `1m` |
 | `timeout` | `1m` | Per submission; Rekor v2 answers only once the entry is in a checkpoint |
@@ -50,7 +52,8 @@ tollkeeper audit verify -f audit.jsonl --pubkey audit.pub --chain-id gw-0 \
 
 - `--rekor-trust` verifies every anchor record: the log's signature on the checkpoint, the inclusion proof, the digest recomputed from the chain, and the checkpoint key in the entry. Without it, anchors are counted and reported as unverified.
 - `--chain-id` is required with `--rekor-trust`; otherwise another chain signed by the same key would pass.
-- `--witness` checks the timestamped cosignatures that witnesses add to the log's checkpoints, and implies `--min-witnesses 1`. The witnessed time is the k-th earliest trusted cosignature. Only witnessed anchors prove time.
+- A timestamp authority in `--rekor-trust` verifies the RFC 3161 token stored with each anchor. It is a time source on its own; no witness flags are needed.
+- `--witness` checks the timestamped cosignatures that witnesses add to the log's checkpoints, and implies `--min-witnesses 1`. The witnessed time is the k-th earliest trusted cosignature. An anchor's time is the earlier of its timestamp and its witnessed time; anchors with neither prove no time, and fail when `--max-anchor-delay` or `--max-anchor-age` is set.
 - `--max-anchor-delay` fails when a record was first witnessed long after it was written. Record timestamps may not go back by more than a minute, so a rebuilt suffix cannot hide behind an old date.
 - `--max-unanchored` bounds the records after the last anchored checkpoint in the file.
 - `--max-anchor-age` fails when the newest witnessed anchor is too old. That catches a file cut back to an older anchor, which no in-file check can detect.

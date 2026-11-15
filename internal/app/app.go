@@ -334,16 +334,29 @@ func (a *App) openAnchorer(ctx context.Context, opts *audit.Options) error {
 			return fmt.Errorf("audit anchoring required: %w", err)
 		}
 	}
+	var stamper anchor.Timestamper
+	if ac.TSAURL != "" {
+		if !trust.HasTimestampAuthority() {
+			return fmt.Errorf("%w: audit.anchor.tsa_url is set but trust_files hold no timestamp authority",
+				anchor.ErrBadTrust)
+		}
+		tc, err := anchor.NewTimestampClient(ac.TSAURL, otelhttp.NewTransport(http.DefaultTransport))
+		if err != nil {
+			return err
+		}
+		stamper, trust = tc, trust.RequireTime()
+	}
 	an, err := anchor.New(anchor.Options{
-		ChainID:    a.cfg.Audit.ChainID,
-		Key:        opts.Signer,
-		Every:      ac.Every,
-		Interval:   ac.Interval,
-		Timeout:    ac.Timeout,
-		MaxBackoff: ac.MaxBackoff,
-		MinSpacing: ac.MinSpacing,
-		Verifier:   anchor.NewReceiptVerifier(trust),
-		Logger:     a.log,
+		ChainID:     a.cfg.Audit.ChainID,
+		Key:         opts.Signer,
+		Timestamper: stamper,
+		Every:       ac.Every,
+		Interval:    ac.Interval,
+		Timeout:     ac.Timeout,
+		MaxBackoff:  ac.MaxBackoff,
+		MinSpacing:  ac.MinSpacing,
+		Verifier:    anchor.NewReceiptVerifier(trust),
+		Logger:      a.log,
 		Hooks: anchor.Hooks{
 			Attempt:  func(o string) { a.metrics.AnchorAttempts.WithLabelValues(o).Inc() },
 			Duration: func(d time.Duration) { a.metrics.AnchorDuration.Observe(d.Seconds()) },
@@ -361,6 +374,7 @@ func (a *App) openAnchorer(ctx context.Context, opts *audit.Options) error {
 	opts.AnchorCommitted = an.Committed
 	opts.AnchorDropped = func(error) { a.metrics.AnchorAttempts.WithLabelValues(anchor.OutcomeDropped).Inc() }
 	a.log.InfoContext(ctx, "audit anchoring enabled", slog.String("rekor_url", ac.RekorURL),
+		slog.String("tsa_url", ac.TSAURL),
 		slog.Int("every", ac.Every), slog.Duration("interval", ac.Interval), slog.Bool("required", ac.Required))
 	return nil
 }

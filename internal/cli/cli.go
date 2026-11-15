@@ -273,8 +273,6 @@ func (o *verifyOpts) checkFlags() error {
 		return fmt.Errorf("%w: --rekor-trust needs --pubkey; anchors are bound to the checkpoint key", ErrVerify)
 	case (o.requireAnchors || o.maxUnanchored > 0) && len(o.rekorTrust) == 0:
 		return fmt.Errorf("%w: --require-anchors and --max-unanchored need --rekor-trust", ErrVerify)
-	case (o.maxAnchorDelay > 0 || o.maxAnchorAge > 0) && o.minWitnesses < 1:
-		return fmt.Errorf("%w: --max-anchor-delay and --max-anchor-age need --witness keys", ErrVerify)
 	case len(o.witnesses) > 0 && len(o.rekorTrust) == 0:
 		return fmt.Errorf("%w: --witness needs --rekor-trust", ErrVerify)
 	}
@@ -289,6 +287,13 @@ func (o *verifyOpts) anchorVerifier() (*anchor.ReceiptVerifier, error) {
 	trust, err = trust.WithWitnesses(o.witnesses, o.minWitnesses)
 	if err != nil {
 		return nil, err
+	}
+	if o.maxAnchorDelay > 0 || o.maxAnchorAge > 0 {
+		if o.minWitnesses < 1 && !trust.HasTimestampAuthority() {
+			return nil, fmt.Errorf("%w: --max-anchor-delay and --max-anchor-age need a time source: --witness keys "+
+				"or a timestamp authority in --rekor-trust", ErrVerify)
+		}
+		trust = trust.RequireTime()
 	}
 	return anchor.NewReceiptVerifier(trust), nil
 }
@@ -311,9 +316,9 @@ func checkAnchors(rep audit.Report, o verifyOpts) error {
 		if o.now != nil {
 			now = o.now
 		}
-		if rep.LastWitnessedAt.IsZero() || now().Sub(rep.LastWitnessedAt) > o.maxAnchorAge {
-			return fmt.Errorf("%w: newest witnessed anchor (%s) is older than --max-anchor-age %s",
-				ErrVerify, witnessedAt(rep), o.maxAnchorAge)
+		if rep.LastAnchorTime.IsZero() || now().Sub(rep.LastAnchorTime) > o.maxAnchorAge {
+			return fmt.Errorf("%w: newest anchor time (%s) is older than --max-anchor-age %s",
+				ErrVerify, anchorTime(rep), o.maxAnchorAge)
 		}
 	}
 	return nil
@@ -358,16 +363,16 @@ func printAnchors(out io.Writer, rep audit.Report) error {
 	if rep.UnverifiedAnchors > 0 {
 		return printf(out, "WARN %d anchors not verified: pass --rekor-trust\n", rep.UnverifiedAnchors)
 	}
-	return printf(out, "ANCHORED anchors=%d anchored_seq=%d after_anchor=%d log=%s#%d witnessed_at=%s\n",
+	return printf(out, "ANCHORED anchors=%d anchored_seq=%d after_anchor=%d log=%s#%d anchor_time=%s\n",
 		rep.Anchors, rep.LastAnchoredSeq, rep.RecordsAfterAnchor, rep.LastAnchorLog, rep.LastAnchorIndex,
-		witnessedAt(rep))
+		anchorTime(rep))
 }
 
-func witnessedAt(rep audit.Report) string {
-	if rep.LastWitnessedAt.IsZero() {
+func anchorTime(rep audit.Report) string {
+	if rep.LastAnchorTime.IsZero() {
 		return "none"
 	}
-	return rep.LastWitnessedAt.UTC().Format(time.RFC3339)
+	return rep.LastAnchorTime.UTC().Format(time.RFC3339)
 }
 
 func checkSignatures(rep audit.Report, o verifyOpts) error {

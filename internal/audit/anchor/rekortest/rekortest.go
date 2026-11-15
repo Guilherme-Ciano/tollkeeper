@@ -24,6 +24,8 @@ import (
 	"github.com/Guilherme-Ciano/tollkeeper/internal/audit/anchor"
 )
 
+const keyRawBytes = "rawBytes"
+
 type witness struct {
 	name string
 	pub  ed25519.PublicKey
@@ -59,6 +61,8 @@ type Server struct {
 	delay       time.Duration
 	tamperProof bool
 	now         func() time.Time
+	tsa         *tsa
+	TSAURL      string
 }
 
 type Option func(*Server)
@@ -83,12 +87,16 @@ func New(tb testing.TB, opts ...Option) *Server {
 	mux := http.NewServeMux()
 	mux.HandleFunc("POST /api/v2/log/entries", s.create)
 	mux.HandleFunc("GET /api/v2/checkpoint", s.checkpoint)
+	mux.HandleFunc("POST /api/v1/timestamp", s.timestamp)
 	srv := httptest.NewServer(mux)
 	tb.Cleanup(srv.Close)
 	s.URL = srv.URL
 	s.Origin = srv.Listener.Addr().String()
 	for _, o := range opts {
 		o(s)
+	}
+	if s.tsa != nil {
+		s.TSAURL = srv.URL + "/api/v1/timestamp"
 	}
 	pub, priv, err := ed25519.GenerateKey(rand.Reader)
 	if err != nil {
@@ -125,13 +133,23 @@ func (s *Server) clock() time.Time {
 }
 
 func (s *Server) TrustedRootJSON() []byte {
-	root := map[string]any{"tlogs": []any{map[string]any{
+	root := map[string]any{}
+	if s.tsa != nil {
+		root["timestampAuthorities"] = []any{map[string]any{
+			"uri": s.TSAURL, "subject": map[string]any{"commonName": "fake-tsa"},
+			"certChain": map[string]any{"certificates": []any{
+				map[string]any{keyRawBytes: s.tsa.leaf.Raw}, map[string]any{keyRawBytes: s.tsa.root.Raw},
+			}},
+			"validFor": map[string]any{"start": "2020-01-01T00:00:00Z"},
+		}}
+	}
+	root["tlogs"] = []any{map[string]any{
 		"baseUrl": "http://" + s.Origin,
 		"publicKey": map[string]any{
-			"rawBytes": s.logSPKI, "keyDetails": "PKIX_ED25519",
+			keyRawBytes: s.logSPKI, "keyDetails": "PKIX_ED25519",
 			"validFor": map[string]any{"start": "2020-01-01T00:00:00Z"},
 		},
-	}}}
+	}}
 	b, err := json.Marshal(root)
 	if err != nil {
 		panic(err)
@@ -277,7 +295,7 @@ func canonicalBody(hr anchor.HashedRekordRequest) ([]byte, error) {
 				"content": hr.Signature.Content,
 				"verifier": map[string]any{
 					"keyDetails": hr.Signature.Verifier.KeyDetails,
-					"publicKey":  map[string]any{"rawBytes": hr.Signature.Verifier.PublicKey.RawBytes},
+					"publicKey":  map[string]any{keyRawBytes: hr.Signature.Verifier.PublicKey.RawBytes},
 				},
 			},
 		}},
