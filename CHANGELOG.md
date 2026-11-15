@@ -1,5 +1,26 @@
 # Changelog
 
+## [1.1.0](https://github.com/Guilherme-Ciano/tollkeeper/compare/v1.0.0...v1.1.0) (2026-11-15)
+
+
+### Features
+
+* **audit:** anchor signed checkpoints in a Rekor v2 transparency log ([85f077e](https://github.com/Guilherme-Ciano/tollkeeper/commit/85f077e4ab6ec02ddea42303046b2741d5faefdd))
+* **audit:** prove anchor time with RFC 3161 timestamps ([754731d](https://github.com/Guilherme-Ciano/tollkeeper/commit/754731d307e17a29a7e845509a71e3206f10ebaf))
+* **audit:** wire Rekor anchoring into the gateway and audit verify ([7652156](https://github.com/Guilherme-Ciano/tollkeeper/commit/7652156be3c0e39e4769e4bc5a9f3a68672f54a6))
+
+
+### Bug fixes
+
+* **audit:** close anchoring loop and suffix-rebuild gaps found in review ([9845a53](https://github.com/Guilherme-Ciano/tollkeeper/commit/9845a53bfa4366c7e9a6814a447e34cfdcd575e8))
+* catalog deltas against the live snapshot, bare-mode policy tests ([#8](https://github.com/Guilherme-Ciano/tollkeeper/issues/8)) ([7715cdf](https://github.com/Guilherme-Ciano/tollkeeper/commit/7715cdf519f5461b4c343162a42c03392c22891e))
+* v1.0.1 hardening (deps, CodeQL, pinned images, docs) ([#5](https://github.com/Guilherme-Ciano/tollkeeper/issues/5)) ([d03a1fa](https://github.com/Guilherme-Ciano/tollkeeper/commit/d03a1fa47d34ad64193724da4a9f1ae57eac107e))
+
+
+### Documentation
+
+* **audit:** ADR 0010, anchoring runbook, threat model; add receipt fuzzing and a live Rekor test ([b773228](https://github.com/Guilherme-Ciano/tollkeeper/commit/b773228eb0fd363efbbb0513504da62a383eeca9))
+
 ## 1.0.0 (2026-11-14)
 
 
