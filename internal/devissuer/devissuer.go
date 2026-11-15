@@ -227,18 +227,29 @@ func grantScopes(requested string, allowed ...[]string) []string {
 	}
 	var out []string
 	for _, s := range want {
-		ok := true
+		var granted string
+		ok := len(allowed) > 0
 		for _, a := range allowed {
-			if !slices.Contains(a, s) {
+			v, found := pick(a, s)
+			if !found {
 				ok = false
 				break
 			}
+			granted = v
 		}
-		if ok && !slices.Contains(out, s) {
-			out = append(out, s)
+		if ok && !slices.Contains(out, granted) {
+			out = append(out, granted)
 		}
 	}
 	return out
+}
+
+func pick(allowed []string, v string) (string, bool) {
+	idx := slices.Index(allowed, v)
+	if idx < 0 {
+		return "", false
+	}
+	return allowed[idx], true
 }
 
 func (i *Issuer) token(w http.ResponseWriter, r *http.Request) {
@@ -273,8 +284,8 @@ func (i *Issuer) token(w http.ResponseWriter, r *http.Request) {
 			)
 			return
 		}
-		resource := r.PostForm.Get("resource")
-		if !slices.Contains(c.Resources, resource) {
+		resource, ok := pick(c.Resources, r.PostForm.Get("resource"))
+		if !ok {
 			oauthError(w, http.StatusBadRequest, "invalid_target", "resource not allowed for client")
 			return
 		}
@@ -359,11 +370,16 @@ const consentPage = `<!doctype html><html><head><meta charset="utf-8"><title>tol
 func (i *Issuer) authorize(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
 	c, ok := i.client(q.Get("client_id"))
-	if !ok || !slices.Contains(c.RedirectURIs, q.Get("redirect_uri")) {
+	if !ok {
 		http.Error(w, "unknown client or redirect_uri", http.StatusBadRequest)
 		return
 	}
-	redirect, err := url.Parse(q.Get("redirect_uri"))
+	redirectURI, ok := pick(c.RedirectURIs, q.Get("redirect_uri"))
+	if !ok {
+		http.Error(w, "unknown client or redirect_uri", http.StatusBadRequest)
+		return
+	}
+	redirect, err := url.Parse(redirectURI)
 	if err != nil {
 		http.Error(w, "bad redirect_uri", http.StatusBadRequest)
 		return
@@ -384,7 +400,8 @@ func (i *Issuer) authorize(w http.ResponseWriter, r *http.Request) {
 		fail("invalid_request")
 		return
 	}
-	if !slices.Contains(c.Resources, q.Get("resource")) {
+	resource, ok := pick(c.Resources, q.Get("resource"))
+	if !ok {
 		fail("invalid_target")
 		return
 	}
@@ -424,8 +441,8 @@ func (i *Issuer) authorize(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	i.code[code] = authCode{
-		clientID: c.ID, redirectURI: q.Get("redirect_uri"), challenge: q.Get("code_challenge"),
-		resource: q.Get("resource"), sub: u.Sub, scopes: grantScopes(q.Get("scope"), c.Scopes, u.Scopes),
+		clientID: c.ID, redirectURI: redirectURI, challenge: q.Get("code_challenge"),
+		resource: resource, sub: u.Sub, scopes: grantScopes(q.Get("scope"), c.Scopes, u.Scopes),
 		expires: i.now().Add(time.Minute),
 	}
 	i.mu.Unlock()

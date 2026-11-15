@@ -51,12 +51,12 @@ services:
     profiles: ["bench"]
 
   jaeger:
-    image: docker.io/jaegertracing/jaeger:2.11.0
+    image: docker.io/jaegertracing/jaeger:2.11.0@sha256:b585df1b6299bbbd16bf7c679da30389349736e4b6bc8f4f500142a75bf26ca8
     profiles: ["obs"]
     ports: ["127.0.0.1:16686:16686"]
 
   prometheus:
-    image: docker.io/prom/prometheus:v3.7.3
+    image: docker.io/prom/prometheus:v3.7.3@sha256:49214755b6153f90a597adcbff0252cc61069f8ab69ce8411285cd4a560e8038
     profiles: ["obs"]
     volumes: ["./deploy/compose/prometheus.yml:/etc/prometheus/prometheus.yml:ro"]
     ports: ["127.0.0.1:9091:9090"]
