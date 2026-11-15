@@ -271,7 +271,7 @@ The full STRIDE analysis with trust boundaries is in [docs/threat-model.md](docs
 
 Report vulnerabilities as described in [SECURITY.md](SECURITY.md).
 
-## Known limitations (v0.1)
+## Known limitations
 
 - **Tools only.** Resources and prompts are not aggregated yet; go-sdk has no dynamic `resources/list` handler ([go-sdk#998](https://github.com/modelcontextprotocol/go-sdk/issues/998)).
 - **Progress notifications are not forwarded**, and if they were, go-sdk may deliver them after the result ([go-sdk#1337](https://github.com/modelcontextprotocol/go-sdk/issues/1337)).
@@ -286,12 +286,23 @@ Report vulnerabilities as described in [SECURITY.md](SECURITY.md).
 
 ## Roadmap
 
-- [x] v0.1: everything above, compose demo, fuzzing, published overhead numbers
+Shipped in v1.0:
+
+- [x] OAuth 2.1 resource server, CEL policies, GCRA rate limits, hash-chained audit with Ed25519 checkpoints
 - [x] Tool pinning enforcement with `pin status` and `pin approve` ([ADR 0007](docs/adr/0007-tool-pinning.md))
 - [x] Official MCP conformance suite in CI, run through the gateway ([conformance/](conformance/README.md))
-- [x] Redis GCRA store with a shared conformance suite, Postgres audit sink with immutable triggers ([ADR 0009](docs/adr/0009-shared-state-redis-postgres.md))
-- [ ] v0.2: OTLP log sink, RFC 7662 introspection, sealed MRTR state, progress forwarding, resources/prompts, hot reload
-- [ ] v1.0: RFC 8693 token exchange to upstreams, DPoP, external checkpoint anchoring, Helm chart
+- [x] Redis GCRA store and Postgres audit sink with immutable triggers ([ADR 0009](docs/adr/0009-shared-state-redis-postgres.md))
+- [x] Signed multi-arch releases with SBOMs and SLSA provenance ([verifying releases](docs/verifying-releases.md))
+
+Shipped in v1.1:
+
+- [x] Checkpoint anchoring in a Rekor v2 transparency log with RFC 3161 timestamps ([ADR 0010](docs/adr/0010-rekor-checkpoint-anchoring.md))
+
+Next:
+
+- [ ] v1.2: sealed MRTR state, progress forwarding
+- [ ] v1.3: resources and prompts aggregation, hot config reload, RFC 7662 introspection, OTLP log sink
+- [ ] v2.0: RFC 8693 token exchange to upstreams, DPoP, Helm chart
 
 ## Development
 

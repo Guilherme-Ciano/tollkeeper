@@ -2,14 +2,25 @@
 
 ## Supported versions
 
+| Version | Supported |
+| --- | --- |
+| 1.0.x | yes |
+| < 1.0 | no |
+
 Only the latest minor release receives security fixes.
 
 ## Reporting a vulnerability
 
-Use GitHub Private Vulnerability Reporting on this repository. Please do not open a public issue.
+Report privately at <https://github.com/Guilherme-Ciano/tollkeeper/security/advisories/new> (GitHub Private Vulnerability Reporting). Please do not open a public issue.
 
-- Acknowledgement within 72 hours.
-- Coordinated disclosure within 90 days, earlier if a fix ships.
+| Step | Target |
+| --- | --- |
+| Acknowledgement | 72 hours |
+| Initial assessment and severity | 7 days |
+| Fix for critical and high severity | 30 days |
+| Coordinated disclosure | 90 days at most, earlier once a fix ships |
+
+Fixed vulnerabilities are published as [GitHub Security Advisories](https://github.com/Guilherme-Ciano/tollkeeper/security/advisories) with a CVE when one applies, and noted in the release changelog.
 
 ## In scope
 
