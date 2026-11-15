@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"math"
+	"slices"
 	"strings"
 
 	"github.com/jackc/pgx/v5"
@@ -149,14 +150,18 @@ func (s *Sink) RequireSchema(ctx context.Context) error {
 }
 
 func (s *Sink) RequireAnchorKind(ctx context.Context) error {
-	var def string
-	err := s.pool.QueryRow(ctx, `
-		SELECT coalesce(string_agg(pg_get_constraintdef(oid), ' '), '') FROM pg_constraint
-		WHERE conrelid = 'tollkeeper_audit'::regclass AND contype = 'c'`).Scan(&def)
+	rows, err := s.pool.Query(ctx, `
+		SELECT pg_get_constraintdef(oid) FROM pg_constraint
+		WHERE conrelid = 'tollkeeper_audit'::regclass AND contype = 'c'
+		  AND pg_get_constraintdef(oid) LIKE '%kind%'`)
 	if err != nil {
 		return fmt.Errorf("check audit schema: %w", err)
 	}
-	if !strings.Contains(def, "'anchor'") {
+	defs, err := pgx.CollectRows(rows, pgx.RowTo[string])
+	if err != nil {
+		return fmt.Errorf("check audit schema: %w", err)
+	}
+	if len(defs) == 0 || slices.ContainsFunc(defs, func(d string) bool { return !strings.Contains(d, "'anchor'") }) {
 		return fmt.Errorf(
 			"%w: the audit table does not accept anchor records; apply the current schema.sql or set "+
 				"audit.postgres.migrate: true",

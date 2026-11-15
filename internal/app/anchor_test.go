@@ -36,7 +36,7 @@ func anchoredConfig(t *testing.T, upURL string, s *rekortest.Server) (cfg config
 	cfg.Audit.Checkpoint = config.Checkpoint{Every: 2, SigningKeyFile: keyPath}
 	cfg.Audit.Anchor = config.AuditAnchor{
 		Enabled: true, RekorURL: s.URL, TrustFiles: []string{rootPath}, Every: 1,
-		Timeout: 20 * time.Second, MaxBackoff: time.Second, Required: true,
+		Timeout: 20 * time.Second, MaxBackoff: time.Second, MinSpacing: time.Millisecond, Required: true,
 	}
 	if err := cfg.Validate(); err != nil && strings.Contains(err.Error(), "audit.") {
 		t.Fatal(err)

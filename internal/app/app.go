@@ -52,7 +52,6 @@ type App struct {
 	auditLog  *audit.Log
 	auditPG   *pgsink.Sink
 	anchorer  *anchor.Anchorer
-	version   string
 	catalog   *catalog.Catalog
 	upstreams []*upstream.Upstream
 	gateway   *gateway.Gateway
@@ -65,7 +64,7 @@ type App struct {
 func Build(ctx context.Context, cfg config.Config, log *slog.Logger, version string) (built *App, err error) {
 	a := &App{
 		cfg: cfg, log: log, metrics: telemetry.NewMetrics(), catalog: catalog.New(maxCatalogTools),
-		synced: map[string]*atomic.Uint64{}, version: version,
+		synced: map[string]*atomic.Uint64{},
 	}
 	defer func() {
 		if err != nil {
@@ -311,11 +310,7 @@ func (s anchorSink) AppendAnchor(ref audit.CheckpointRef, an *audit.Anchor) erro
 	if s.app.auditLog == nil {
 		return audit.ErrClosed
 	}
-	if err := s.app.auditLog.AppendAnchor(ref, an); err != nil {
-		return err
-	}
-	s.app.metrics.AnchorCoveredSeq.Set(float64(ref.Seq))
-	return nil
+	return s.app.auditLog.AppendAnchor(ref, an)
 }
 
 func (a *App) openAnchorer(ctx context.Context, opts *audit.Options) error {
@@ -324,7 +319,7 @@ func (a *App) openAnchorer(ctx context.Context, opts *audit.Options) error {
 	if err != nil {
 		return err
 	}
-	client, err := anchor.NewClient(ac.RekorURL, "tollkeeper/"+a.version, otelhttp.NewTransport(http.DefaultTransport))
+	client, err := anchor.NewClient(ac.RekorURL, "tollkeeper", otelhttp.NewTransport(http.DefaultTransport))
 	if err != nil {
 		return err
 	}
@@ -340,12 +335,22 @@ func (a *App) openAnchorer(ctx context.Context, opts *audit.Options) error {
 		}
 	}
 	an, err := anchor.New(anchor.Options{
-		ChainID: a.cfg.Audit.ChainID, Key: opts.Signer, Every: ac.Every, Interval: ac.Interval,
-		Timeout: ac.Timeout, MaxBackoff: ac.MaxBackoff, Verifier: anchor.NewReceiptVerifier(trust), Logger: a.log,
+		ChainID:    a.cfg.Audit.ChainID,
+		Key:        opts.Signer,
+		Every:      ac.Every,
+		Interval:   ac.Interval,
+		Timeout:    ac.Timeout,
+		MaxBackoff: ac.MaxBackoff,
+		MinSpacing: ac.MinSpacing,
+		Verifier:   anchor.NewReceiptVerifier(trust),
+		Logger:     a.log,
 		Hooks: anchor.Hooks{
 			Attempt:  func(o string) { a.metrics.AnchorAttempts.WithLabelValues(o).Inc() },
 			Duration: func(d time.Duration) { a.metrics.AnchorDuration.Observe(d.Seconds()) },
-			Anchored: func(_ uint64, at time.Time) { a.metrics.AnchorLastSuccess.Set(float64(at.Unix())) },
+			Anchored: func(seq uint64, at time.Time) {
+				a.metrics.AnchorLastSuccess.Set(float64(at.Unix()))
+				a.metrics.AnchorCoveredSeq.Set(float64(seq))
+			},
 		},
 	}, client, anchorSink{app: a})
 	if err != nil {
@@ -353,6 +358,7 @@ func (a *App) openAnchorer(ctx context.Context, opts *audit.Options) error {
 	}
 	a.anchorer = an
 	opts.CheckpointCommitted = an.Offer
+	opts.AnchorCommitted = an.Committed
 	opts.AnchorDropped = func(error) { a.metrics.AnchorAttempts.WithLabelValues(anchor.OutcomeDropped).Inc() }
 	a.log.InfoContext(ctx, "audit anchoring enabled", slog.String("rekor_url", ac.RekorURL),
 		slog.Int("every", ac.Every), slog.Duration("interval", ac.Interval), slog.Bool("required", ac.Required))

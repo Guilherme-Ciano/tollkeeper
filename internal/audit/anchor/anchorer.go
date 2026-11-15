@@ -47,6 +47,7 @@ type Options struct {
 	Timeout     time.Duration
 	BaseBackoff time.Duration
 	MaxBackoff  time.Duration
+	MinSpacing  time.Duration
 	Verifier    *ReceiptVerifier
 	Logger      *slog.Logger
 	Hooks       Hooks
@@ -66,6 +67,7 @@ type Anchorer struct {
 	anchoredSeq  uint64
 	skipSeq      uint64
 	lastAnchorAt time.Time
+	started      time.Time
 	lastSuccess  atomic.Int64
 	wake         chan struct{}
 }
@@ -96,7 +98,12 @@ func New(opts Options, s Submitter, sink ReceiptSink) (*Anchorer, error) {
 	if opts.MaxBackoff < opts.BaseBackoff {
 		opts.MaxBackoff = max(opts.BaseBackoff, 10*time.Minute)
 	}
-	return &Anchorer{opts: opts, pub: pub, submit: s, sink: sink, wake: make(chan struct{}, 1)}, nil
+	if opts.MinSpacing <= 0 {
+		opts.MinSpacing = time.Minute
+	}
+	return &Anchorer{
+		opts: opts, pub: pub, submit: s, sink: sink, wake: make(chan struct{}, 1), started: opts.Now(),
+	}, nil
 }
 
 func (a *Anchorer) Offer(ref audit.CheckpointRef) {
@@ -120,15 +127,23 @@ func (a *Anchorer) LastSuccess() time.Time {
 	return time.Unix(0, ns)
 }
 
+func (a *Anchorer) Committed(ref audit.CheckpointRef) {
+	now := a.opts.Now()
+	a.lastSuccess.Store(now.UnixNano())
+	if a.opts.Hooks.Anchored != nil {
+		a.opts.Hooks.Anchored(ref.Seq, now)
+	}
+}
+
 func (a *Anchorer) Stale(now time.Time, after time.Duration) bool {
-	a.mu.Lock()
-	pending := a.haveLatest && a.latest.Seq != a.anchoredSeq
-	a.mu.Unlock()
-	if !pending {
+	if _, due, _ := a.next(now); !due {
 		return false
 	}
 	last := a.LastSuccess()
-	return !last.IsZero() && now.Sub(last) > after
+	if last.Before(a.started) {
+		last = a.started
+	}
+	return now.Sub(last) > after
 }
 
 func (a *Anchorer) next(now time.Time) (audit.CheckpointRef, bool, time.Duration) {
@@ -137,17 +152,21 @@ func (a *Anchorer) next(now time.Time) (audit.CheckpointRef, bool, time.Duration
 	if !a.haveLatest || a.latest.Seq == a.anchoredSeq || a.latest.Seq == a.skipSeq {
 		return audit.CheckpointRef{}, false, 0
 	}
+	since := a.lastAnchorAt
+	if since.IsZero() {
+		since = a.started
+	}
+	elapsed := now.Sub(since)
+	if elapsed < a.opts.MinSpacing {
+		return audit.CheckpointRef{}, false, a.opts.MinSpacing - elapsed
+	}
 	if a.opts.Every > 0 && a.sinceAnchor >= a.opts.Every {
 		return a.latest, true, 0
 	}
 	if a.opts.Interval <= 0 {
 		return audit.CheckpointRef{}, false, 0
 	}
-	if a.lastAnchorAt.IsZero() {
-		return a.latest, true, 0
-	}
-	elapsed := now.Sub(a.lastAnchorAt)
-	if elapsed >= a.opts.Interval {
+	if a.lastAnchorAt.IsZero() || elapsed >= a.opts.Interval {
 		return a.latest, true, 0
 	}
 	return audit.CheckpointRef{}, false, a.opts.Interval - elapsed
@@ -187,11 +206,11 @@ func (a *Anchorer) Run(ctx context.Context) {
 func (a *Anchorer) anchorWithRetry(ctx context.Context, ref audit.CheckpointRef) bool {
 	for attempt := 0; ; attempt++ {
 		an, err := a.AnchorNow(ctx, ref)
-		if ctx.Err() != nil {
-			return false
-		}
 		if err == nil {
 			return a.deliver(ref, an)
+		}
+		if ctx.Err() != nil {
+			return false
 		}
 		if !IsRetryable(err) {
 			a.reject(ref, err)
@@ -242,28 +261,22 @@ func (a *Anchorer) reject(ref audit.CheckpointRef, err error) {
 
 func (a *Anchorer) deliver(ref audit.CheckpointRef, an *audit.Anchor) bool {
 	err := a.sink.AppendAnchor(ref, an)
-	switch {
-	case errors.Is(err, audit.ErrClosed):
+	if errors.Is(err, audit.ErrClosed) {
 		return false
-	case err != nil:
-		a.outcome(OutcomeDropped)
-		a.opts.Logger.Warn("audit anchor receipt dropped", slog.Uint64("covers_seq", ref.Seq),
-			slog.String("error", err.Error()))
-	default:
-		a.outcome(OutcomeOK)
 	}
 	now := a.opts.Now()
 	a.mu.Lock()
+	defer a.mu.Unlock()
+	a.lastAnchorAt = now
+	if err != nil {
+		a.outcome(OutcomeDropped)
+		a.opts.Logger.Warn("audit anchor receipt dropped", slog.Uint64("covers_seq", ref.Seq),
+			slog.String("error", err.Error()))
+		return true
+	}
+	a.outcome(OutcomeOK)
 	a.anchoredSeq = ref.Seq
 	a.sinceAnchor = 0
-	a.lastAnchorAt = now
-	a.mu.Unlock()
-	if err == nil {
-		a.lastSuccess.Store(now.UnixNano())
-		if a.opts.Hooks.Anchored != nil {
-			a.opts.Hooks.Anchored(ref.Seq, now)
-		}
-	}
 	return true
 }
 

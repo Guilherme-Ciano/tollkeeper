@@ -466,7 +466,7 @@ func newAnchorer(
 	t.Helper()
 	opts := anchor.Options{
 		ChainID: chainID, Key: k, Interval: time.Hour, Timeout: 5 * time.Second,
-		BaseBackoff: time.Millisecond, MaxBackoff: 5 * time.Millisecond,
+		BaseBackoff: time.Millisecond, MaxBackoff: 5 * time.Millisecond, MinSpacing: time.Nanosecond,
 		Verifier: anchor.NewReceiptVerifier(trustFor(t, s, 0)),
 	}
 	if mut != nil {
@@ -505,8 +505,12 @@ func TestAnchorerAnchorsFirstCheckpointThenWaitsForInterval(t *testing.T) {
 	if s.Entries() != 1 || sink.got[0].CoversSeq != 10 {
 		t.Fatalf("entries %d, anchors %+v", s.Entries(), sink.got)
 	}
+	if !a.LastSuccess().IsZero() {
+		t.Fatal("success recorded before the receipt was committed to the log")
+	}
+	a.Committed(ref(10))
 	if a.LastSuccess().IsZero() {
-		t.Fatal("last success not recorded")
+		t.Fatal("last success not recorded after commit")
 	}
 }
 
@@ -631,4 +635,178 @@ func FuzzReceiptVerifier(f *testing.F) {
 			}
 		}
 	})
+}
+
+func TestIdleLogIsAnchoredOnce(t *testing.T) {
+	t.Parallel()
+	s := rekortest.New(t)
+	k := key(t)
+	sink := &lateSink{}
+	a, err := anchor.New(anchor.Options{
+		ChainID: "gw-1", Key: k, Every: 1, Timeout: 5 * time.Second, MinSpacing: time.Nanosecond,
+		Verifier: anchor.NewReceiptVerifier(trustFor(t, s, 0)),
+	}, client(t, s), sink)
+	if err != nil {
+		t.Fatal(err)
+	}
+	l, err := audit.Open(audit.Options{
+		Path: filepath.Join(t.TempDir(), "audit.jsonl"), ChainID: "gw-1", BatchSize: 1,
+		FlushInterval: time.Millisecond, Signer: k, CheckpointEvery: 1,
+		CheckpointCommitted: a.Offer, AnchorCommitted: a.Committed,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	sink.log = l
+	ctx, cancel := context.WithCancel(t.Context())
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		a.Run(ctx)
+	}()
+	if err := l.Append(
+		t.Context(),
+		audit.Event{Phase: audit.PhaseOutcome, Method: "m", Decision: "allow"},
+	); err != nil {
+		t.Fatal(err)
+	}
+	time.Sleep(300 * time.Millisecond)
+	cancel()
+	<-done
+	if err := l.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if n := s.Entries(); n != 1 {
+		t.Fatalf("one event on an idle gateway produced %d log entries", n)
+	}
+}
+
+func TestMinSpacingDelaysFirstAnchorAfterStart(t *testing.T) {
+	t.Parallel()
+	s := rekortest.New(t)
+	sink := newSink()
+	a := newAnchorer(t, s, key(t), sink, func(o *anchor.Options) { o.MinSpacing = time.Hour })
+	a.Offer(ref(1))
+	time.Sleep(50 * time.Millisecond)
+	if s.Entries() != 0 {
+		t.Fatal("restart anchored before min spacing")
+	}
+}
+
+func TestStaleOnlyWhenAnchoringIsDueAndFailing(t *testing.T) {
+	t.Parallel()
+	s := rekortest.New(t)
+	now := time.Now()
+	mk := func(every int, interval time.Duration) *anchor.Anchorer {
+		a, err := anchor.New(anchor.Options{
+			ChainID: chainID, Key: key(t), Every: every, Interval: interval, MinSpacing: time.Nanosecond,
+			Verifier: anchor.NewReceiptVerifier(trustFor(t, s, 0)), Now: func() time.Time { return now },
+		}, client(t, s), newSink())
+		if err != nil {
+			t.Fatal(err)
+		}
+		return a
+	}
+	never := mk(0, time.Minute)
+	never.Offer(ref(1))
+	if !never.Stale(now.Add(time.Hour), 10*time.Minute) {
+		t.Fatal("anchoring that never succeeded is not reported stale")
+	}
+	idle := mk(10, 0)
+	idle.Offer(ref(1))
+	if idle.Stale(now.Add(time.Hour), 10*time.Minute) {
+		t.Fatal("every-only anchoring waiting for more checkpoints reported stale")
+	}
+}
+
+func TestWitnessTimeUsesQuorumCosignature(t *testing.T) {
+	t.Parallel()
+	var mu sync.Mutex
+	base := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	times := []time.Time{base, base.Add(time.Hour)}
+	i := 0
+	s := rekortest.New(t, rekortest.WithClock(func() time.Time {
+		mu.Lock()
+		defer mu.Unlock()
+		tm := times[i%2]
+		i++
+		return tm
+	}), rekortest.WithWitness("w1.example"), rekortest.WithWitness("w2.example"))
+	k := key(t)
+	a := anchored(t, s, k, ref(1))
+	r := ref(1)
+	r.TS = base.Add(-time.Minute).UnixNano()
+	ev, err := anchor.NewReceiptVerifier(trustFor(t, s, 2)).VerifyAnchor(chainID, a, r, pubOf(t, k))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !ev.WitnessedAt.Equal(base.Add(time.Hour)) {
+		t.Fatalf("witnessed at %s: one early witness must not set the time for a quorum of two", ev.WitnessedAt)
+	}
+}
+
+func TestWithWitnessesRejectsSameKeyUnderTwoNames(t *testing.T) {
+	t.Parallel()
+	s := rekortest.New(t)
+	pub := pubOf(t, key(t))
+	tr, err := anchor.ParseTrust(s.TrustedRootJSON(), "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := tr.WithWitnesses([]string{
+		anchor.CosignatureVKey("a.example", pub), anchor.CosignatureVKey("b.example", pub),
+	}, 2); !errors.Is(err, anchor.ErrBadTrust) {
+		t.Fatalf("duplicate witness key counted twice: %v", err)
+	}
+}
+
+func TestReceiptVerifierRejectsExpiredLogKeyWithoutWitnessTime(t *testing.T) {
+	t.Parallel()
+	s := rekortest.New(t)
+	k := key(t)
+	a := anchored(t, s, k, ref(1))
+	root := strings.Replace(string(s.TrustedRootJSON()), `"start":"2020-01-01T00:00:00Z"`,
+		`"start":"2020-01-01T00:00:00Z","end":"2021-01-01T00:00:00Z"`, 1)
+	tr, err := anchor.ParseTrust([]byte(root), "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := anchor.NewReceiptVerifier(tr).
+		VerifyAnchor(chainID, a, ref(1), pubOf(t, k)); !errors.Is(
+		err,
+		anchor.ErrUntrustedLog,
+	) {
+		t.Fatalf("retired log key accepted: %v", err)
+	}
+}
+
+func TestNewClientRejectsUnsafeURLs(t *testing.T) {
+	t.Parallel()
+	for _, u := range []string{
+		"http://rekor.example.com", "https://user:pass@rekor.example.com", "https://rekor.example.com?x=1",
+		"https://rekor.example.com#f", "ftp://rekor.example.com", "https://",
+	} {
+		if _, err := anchor.NewClient(u, "", nil); !errors.Is(err, anchor.ErrBadTrust) {
+			t.Errorf("%s accepted: %v", u, err)
+		}
+	}
+	for _, u := range []string{"https://log2025-1.rekor.sigstore.dev", "http://localhost", "http://[::1]:3000", "http://127.0.0.1:8080/"} {
+		if _, err := anchor.NewClient(u, "", nil); err != nil {
+			t.Errorf("%s rejected: %v", u, err)
+		}
+	}
+}
+
+func TestTrustedRootOriginKeepsURLPath(t *testing.T) {
+	t.Parallel()
+	s := rekortest.New(t)
+	root := strings.Replace(string(s.TrustedRootJSON()), `"baseUrl":"http://`+s.Origin+`"`,
+		`"baseUrl":"https://rekor.internal/shard-a/"`, 1)
+	tr, err := anchor.ParseTrust([]byte(root), "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := strings.Join(tr.Origins(), ","); got != "rekor.internal/shard-a" {
+		t.Fatalf("origins %s", got)
+	}
 }

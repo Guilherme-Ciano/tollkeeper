@@ -94,8 +94,8 @@ Upstreams are **semi-trusted**: the operator chose them, but their tool definiti
 | T | Rows rewritten in a database sink | Triggers reject `UPDATE`, `DELETE` and `TRUNCATE`, and recompute each row's hash and chain link on `INSERT`; the gateway role holds only `INSERT` and `SELECT` ([ADR 0009](adr/0009-shared-state-redis-postgres.md)) | `internal/audit/pgsink` |
 | R | Losing records silently on disk failure | `fail_closed` stops admitting calls; lost events become signed gap records | `internal/audit/log.go` |
 | D | Full disk blocking every call | Fail-closed by design; alert on `mcpgw_audit_*` metrics | runbook in README |
-| T | Key holder rebuilds and re-signs the chain | Checkpoints anchored in a Rekor v2 log; `audit verify --rekor-trust` checks inclusion, and `--witness` with `--max-anchor-delay` rejects checkpoints witnessed long after they were written ([ADR 0010](adr/0010-rekor-checkpoint-anchoring.md)) | `internal/audit/anchor` |
-| T | Tail truncation | `--require-anchors` and `--max-unanchored` bound the records after the last anchored checkpoint | `internal/cli` |
+| T | Key holder rebuilds and re-signs the chain | Checkpoints anchored in a Rekor v2 log; anchors bind the whole prefix, so a rebuilt prefix fails. A rebuilt suffix needs witnessed checkpoints: timestamps may not go back, and `--max-anchor-delay` measures from the oldest newly covered record ([ADR 0010](adr/0010-rekor-checkpoint-anchoring.md)) | `internal/audit/verify.go`, `internal/audit/anchor` |
+| T | Tail truncation | `--max-unanchored` bounds the unanchored tail in the file; `--max-anchor-age` (needs witnesses) detects a file cut back to an older anchor | `internal/cli` |
 | T | Forged anchor receipts | Receipts are verified before they are written and again by `audit verify`: log signature on the checkpoint, RFC 6962 inclusion proof, digest recomputed from the chain, logged key equal to the checkpoint key | `internal/audit/anchor/receipt.go` |
 | D | Transparency log slow or down | Anchoring runs in the background with a latest-wins slot and a bounded queue; it never delays audit writes. `required: true` only affects startup and `/readyz` | `internal/audit/anchor/anchorer.go` |
 
@@ -110,7 +110,8 @@ Upstreams are **semi-trusted**: the operator chose them, but their tool definiti
 ## Residual risks
 
 - Records written after the last anchored checkpoint can be truncated by someone with write access to the log. `--max-unsigned` and `--max-unanchored` bound how many; without anchoring, a key holder can also rebuild the whole chain.
-- An anchor proves time only through witness cosignatures. Without `--witness`, it proves that the checkpoint is in the log, not when it got there. Sigstore publishes no witness policy yet, so which witnesses to trust is the operator's choice.
+- An anchor proves time only through witness cosignatures, and the public Rekor v2 instance does not promise witnessed checkpoints yet. Without them an anchor proves that the checkpoint is in the log, not when it got there, so a key holder who rebuilds a suffix and cuts the file back is not detected. An RFC 3161 timestamp is the planned fallback.
+- Rekor v2 has no search API, so the verifier cannot discover anchors that were removed from the file. A monitor that lists every log entry signed by the checkpoint key would close that gap and is not implemented.
 - Tool **results** are passed through unchanged. Prompt injection inside results is the agent's problem to handle; the gateway records a hash of each result so incidents can be reconstructed.
 - Upstreams see the gateway, not the end user, as the caller until RFC 8693 token exchange lands.
 - A compromised identity provider can mint valid tokens. tollkeeper limits the damage with scopes and policy but cannot detect it.

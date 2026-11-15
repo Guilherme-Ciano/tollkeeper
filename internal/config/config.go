@@ -176,6 +176,7 @@ type AuditAnchor struct {
 	Interval   time.Duration `koanf:"interval"`
 	Timeout    time.Duration `koanf:"timeout"`
 	MaxBackoff time.Duration `koanf:"max_backoff"`
+	MinSpacing time.Duration `koanf:"min_spacing"`
 	Required   bool          `koanf:"required"`
 }
 
@@ -237,7 +238,7 @@ func Defaults() Config {
 			Checkpoint:     Checkpoint{Every: 1000, Interval: 30 * time.Second},
 			Postgres:       AuditPostgres{Timeout: 5 * time.Second},
 			Anchor: AuditAnchor{
-				Interval: 15 * time.Minute, Timeout: time.Minute, MaxBackoff: 10 * time.Minute,
+				Interval: 15 * time.Minute, Timeout: time.Minute, MaxBackoff: 10 * time.Minute, MinSpacing: time.Minute,
 			},
 		},
 		Pinning: Pinning{Mode: PinModeWarn, ReloadInterval: 5 * time.Second},

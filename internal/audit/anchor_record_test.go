@@ -140,29 +140,6 @@ func mustRead(t *testing.T, path string) []byte {
 	return b
 }
 
-func TestAppendAnchorQueueFull(t *testing.T) {
-	t.Parallel()
-	pub, priv := keyPair(t)
-	l, err := Open(Options{
-		Path: filepath.Join(t.TempDir(), "a.jsonl"), ChainID: "c1", FlushInterval: time.Hour, Signer: priv,
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = l.Close() })
-	ref := CheckpointRef{ChainID: "c1", Seq: 1, Hash: ZeroHash}
-	var full error
-	for range 64 {
-		if err := l.AppendAnchor(ref, fakeAnchor(ref, pub)); err != nil {
-			full = err
-			break
-		}
-	}
-	if !errors.Is(full, ErrAnchorQueue) {
-		t.Fatalf("queue never filled: %v", full)
-	}
-}
-
 func TestStaleAndForeignAnchorsAreDropped(t *testing.T) {
 	t.Parallel()
 	pub, priv := keyPair(t)
@@ -192,7 +169,7 @@ func TestStaleAndForeignAnchorsAreDropped(t *testing.T) {
 	}
 	mu.Lock()
 	defer mu.Unlock()
-	if len(drops) != 2 || !errors.Is(drops[0], ErrAnchorStale) {
+	if len(drops) != 2 || !errors.Is(drops[0], ErrAnchorStale) || !errors.Is(drops[1], ErrAnchorForeign) {
 		t.Fatalf("drops %v", drops)
 	}
 	rep, err := verifyFile(t, path, pub)
@@ -285,7 +262,7 @@ func TestVerifyWithAnchorVerifierReportsAnchoredPrefix(t *testing.T) {
 		t.Fatal(err)
 	}
 	if rep.LastAnchoredSeq != ref.Seq || rep.RecordsAfterAnchor != rep.LastSeq-ref.Seq ||
-		rep.UnverifiedAnchors != 0 || rep.LastAnchorIndex != 9 || rep.MaxAnchorDelay != 90*time.Second {
+		rep.UnverifiedAnchors != 0 || rep.LastAnchorIndex != 9 || rep.MaxAnchorDelay < 90*time.Second {
 		t.Fatalf("report %+v", rep)
 	}
 	if _, err := VerifyWith(
@@ -381,5 +358,204 @@ func TestCheckpointRingBounded(t *testing.T) {
 	}
 	if _, ok := r.find(1); ok {
 		t.Fatal("checkpoint beyond the lag bound still found")
+	}
+}
+
+func TestQueueAnchorEvictsOldestAndReportsIt(t *testing.T) {
+	t.Parallel()
+	var drops []error
+	l := &Log{opts: Options{AnchorDropped: func(err error) { drops = append(drops, err) }}}
+	for i := range uint64(anchorQueue + 1) {
+		l.queueAnchor(queuedAnchor{ref: CheckpointRef{Seq: i + 1}})
+	}
+	if len(drops) != 1 || !errors.Is(drops[0], ErrAnchorQueue) || len(l.pendingAnchors) != anchorQueue ||
+		l.pendingAnchors[0].ref.Seq != 2 {
+		t.Fatalf("drops %v, pending %+v", drops, l.pendingAnchors)
+	}
+	full := &Log{anchors: make(chan queuedAnchor, anchorQueue)}
+	for range anchorQueue {
+		if err := full.AppendAnchor(CheckpointRef{}, &Anchor{}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := full.AppendAnchor(CheckpointRef{}, &Anchor{}); !errors.Is(err, ErrAnchorQueue) {
+		t.Fatalf("full channel: %v", err)
+	}
+}
+
+func TestAnchorLagBoundMatchesVerifierRing(t *testing.T) {
+	t.Parallel()
+	var drops []error
+	const head = MaxAnchorLagCheckpoints + 10
+	l := &Log{
+		opts: Options{ChainID: "c1", Now: time.Now, AnchorDropped: func(err error) { drops = append(drops, err) }},
+		prev: ZeroHash, seq: 100, ckptOrdinal: head,
+	}
+	inside := queuedAnchor{
+		ref:    CheckpointRef{ChainID: "c1", Seq: 50, Ordinal: head - (MaxAnchorLagCheckpoints - 1)},
+		anchor: &Anchor{},
+	}
+	outside := queuedAnchor{
+		ref:    CheckpointRef{ChainID: "c1", Seq: 40, Ordinal: head - MaxAnchorLagCheckpoints},
+		anchor: &Anchor{},
+	}
+	foreign := queuedAnchor{ref: CheckpointRef{ChainID: "other", Seq: 50, Ordinal: head}, anchor: &Anchor{}}
+	l.pendingAnchors = []queuedAnchor{inside, outside, foreign}
+	n, err := l.appendAnchors()
+	if err != nil || n != 1 {
+		t.Fatalf("appended %d: %v", n, err)
+	}
+	if len(drops) != 2 || !errors.Is(drops[0], ErrAnchorStale) || !errors.Is(drops[1], ErrAnchorForeign) {
+		t.Fatalf("drops %v", drops)
+	}
+	var r checkpointRing
+	for i := range uint64(MaxAnchorLagCheckpoints) {
+		r.add(CheckpointRef{Seq: i + 1})
+	}
+	if _, ok := r.find(1); !ok {
+		t.Fatal("verifier ring dropped a checkpoint the writer still anchors")
+	}
+	r.add(CheckpointRef{Seq: MaxAnchorLagCheckpoints + 1})
+	if _, ok := r.find(1); ok {
+		t.Fatal("verifier ring kept a checkpoint the writer would refuse to anchor")
+	}
+}
+
+func TestPendingAnchorSurvivesFailedWrite(t *testing.T) {
+	t.Parallel()
+	pub, priv := keyPair(t)
+	c := &anchorCapture{}
+	path := filepath.Join(t.TempDir(), "audit.jsonl")
+	l := openAnchoring(t, path, priv, c, nil)
+	appendN(t, l, 2)
+	ref := c.last(t)
+	ff := &flakyFile{logFile: l.file}
+	ff.failWrites.Store(3)
+	l.file = ff
+	if err := l.AppendAnchor(ref, fakeAnchor(ref, pub)); err != nil {
+		t.Fatal(err)
+	}
+	waitFor(t, func() bool { return ff.failWrites.Load() < 0 })
+	appendN(t, l, 1)
+	if err := l.Close(); err != nil {
+		t.Fatal(err)
+	}
+	rep, err := verifyFile(t, path, pub)
+	if err != nil || rep.Anchors != 1 {
+		t.Fatalf("anchor lost after failed writes: %+v %v", rep, err)
+	}
+}
+
+func TestAnchorRecordsDoNotMakeACheckpointDue(t *testing.T) {
+	t.Parallel()
+	pub, priv := keyPair(t)
+	c := &anchorCapture{}
+	l, err := Open(Options{
+		Path: filepath.Join(t.TempDir(), "audit.jsonl"), ChainID: "c1", BatchSize: 1, FlushInterval: time.Millisecond,
+		Signer: priv, CheckpointEvery: 1, CheckpointCommitted: c.add,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	appendN(t, l, 1)
+	ref := c.last(t)
+	if err := l.AppendAnchor(ref, fakeAnchor(ref, pub)); err != nil {
+		t.Fatal(err)
+	}
+	time.Sleep(50 * time.Millisecond)
+	c.mu.Lock()
+	n := len(c.refs)
+	c.mu.Unlock()
+	if n != 1 {
+		t.Fatalf("an anchor record produced %d more checkpoints", n-1)
+	}
+	if err := l.Close(); err != nil {
+		t.Fatal(err)
+	}
+}
+
+type clock struct {
+	mu sync.Mutex
+	t  time.Time
+}
+
+func (c *clock) now() time.Time {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.t
+}
+
+func (c *clock) set(t time.Time) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.t = t
+}
+
+func TestAnchorDelayMeasuredFromOldestCoveredRecord(t *testing.T) {
+	t.Parallel()
+	pub, priv := keyPair(t)
+	t0 := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	clk := &clock{t: t0}
+	c := &anchorCapture{}
+	path := filepath.Join(t.TempDir(), "audit.jsonl")
+	l, err := Open(Options{
+		Path: path, ChainID: "c1", BatchSize: 1, FlushInterval: time.Millisecond, Signer: priv,
+		CheckpointEvery: 3, CheckpointCommitted: c.add, Now: clk.now,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	appendN(t, l, 2)
+	waitFor(t, func() bool { return l.Seq() == 2 })
+	clk.set(t0.Add(2 * time.Hour))
+	appendN(t, l, 1)
+	ref := c.last(t)
+	if err := l.AppendAnchor(ref, fakeAnchor(ref, pub)); err != nil {
+		t.Fatal(err)
+	}
+	appendN(t, l, 1)
+	if err := l.Close(); err != nil {
+		t.Fatal(err)
+	}
+	rep, err := VerifyWith(bytes.NewReader(mustRead(t, path)),
+		VerifyOptions{PublicKey: pub, Anchors: stubAnchors{at: t0.Add(2 * time.Hour)}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if rep.MaxAnchorDelay != 2*time.Hour {
+		t.Fatalf("delay %s: measured from the checkpoint's own timestamp, which its signer chooses", rep.MaxAnchorDelay)
+	}
+	if _, err := VerifyWith(bytes.NewReader(mustRead(t, path)),
+		VerifyOptions{PublicKey: pub, Anchors: stubAnchors{at: t0.Add(time.Hour)}}); !errors.Is(err, ErrTampered) {
+		t.Fatalf("checkpoint dated after its witness accepted: %v", err)
+	}
+}
+
+func TestVerifyRejectsTimestampsGoingBack(t *testing.T) {
+	t.Parallel()
+	_, priv := keyPair(t)
+	t0 := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	clk := &clock{t: t0}
+	path := filepath.Join(t.TempDir(), "audit.jsonl")
+	l, err := Open(
+		Options{Path: path, ChainID: "c1", BatchSize: 1, FlushInterval: time.Millisecond, Signer: priv, Now: clk.now},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	appendN(t, l, 1)
+	waitFor(t, func() bool { return l.Seq() == 1 })
+	clk.set(t0.Add(-30 * time.Second))
+	appendN(t, l, 1)
+	waitFor(t, func() bool { return l.Seq() == 2 })
+	clk.set(t0.Add(-time.Hour))
+	appendN(t, l, 1)
+	if err := l.Close(); err != nil {
+		t.Fatal(err)
+	}
+	_, err = Verify(bytes.NewReader(mustRead(t, path)), nil)
+	var ve *VerifyError
+	if !errors.As(err, &ve) || ve.Seq != 3 {
+		t.Fatalf("an hour backwards accepted or wrong record blamed: %v", err)
 	}
 }

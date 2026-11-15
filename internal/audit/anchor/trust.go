@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"crypto/ecdsa"
 	"crypto/ed25519"
+	"crypto/elliptic"
 	"crypto/sha256"
 	"crypto/x509"
 	"encoding/base64"
@@ -128,17 +129,18 @@ func (t *Trust) add(data []byte, origin string) error {
 		if err != nil || u.Host == "" {
 			return fmt.Errorf("%w: tlogs[%d].baseUrl %q", ErrBadTrust, i, tl.BaseURL)
 		}
+		origin := u.Host + strings.TrimSuffix(u.Path, "/")
 		switch tl.PublicKey.KeyDetails {
 		case "PKIX_ED25519", "PKIX_ECDSA_P256_SHA_256":
 		default:
 			continue
 		}
-		v, err := logVerifier(u.Host, tl.PublicKey.RawBytes)
+		v, err := logVerifier(origin, tl.PublicKey.RawBytes)
 		if err != nil {
 			return fmt.Errorf("tlogs[%d]: %w", i, err)
 		}
-		t.logs[u.Host] = append(t.logs[u.Host], LogKey{
-			Origin: u.Host, Verifier: v,
+		t.logs[origin] = append(t.logs[origin], LogKey{
+			Origin: origin, Verifier: v,
 			ValidFrom: tl.PublicKey.ValidFor.Start, ValidUntil: tl.PublicKey.ValidFor.End,
 		})
 	}
@@ -150,11 +152,17 @@ func (t *Trust) WithWitnesses(vkeys []string, minWitnesses int) (*Trust, error) 
 		return nil, fmt.Errorf("%w: need %d witnesses but %d keys were given", ErrBadTrust, minWitnesses, len(vkeys))
 	}
 	out := &Trust{logs: t.logs, minWitnesses: minWitnesses}
+	seen := map[string]bool{}
 	for _, k := range vkeys {
 		v, err := NewCosignatureVerifier(k)
 		if err != nil {
 			return nil, err
 		}
+		cv, ok := v.(*cosignatureVerifier)
+		if !ok || seen[string(cv.key)] {
+			return nil, fmt.Errorf("%w: witness key %q is listed twice", ErrBadTrust, v.Name())
+		}
+		seen[string(cv.key)] = true
 		out.witnesses = append(out.witnesses, v)
 	}
 	return out, nil
@@ -185,6 +193,9 @@ func logVerifier(origin string, spki []byte) (note.Verifier, error) {
 		}
 		return v, nil
 	case *ecdsa.PublicKey:
+		if k.Curve != elliptic.P256() {
+			return nil, fmt.Errorf("%w: ECDSA log key is not P-256", ErrBadTrust)
+		}
 		sum := sha256.Sum256(spki)
 		return &ecdsaVerifier{name: origin, hash: binary.BigEndian.Uint32(sum[:4]), key: k}, nil
 	default:

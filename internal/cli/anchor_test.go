@@ -59,15 +59,20 @@ func writeAnchoredLog(t *testing.T, witnessDelay time.Duration) anchoredLog {
 	sink := &logSink{}
 	got := make(chan struct{}, 16)
 	an, err := anchor.New(anchor.Options{
-		ChainID: "c", Key: priv, Every: 1, Timeout: 5 * time.Second, Verifier: anchor.NewReceiptVerifier(trust),
-		Hooks: anchor.Hooks{Anchored: func(uint64, time.Time) { got <- struct{}{} }},
+		ChainID:    "c",
+		Key:        priv,
+		Every:      1,
+		Timeout:    5 * time.Second,
+		MinSpacing: time.Nanosecond,
+		Verifier:   anchor.NewReceiptVerifier(trust),
+		Hooks:      anchor.Hooks{Anchored: func(uint64, time.Time) { got <- struct{}{} }},
 	}, c, sink)
 	if err != nil {
 		t.Fatal(err)
 	}
 	l, err := audit.Open(audit.Options{
 		Path: al.path, ChainID: "c", BatchSize: 2, FlushInterval: time.Millisecond, Signer: priv,
-		CheckpointEvery: 2, CheckpointCommitted: an.Offer,
+		CheckpointEvery: 2, CheckpointCommitted: an.Offer, AnchorCommitted: an.Committed,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -114,7 +119,7 @@ func TestVerifyAnchorsCLI(t *testing.T) {
 	al := writeAnchoredLog(t, 0)
 	slow := writeAnchoredLog(t, time.Hour)
 	base := func(a anchoredLog) verifyOpts {
-		return verifyOpts{file: a.path, pubkey: a.pub, maxUnsigned: 1000, rekorTrust: []string{a.root}}
+		return verifyOpts{file: a.path, pubkey: a.pub, maxUnsigned: 1000, rekorTrust: []string{a.root}, chainID: "c"}
 	}
 	withWitness := func(o verifyOpts, a anchoredLog) verifyOpts {
 		o.witnesses, o.minWitnesses = a.witnesses, 1
@@ -154,7 +159,7 @@ func TestVerifyAnchorsCLI(t *testing.T) {
 			"delay needs witnesses",
 			func() verifyOpts { o := base(al); o.maxAnchorDelay = time.Minute; return o }(),
 			false,
-			"needs --min-witnesses",
+			"need --witness keys",
 		},
 		{
 			"require needs trust",
@@ -164,9 +169,38 @@ func TestVerifyAnchorsCLI(t *testing.T) {
 		},
 		{
 			"trust needs key",
-			verifyOpts{file: al.path, noSignatures: true, rekorTrust: []string{al.root}},
+			verifyOpts{file: al.path, noSignatures: true, rekorTrust: []string{al.root}, chainID: "c"},
 			false,
 			"needs --pubkey",
+		},
+		{
+			"trust needs chain id",
+			verifyOpts{file: al.path, pubkey: al.pub, maxUnsigned: 1000, rekorTrust: []string{al.root}},
+			false,
+			"needs --chain-id",
+		},
+		{
+			"witness implies quorum of one",
+			func() verifyOpts { o := base(al); o.witnesses = al.witnesses; return o }(),
+			true,
+			"witnessed_at=20",
+		},
+		{
+			"fresh anchor age",
+			func() verifyOpts { o := withWitness(base(al), al); o.maxAnchorAge = time.Hour; return o }(),
+			true,
+			"ANCHORED",
+		},
+		{
+			"old anchor age",
+			func() verifyOpts {
+				o := withWitness(base(al), al)
+				o.maxAnchorAge = time.Hour
+				o.now = func() time.Time { return time.Now().Add(2 * time.Hour) }
+				return o
+			}(),
+			false,
+			"older than --max-anchor-age",
 		},
 	}
 	for _, tc := range cases {
@@ -198,7 +232,9 @@ func TestVerifyAnchorsFailAgainstOtherLog(t *testing.T) {
 		t.Fatal(err)
 	}
 	var out bytes.Buffer
-	err := runVerify(&out, verifyOpts{file: al.path, pubkey: al.pub, maxUnsigned: 1000, rekorTrust: []string{root}})
+	err := runVerify(&out, verifyOpts{
+		file: al.path, pubkey: al.pub, maxUnsigned: 1000, rekorTrust: []string{root}, chainID: "c",
+	})
 	if err == nil || !strings.Contains(out.String(), "FAIL") {
 		t.Fatalf("anchors from an untrusted log passed: %v %s", err, out.String())
 	}

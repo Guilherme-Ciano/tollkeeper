@@ -218,6 +218,8 @@ type verifyOpts struct {
 	requireAnchors bool
 	maxUnanchored  uint64
 	maxAnchorDelay time.Duration
+	maxAnchorAge   time.Duration
+	now            func() time.Time
 }
 
 func verifyCmd() *cobra.Command {
@@ -250,18 +252,29 @@ func verifyCmd() *cobra.Command {
 	verify.Flags().Uint64Var(&o.maxUnanchored, "max-unanchored", 0,
 		"maximum records after the last verified anchor; 0 disables the check")
 	verify.Flags().DurationVar(&o.maxAnchorDelay, "max-anchor-delay", 0,
-		"maximum time between a checkpoint and its witnessed anchor; needs --min-witnesses; 0 disables the check")
+		"maximum time between a record and the witnessed anchor that first covers it; needs witnesses; 0 disables")
+	verify.Flags().DurationVar(&o.maxAnchorAge, "max-anchor-age", 0,
+		"fail when the newest witnessed anchor is older than this, which detects a log cut back to an old anchor; "+
+			"needs witnesses; 0 disables")
 	return verify
 }
 
 func (o *verifyOpts) checkFlags() error {
+	if len(o.witnesses) > 0 && o.minWitnesses == 0 {
+		o.minWitnesses = 1
+	}
 	switch {
+	case len(o.rekorTrust) > 0 && o.chainID == "" && o.postgres == "":
+		return fmt.Errorf(
+			"%w: --rekor-trust needs --chain-id, or another chain signed by the same key passes",
+			ErrVerify,
+		)
 	case len(o.rekorTrust) > 0 && o.noSignatures:
 		return fmt.Errorf("%w: --rekor-trust needs --pubkey; anchors are bound to the checkpoint key", ErrVerify)
 	case (o.requireAnchors || o.maxUnanchored > 0) && len(o.rekorTrust) == 0:
 		return fmt.Errorf("%w: --require-anchors and --max-unanchored need --rekor-trust", ErrVerify)
-	case o.maxAnchorDelay > 0 && o.minWitnesses < 1:
-		return fmt.Errorf("%w: --max-anchor-delay needs --min-witnesses of at least 1", ErrVerify)
+	case (o.maxAnchorDelay > 0 || o.maxAnchorAge > 0) && o.minWitnesses < 1:
+		return fmt.Errorf("%w: --max-anchor-delay and --max-anchor-age need --witness keys", ErrVerify)
 	case len(o.witnesses) > 0 && len(o.rekorTrust) == 0:
 		return fmt.Errorf("%w: --witness needs --rekor-trust", ErrVerify)
 	}
@@ -290,8 +303,18 @@ func checkAnchors(rep audit.Report, o verifyOpts) error {
 			ErrVerify, rep.RecordsAfterAnchor, rep.LastAnchoredSeq, o.maxUnanchored)
 	}
 	if o.maxAnchorDelay > 0 && rep.MaxAnchorDelay > o.maxAnchorDelay {
-		return fmt.Errorf("%w: a checkpoint was witnessed %s after it was written, more than --max-anchor-delay %s",
+		return fmt.Errorf("%w: a record was first witnessed %s after it was written, more than --max-anchor-delay %s",
 			ErrVerify, rep.MaxAnchorDelay, o.maxAnchorDelay)
+	}
+	if o.maxAnchorAge > 0 {
+		now := time.Now
+		if o.now != nil {
+			now = o.now
+		}
+		if rep.LastWitnessedAt.IsZero() || now().Sub(rep.LastWitnessedAt) > o.maxAnchorAge {
+			return fmt.Errorf("%w: newest witnessed anchor (%s) is older than --max-anchor-age %s",
+				ErrVerify, witnessedAt(rep), o.maxAnchorAge)
+		}
 	}
 	return nil
 }
@@ -335,12 +358,16 @@ func printAnchors(out io.Writer, rep audit.Report) error {
 	if rep.UnverifiedAnchors > 0 {
 		return printf(out, "WARN %d anchors not verified: pass --rekor-trust\n", rep.UnverifiedAnchors)
 	}
-	witnessed := "none"
-	if !rep.LastWitnessedAt.IsZero() {
-		witnessed = rep.LastWitnessedAt.UTC().Format(time.RFC3339)
-	}
 	return printf(out, "ANCHORED anchors=%d anchored_seq=%d after_anchor=%d log=%s#%d witnessed_at=%s\n",
-		rep.Anchors, rep.LastAnchoredSeq, rep.RecordsAfterAnchor, rep.LastAnchorLog, rep.LastAnchorIndex, witnessed)
+		rep.Anchors, rep.LastAnchoredSeq, rep.RecordsAfterAnchor, rep.LastAnchorLog, rep.LastAnchorIndex,
+		witnessedAt(rep))
+}
+
+func witnessedAt(rep audit.Report) string {
+	if rep.LastWitnessedAt.IsZero() {
+		return "none"
+	}
+	return rep.LastWitnessedAt.UTC().Format(time.RFC3339)
 }
 
 func checkSignatures(rep audit.Report, o verifyOpts) error {

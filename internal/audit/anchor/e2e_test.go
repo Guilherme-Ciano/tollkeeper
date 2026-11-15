@@ -28,7 +28,7 @@ func runAnchoredLog(t *testing.T, s *rekortest.Server, k ed25519.PrivateKey, eve
 	anchored := make(chan uint64, 64)
 	a, err := anchor.New(anchor.Options{
 		ChainID: "gw-1", Key: k, Every: every, Timeout: 5 * time.Second,
-		BaseBackoff: time.Millisecond, MaxBackoff: 5 * time.Millisecond,
+		BaseBackoff: time.Millisecond, MaxBackoff: 5 * time.Millisecond, MinSpacing: time.Nanosecond,
 		Verifier: anchor.NewReceiptVerifier(trustFor(t, s, 0)),
 		Hooks:    anchor.Hooks{Anchored: func(seq uint64, _ time.Time) { anchored <- seq }},
 	}, client(t, s), sink)
@@ -37,7 +37,7 @@ func runAnchoredLog(t *testing.T, s *rekortest.Server, k ed25519.PrivateKey, eve
 	}
 	l, err := audit.Open(audit.Options{
 		Path: path, ChainID: "gw-1", Buffer: 256, BatchSize: 8, FlushInterval: time.Millisecond, Fsync: true,
-		Signer: k, CheckpointEvery: 4, CheckpointCommitted: a.Offer,
+		Signer: k, CheckpointEvery: 4, CheckpointCommitted: a.Offer, AnchorCommitted: a.Committed,
 	})
 	if err != nil {
 		t.Fatal(err)

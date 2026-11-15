@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"net/url"
 	"strconv"
@@ -130,8 +131,9 @@ type Client struct {
 
 func NewClient(rawURL, userAgent string, rt http.RoundTripper) (*Client, error) {
 	u, err := url.Parse(strings.TrimSuffix(rawURL, "/"))
-	if err != nil || (u.Scheme != "https" && u.Scheme != "http") || u.Host == "" {
-		return nil, fmt.Errorf("%w: rekor url %q", ErrBadTrust, rawURL)
+	if err != nil || !SafeURL(u) {
+		return nil, fmt.Errorf("%w: rekor url must be https (http only for loopback) with no credentials, "+
+			"query or fragment", ErrBadTrust)
 	}
 	if rt == nil {
 		rt = http.DefaultTransport
@@ -144,6 +146,22 @@ func NewClient(rawURL, userAgent string, rt http.RoundTripper) (*Client, error) 
 			CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse },
 		},
 	}, nil
+}
+
+func SafeURL(u *url.URL) bool {
+	if u.Host == "" || u.User != nil || u.RawQuery != "" || u.Fragment != "" {
+		return false
+	}
+	switch u.Scheme {
+	case "https":
+		return true
+	case "http":
+		host := u.Hostname()
+		ip := net.ParseIP(host)
+		return host == "localhost" || (ip != nil && ip.IsLoopback())
+	default:
+		return false
+	}
 }
 
 func (c *Client) Origin() string {

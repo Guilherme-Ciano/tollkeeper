@@ -13,15 +13,16 @@ import (
 )
 
 var (
-	ErrMalformed    = errors.New("malformed audit data")
-	ErrKeyType      = errors.New("key is not ed25519")
-	ErrBackpressure = errors.New("audit buffer full")
-	ErrClosed       = errors.New("audit log closed")
-	ErrSinkFailed   = errors.New("audit sink failing")
-	ErrCorrupt      = errors.New("audit log tail may be inconsistent; writes stopped")
-	ErrKeyExposed   = errors.New("signing key is readable by group or others")
-	ErrAnchorQueue  = errors.New("audit anchor queue full")
-	ErrAnchorStale  = errors.New("anchor covers a checkpoint too far behind the head")
+	ErrMalformed     = errors.New("malformed audit data")
+	ErrKeyType       = errors.New("key is not ed25519")
+	ErrBackpressure  = errors.New("audit buffer full")
+	ErrClosed        = errors.New("audit log closed")
+	ErrSinkFailed    = errors.New("audit sink failing")
+	ErrCorrupt       = errors.New("audit log tail may be inconsistent; writes stopped")
+	ErrKeyExposed    = errors.New("signing key is readable by group or others")
+	ErrAnchorQueue   = errors.New("audit anchor queue full")
+	ErrAnchorStale   = errors.New("anchor covers a checkpoint too far behind the head")
+	ErrAnchorForeign = errors.New("anchor covers a checkpoint of another chain")
 )
 
 func GenerateKeyPair() (privPEM, pubPEM []byte, err error) {

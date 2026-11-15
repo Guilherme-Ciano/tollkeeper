@@ -26,12 +26,15 @@ An external, append-only witness of what the chain looked like at a given time c
   - They travel with the file and reach the Postgres mirror without a new sink.
   - This matters because Rekor v2 has no search API: a lost receipt cannot be fetched again.
 - **Never on the hot path.** Committed checkpoints are offered to a background job with a latest-wins slot.
-  - The job anchors on `every` checkpoints or `interval` (default 15 minutes), retries with full-jitter backoff and honours `Retry-After`.
+  - The job anchors on `every` checkpoints or `interval` (default 15 minutes), never more often than `min_spacing` (1 minute, also after a restart), retries with full-jitter backoff and honours `Retry-After`.
+  - Anchor records do not count as content: they never make a checkpoint due, so an idle gateway stops anchoring.
   - It verifies the receipt before handing it to the sequencer through a bounded, non-blocking queue.
   - A slow or unavailable Rekor lowers the anchoring rate. It never delays, blocks or drops audit writes.
-- **Time.** Rekor v2 records no integration time. The public log's checkpoints carry timestamped witness cosignatures (C2SP `tlog-cosignature`).
-  - `audit verify --witness` checks them.
-  - `--max-anchor-delay` fails any checkpoint whose earliest witnessed time is too long after it was written. A key holder who rewrites the chain today cannot obtain a witness timestamp from last month.
+- **Time.** Rekor v2 records no integration time. Time comes only from timestamped witness cosignatures (C2SP `tlog-cosignature`) on the checkpoint returned with the receipt.
+  - Sigstore's client guidance says checkpoints of the initial Rekor v2 launch are not witnessed, and that co-signed checkpoints in upload responses are planned. Until they arrive, receipts from the public instance prove inclusion, not time.
+  - `audit verify --witness` checks the cosignatures that are present. The witnessed time of an anchor is the k-th earliest trusted cosignature, where k is `--min-witnesses`, so one early or dishonest witness cannot backdate it.
+  - Record timestamps may not go back by more than one minute. `--max-anchor-delay` measures from the oldest record an anchor newly covers, not from the checkpoint's own timestamp, so a key holder who rebuilds a suffix today must date the forged records within that delay.
+  - `--max-anchor-age` fails when the newest witnessed anchor is older than a bound. That detects a log cut back to an old anchor, which no in-file check can see.
 - **Verification is offline.** It uses operator-supplied trust material: a Sigstore `trusted_root.json` or a PEM log key, plus optional witness keys.
   - `audit verify --rekor-trust` checks the log's signature on the checkpoint, the inclusion proof, that the logged digest is the one recomputed from the chain, and that the logged key is the checkpoint key.
   - `--require-anchors` and `--max-unanchored` bound the unanchored tail.
@@ -39,7 +42,7 @@ An external, append-only witness of what the chain looked like at a given time c
 ## Alternatives considered
 
 - **Rekor v1.** It is the public default, but the SET it relies on is what Sigstore is moving away from, and v1 entries are verified with a separate API and key type. The signed-note format of v2 verifies with the Go standard library plus `x/mod`.
-- **RFC 3161 timestamp authority.** It gives a signed time without witnesses, but proves no append-only property and needs CMS parsing dependencies. It may come later as an extra time source.
+- **RFC 3161 timestamp authority.** It gives a signed time without witnesses, but proves no append-only property and needs CMS parsing. Given the witnessing gap above, it is the next step: a timestamp from `timestamp.sigstore.dev` over the anchor digest, stored in the anchor record.
 - **A sidecar file of receipts.** Simpler sequencer, but it is one more mutable file whose deletions cannot be detected, and it would not reach Postgres.
 - **Synchronous anchoring.** It would bound the unanchored tail to zero, but it ties every tool call to a public service's latency and availability.
 
@@ -47,6 +50,11 @@ An external, append-only witness of what the chain looked like at a given time c
 
 - The audit format gains a third record kind. Older verifiers reject logs that contain anchor records, because unknown fields are refused. Logs written without anchoring are unchanged.
 - The Postgres schema accepts `kind = 'anchor'`. The migration upgrades older tables in place, and the gateway refuses to start with anchoring on if the table would reject anchor rows.
-- Entries in the public log are permanent and public. They reveal the checkpoint public key and the anchoring cadence, but no audit content: the anchored digest commits to a 256-bit chain hash.
-- Without witness keys an anchor proves inclusion, not time. The README and the threat model state this.
+- Entries in the public log are permanent and public. They reveal no audit content, because the anchored digest commits to a 256-bit chain hash. They do reveal:
+  - the checkpoint public key, which links every replica and restart to one operator;
+  - the anchoring cadence, and with `every` the checkpoint rate, which follows traffic;
+  - one stream of entries per replica, so the replica count;
+  - to anyone who holds a chain hash, the `chain_id`, which is often a pod name.
+  Interval-only scheduling is recommended on the public instance. Requests carry the generic User-Agent `tollkeeper`.
+- Without witnessed checkpoints an anchor proves inclusion, not time. The README and the threat model state this.
 - The public instance is rate limited by IP and publishes no numbers. The 1 minute minimum interval and the latest-wins policy keep a replica to about 100 entries a day at the default.

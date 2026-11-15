@@ -1,6 +1,8 @@
 # Anchoring the audit log in Rekor
 
-Anchoring publishes a commitment to each signed checkpoint in a Rekor v2 transparency log and stores the receipt in the audit chain. With witness keys, `tollkeeper audit verify` can then prove that a checkpoint existed by a given time, and that the chain was not rewritten after it. The design is in [ADR 0010](../adr/0010-rekor-checkpoint-anchoring.md).
+Anchoring publishes a commitment to each signed checkpoint in a Rekor v2 transparency log and stores the receipt in the audit chain. `tollkeeper audit verify` can then prove that each anchored checkpoint is in the log. When the log returns witnessed checkpoints, it can also prove *when*, and that the chain was not rewritten afterwards. The design is in [ADR 0010](../adr/0010-rekor-checkpoint-anchoring.md).
+
+> **Time on the public instance.** Sigstore's client guidance says checkpoints of the initial Rekor v2 launch are not witnessed; co-signed checkpoints in upload responses are planned. Until then, anchors from `log2025-1` prove inclusion only, and `--min-witnesses`, `--max-anchor-delay` and `--max-anchor-age` fail on them. An RFC 3161 timestamp is the planned fallback.
 
 ## Prerequisites
 
@@ -32,23 +34,26 @@ audit:
 | `interval` | `15m` | Anchor at most this often; `0` or at least `1m` |
 | `timeout` | `1m` | Per submission; Rekor v2 answers only once the entry is in a checkpoint |
 | `max_backoff` | `10m` | Upper bound of the retry backoff |
+| `min_spacing` | `1m` | Minimum time between submissions, also after a restart; lower only for a loopback test log |
 | `required` | `false` | Check the log at startup and report stale anchoring on `/readyz` |
 
-Each entry is public and permanent. It contains the checkpoint public key and a digest, not audit content.
+Each entry is public and permanent. It contains the checkpoint public key and a digest, not audit content. Timing still reveals the cadence, restarts and the number of replicas; prefer interval-only scheduling on the public instance.
 
 ## Verifying
 
 ```bash
-tollkeeper audit verify -f audit.jsonl --pubkey audit.pub \
+tollkeeper audit verify -f audit.jsonl --pubkey audit.pub --chain-id gw-0 \
   --rekor-trust trusted_root.json \
   --witness 'witness.example+1a2b3c4d+BASE64KEY' --min-witnesses 1 \
-  --require-anchors --max-unanchored 5000 --max-anchor-delay 1h
+  --require-anchors --max-unanchored 5000 --max-anchor-delay 1h --max-anchor-age 2h
 ```
 
 - `--rekor-trust` verifies every anchor record: the log's signature on the checkpoint, the inclusion proof, the digest recomputed from the chain, and the checkpoint key in the entry. Without it, anchors are counted and reported as unverified.
-- `--witness` and `--min-witnesses` check the timestamped cosignatures that witnesses add to the log's checkpoints. Only witnessed anchors prove time.
-- `--max-anchor-delay` fails when a checkpoint was witnessed long after it was written. That is what a chain rebuilt by a key holder looks like.
-- `--max-unanchored` bounds the records after the last anchored checkpoint. That is the part an attacker could truncate without detection.
+- `--chain-id` is required with `--rekor-trust`; otherwise another chain signed by the same key would pass.
+- `--witness` checks the timestamped cosignatures that witnesses add to the log's checkpoints, and implies `--min-witnesses 1`. The witnessed time is the k-th earliest trusted cosignature. Only witnessed anchors prove time.
+- `--max-anchor-delay` fails when a record was first witnessed long after it was written. Record timestamps may not go back by more than a minute, so a rebuilt suffix cannot hide behind an old date.
+- `--max-unanchored` bounds the records after the last anchored checkpoint in the file.
+- `--max-anchor-age` fails when the newest witnessed anchor is too old. That catches a file cut back to an older anchor, which no in-file check can detect.
 
 A successful run ends with a line such as:
 
@@ -60,7 +65,7 @@ ANCHORED anchors=96 anchored_seq=184213 after_anchor=742 log=log2025-1.rekor.sig
 
 | Metric | Alert when |
 | --- | --- |
-| `mcpgw_audit_anchor_last_success_timestamp_seconds` | `time() - value > 2 * interval + max_backoff` |
+| `mcpgw_audit_anchor_last_success_timestamp_seconds` | `time() - value > 2 * interval + max_backoff`; the gauge is `0` until the first receipt is committed, so also alert when it stays `0` past one interval |
 | `mcpgw_audit_anchor_attempts_total{outcome="rejected"}` | any increase: a configuration or key problem |
 | `mcpgw_audit_anchor_attempts_total{outcome="invalid_receipt"}` | any increase: wrong trust material, or a misbehaving log |
 | `mcpgw_audit_anchor_attempts_total{outcome="retry"}` | a sustained rate: the log is unavailable or rate limiting |

@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math"
 	"slices"
 	"time"
 )
@@ -53,6 +54,8 @@ type VerifyOptions struct {
 
 var ErrAnchorNeedsKey = errors.New("verifying anchors requires the checkpoint public key")
 
+const MaxClockStep = time.Minute
+
 type VerifyError struct {
 	Line   int
 	Seq    uint64
@@ -81,19 +84,31 @@ func strictDecode(data []byte, v any) error {
 	return nil
 }
 
+type ringEntry struct {
+	ref    CheckpointRef
+	nextTS int64
+}
+
 type checkpointRing struct {
-	refs []CheckpointRef
+	refs []ringEntry
 }
 
 func (c *checkpointRing) add(ref CheckpointRef) {
 	if len(c.refs) >= 2*MaxAnchorLagCheckpoints {
 		c.refs = append(c.refs[:0], c.refs[len(c.refs)-MaxAnchorLagCheckpoints:]...)
 	}
-	c.refs = append(c.refs, ref)
+	c.refs = append(c.refs, ringEntry{ref: ref, nextTS: math.MaxInt64})
 }
 
-func (c *checkpointRing) find(seq uint64) (CheckpointRef, bool) {
-	i, ok := slices.BinarySearchFunc(c.refs, seq, func(r CheckpointRef, s uint64) int {
+func (c *checkpointRing) next(ts int64) {
+	if n := len(c.refs); n > 0 && c.refs[n-1].nextTS == math.MaxInt64 {
+		c.refs[n-1].nextTS = ts
+	}
+}
+
+func (c *checkpointRing) find(seq uint64) (ringEntry, bool) {
+	i, ok := slices.BinarySearchFunc(c.refs, seq, func(e ringEntry, s uint64) int {
+		r := e.ref
 		switch {
 		case r.Seq < s:
 			return -1
@@ -104,7 +119,7 @@ func (c *checkpointRing) find(seq uint64) (CheckpointRef, bool) {
 		}
 	})
 	if !ok || len(c.refs)-1-i >= MaxAnchorLagCheckpoints {
-		return CheckpointRef{}, false
+		return ringEntry{}, false
 	}
 	return c.refs[i], true
 }
@@ -116,6 +131,9 @@ type verifier struct {
 	prev    string
 	lineNo  int
 	ckpts   checkpointRing
+	firstTS int64
+	lastTS  int64
+	witSeq  uint64
 }
 
 func Verify(r io.Reader, pub ed25519.PublicKey) (Report, error) {
@@ -184,6 +202,15 @@ func (v *verifier) line(line []byte, terminated bool) error {
 	if want != rec.Hash {
 		return v.fail(body.Seq, "hash mismatch: record content was modified")
 	}
+	if v.rep.Records > 0 && body.TS < v.lastTS-int64(MaxClockStep) {
+		return v.fail(body.Seq, "timestamp goes back %s from the previous record",
+			time.Duration(v.lastTS-body.TS))
+	}
+	if v.rep.Records == 0 {
+		v.firstTS = body.TS
+	}
+	v.lastTS = max(v.lastTS, body.TS)
+	v.ckpts.next(body.TS)
 	if body.kinds() != 1 {
 		return v.fail(body.Seq, "record must hold exactly one of event, checkpoint or anchor")
 	}
@@ -217,7 +244,8 @@ func (v *verifier) account(body *Body, hash string) error {
 
 func (v *verifier) anchor(body *Body) error {
 	a := body.Anchor
-	covered, ok := v.ckpts.find(a.CoversSeq)
+	entry, ok := v.ckpts.find(a.CoversSeq)
+	covered := entry.ref
 	if !ok || covered.Hash != a.CoversHash {
 		return v.fail(body.Seq, "anchor covers an unknown or different checkpoint at seq %d", a.CoversSeq)
 	}
@@ -239,11 +267,29 @@ func (v *verifier) anchor(body *Body) error {
 		v.rep.LastAnchorIndex = ev.LogIndex
 	}
 	if !ev.WitnessedAt.IsZero() {
-		if ev.WitnessedAt.After(v.rep.LastWitnessedAt) {
-			v.rep.LastWitnessedAt = ev.WitnessedAt
-		}
-		v.rep.MaxAnchorDelay = max(v.rep.MaxAnchorDelay, ev.WitnessedAt.Sub(time.Unix(0, covered.TS)))
+		return v.witnessed(body.Seq, covered, ev.WitnessedAt)
 	}
+	return nil
+}
+
+func (v *verifier) witnessed(seq uint64, covered CheckpointRef, at time.Time) error {
+	if at.UnixNano() < covered.TS-int64(MaxClockStep) {
+		return v.fail(seq, "checkpoint at seq %d is dated after it was witnessed", covered.Seq)
+	}
+	if covered.Seq <= v.witSeq {
+		return nil
+	}
+	start := v.firstTS
+	if v.witSeq > 0 {
+		if prev, ok := v.ckpts.find(v.witSeq); ok && prev.nextTS != math.MaxInt64 {
+			start = prev.nextTS
+		}
+	}
+	v.witSeq = covered.Seq
+	if at.After(v.rep.LastWitnessedAt) {
+		v.rep.LastWitnessedAt = at
+	}
+	v.rep.MaxAnchorDelay = max(v.rep.MaxAnchorDelay, at.Sub(time.Unix(0, start)))
 	return nil
 }
 

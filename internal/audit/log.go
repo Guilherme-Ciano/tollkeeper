@@ -39,6 +39,7 @@ type Options struct {
 	MirrorTimeout      time.Duration
 
 	CheckpointCommitted func(CheckpointRef)
+	AnchorCommitted     func(CheckpointRef)
 	AnchorDropped       func(error)
 }
 
@@ -76,6 +77,7 @@ type Log struct {
 	seq          uint64
 	prev         string
 	lastCkptSeq  uint64
+	unsigned     uint64
 	lastCkptTime time.Time
 	buf          bytes.Buffer
 	rows         []Row
@@ -160,6 +162,9 @@ func (l *Log) recover() error {
 	}
 	l.seq = body.Seq
 	l.prev = rec.Hash
+	if body.Checkpoint == nil {
+		l.unsigned = 1
+	}
 	if body.Checkpoint != nil {
 		l.lastCkptSeq = body.Seq
 		l.recovered = CheckpointRef{ChainID: body.ChainID, Seq: body.Seq, Hash: rec.Hash, TS: body.TS}
@@ -187,11 +192,36 @@ func (l *Log) AppendAnchor(ref CheckpointRef, a *Anchor) error {
 }
 
 func (l *Log) queueAnchor(q queuedAnchor) {
+	if l.fatal.Load() {
+		l.anchorDropped(ErrCorrupt)
+		return
+	}
 	if len(l.pendingAnchors) >= anchorQueue {
 		l.pendingAnchors = slices.Delete(l.pendingAnchors, 0, 1)
 		l.anchorDropped(ErrAnchorQueue)
 	}
 	l.pendingAnchors = append(l.pendingAnchors, q)
+}
+
+func (l *Log) anchorRejection(q queuedAnchor) error {
+	switch {
+	case q.ref.ChainID != l.opts.ChainID:
+		return ErrAnchorForeign
+	case q.ref.Seq > l.seq || q.ref.Ordinal > l.ckptOrdinal || l.ckptOrdinal-q.ref.Ordinal >= MaxAnchorLagCheckpoints:
+		return ErrAnchorStale
+	default:
+		return nil
+	}
+}
+
+func (l *Log) dropRejectedAnchors() {
+	l.pendingAnchors = slices.DeleteFunc(l.pendingAnchors, func(q queuedAnchor) bool {
+		err := l.anchorRejection(q)
+		if err != nil {
+			l.anchorDropped(err)
+		}
+		return err != nil
+	})
 }
 
 func (l *Log) anchorDropped(err error) {
@@ -337,6 +367,7 @@ func (l *Log) shutdown(ctx context.Context, batch []Event) {
 type sequencerState struct {
 	seq      uint64
 	prev     string
+	unsigned uint64
 	ckSeq    uint64
 	ckTime   time.Time
 	ordinal  uint64
@@ -345,14 +376,14 @@ type sequencerState struct {
 
 func (l *Log) save() sequencerState {
 	return sequencerState{
-		seq: l.seq, prev: l.prev, ckSeq: l.lastCkptSeq, ckTime: l.lastCkptTime,
+		seq: l.seq, prev: l.prev, unsigned: l.unsigned, ckSeq: l.lastCkptSeq, ckTime: l.lastCkptTime,
 		ordinal: l.ckptOrdinal, lastCkpt: l.lastCkpt,
 	}
 }
 
 func (l *Log) restore(s sequencerState) {
 	atomic.StoreUint64(&l.seq, s.seq)
-	l.prev, l.lastCkptSeq, l.lastCkptTime = s.prev, s.ckSeq, s.ckTime
+	l.prev, l.unsigned, l.lastCkptSeq, l.lastCkptTime = s.prev, s.unsigned, s.ckSeq, s.ckTime
 	l.ckptOrdinal, l.lastCkpt = s.ordinal, s.lastCkpt
 }
 
@@ -389,30 +420,23 @@ func (l *Log) run(ctx context.Context) {
 }
 
 func (l *Log) checkpointDue() bool {
-	if l.opts.Signer == nil || l.seq == l.lastCkptSeq {
+	if l.opts.Signer == nil || l.unsigned == 0 {
 		return false
 	}
-	if l.opts.CheckpointEvery > 0 && l.seq-l.lastCkptSeq >= uint64(l.opts.CheckpointEvery) {
+	if l.opts.CheckpointEvery > 0 && l.unsigned >= uint64(l.opts.CheckpointEvery) {
 		return true
 	}
 	return l.opts.CheckpointInterval > 0 && l.opts.Now().Sub(l.lastCkptTime) >= l.opts.CheckpointInterval
 }
 
 func (l *Log) appendAnchors() (int, error) {
-	n := 0
+	l.dropRejectedAnchors()
 	for _, q := range l.pendingAnchors {
-		if q.ref.ChainID != l.opts.ChainID || q.ref.Seq > l.seq || q.ref.Ordinal > l.ckptOrdinal ||
-			l.ckptOrdinal-q.ref.Ordinal >= MaxAnchorLagCheckpoints {
-			l.anchorDropped(ErrAnchorStale)
-			n++
-			continue
-		}
 		if err := l.appendBody(&Body{Anchor: q.anchor}); err != nil {
 			return 0, err
 		}
-		n++
 	}
-	return n, nil
+	return len(l.pendingAnchors), nil
 }
 
 func (l *Log) appendBody(b *Body) error {
@@ -430,6 +454,9 @@ func (l *Log) appendBody(b *Body) error {
 	}
 	l.buf.Write(line)
 	l.buf.WriteByte('\n')
+	if b.Event != nil {
+		l.unsigned++
+	}
 	if l.opts.Mirror != nil {
 		l.rows = append(l.rows, rowFor(b, rec))
 	}
@@ -449,6 +476,7 @@ func (l *Log) appendCheckpoint() error {
 	}
 	l.lastCkptSeq = l.seq
 	l.lastCkptTime = l.opts.Now()
+	l.unsigned = 0
 	l.ckptOrdinal++
 	l.lastCkpt = CheckpointRef{ChainID: l.opts.ChainID, Seq: l.seq, Hash: l.prev, TS: b.TS, Ordinal: l.ckptOrdinal}
 	return nil
@@ -456,6 +484,7 @@ func (l *Log) appendCheckpoint() error {
 
 func (l *Log) write(ctx context.Context, batch []Event) (err error) {
 	if l.fatal.Load() {
+		l.dropAllAnchors(ErrCorrupt)
 		return ErrCorrupt
 	}
 	saved := l.save()
@@ -471,9 +500,26 @@ func (l *Log) write(ctx context.Context, batch []Event) (err error) {
 	if err != nil {
 		return err
 	}
-	if d > 0 {
+	if err := l.appendBatch(d, batch); err != nil {
+		return err
+	}
+	if err := l.commit(ctx); err != nil {
+		return err
+	}
+	written := slices.Clone(l.pendingAnchors[:anchored])
+	l.pendingAnchors = slices.Delete(l.pendingAnchors, 0, anchored)
+	l.committed(saved)
+	l.anchorsCommitted(written)
+	if l.opts.Hooks.Written != nil {
+		l.opts.Hooks.Written(len(batch))
+	}
+	return nil
+}
+
+func (l *Log) appendBatch(dropped uint64, batch []Event) error {
+	if dropped > 0 {
 		if err := l.appendBody(
-			&Body{Event: &Event{Phase: PhaseDecision, Method: "audit", Decision: DecisionGap, Dropped: d}},
+			&Body{Event: &Event{Phase: PhaseDecision, Method: "audit", Decision: DecisionGap, Dropped: dropped}},
 		); err != nil {
 			return err
 		}
@@ -482,26 +528,34 @@ func (l *Log) write(ctx context.Context, batch []Event) (err error) {
 		if err := l.appendBody(&Body{Event: &batch[i]}); err != nil {
 			return err
 		}
-		if l.checkpointDue() {
-			if err := l.appendCheckpoint(); err != nil {
-				return err
-			}
-		}
-	}
-	if l.checkpointDue() {
-		if err := l.appendCheckpoint(); err != nil {
+		if err := l.maybeCheckpoint(); err != nil {
 			return err
 		}
 	}
-	if err := l.commit(ctx); err != nil {
-		return err
+	return l.maybeCheckpoint()
+}
+
+func (l *Log) maybeCheckpoint() error {
+	if !l.checkpointDue() {
+		return nil
 	}
-	l.pendingAnchors = slices.Delete(l.pendingAnchors, 0, anchored)
-	l.committed(saved)
-	if l.opts.Hooks.Written != nil {
-		l.opts.Hooks.Written(len(batch))
+	return l.appendCheckpoint()
+}
+
+func (l *Log) anchorsCommitted(written []queuedAnchor) {
+	if l.opts.AnchorCommitted == nil {
+		return
 	}
-	return nil
+	for _, q := range written {
+		l.opts.AnchorCommitted(q.ref)
+	}
+}
+
+func (l *Log) dropAllAnchors(err error) {
+	for range l.pendingAnchors {
+		l.anchorDropped(err)
+	}
+	l.pendingAnchors = l.pendingAnchors[:0]
 }
 
 func (l *Log) resetBatch() {

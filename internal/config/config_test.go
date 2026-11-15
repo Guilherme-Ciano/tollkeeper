@@ -246,3 +246,32 @@ func TestValidateAuditAnchor(t *testing.T) {
 		t.Fatalf("loopback http rejected: %v", err)
 	}
 }
+
+func TestAnchorURLAndSpacingRules(t *testing.T) {
+	t.Parallel()
+	for url, ok := range map[string]bool{
+		"https://log2025-1.rekor.sigstore.dev": true, "http://localhost": true, "http://[::1]": true,
+		"http://127.0.0.1:3000": true, "http://rekor.example.com": false, "https://u:p@rekor.example.com": false,
+		"https://rekor.example.com?x=1": false,
+	} {
+		cfg := Defaults()
+		cfg.Audit.Checkpoint.SigningKeyFile = "/k.pem"
+		cfg.Audit.Anchor.Enabled = true
+		cfg.Audit.Anchor.TrustFiles = []string{"/root.json"}
+		cfg.Audit.Anchor.RekorURL = url
+		err := cfg.Validate()
+		bad := err != nil && strings.Contains(err.Error(), "audit.anchor.rekor_url:")
+		if bad == ok {
+			t.Errorf("%s: accepted=%t, err=%v", url, !bad, err)
+		}
+	}
+	cfg := Defaults()
+	cfg.Audit.Checkpoint.SigningKeyFile = "/k.pem"
+	cfg.Audit.Anchor = AuditAnchor{
+		Enabled: true, RekorURL: "https://rekor.example.com", TrustFiles: []string{"/r.json"},
+		Interval: time.Hour, Timeout: time.Minute, MaxBackoff: time.Minute, MinSpacing: time.Second,
+	}
+	if err := cfg.Validate(); err == nil || !strings.Contains(err.Error(), "audit.anchor.min_spacing:") {
+		t.Fatalf("sub-minute spacing against a public log accepted: %v", err)
+	}
+}

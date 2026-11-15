@@ -9,6 +9,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"math"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -130,8 +131,12 @@ func (v *ReceiptVerifier) VerifyAnchor(
 	if err := v.witness(n, &ev); err != nil {
 		return ev, err
 	}
-	if !ev.WitnessedAt.IsZero() && !logKey.validAt(ev.WitnessedAt) {
-		return ev, fmt.Errorf("%w: log key not valid at %s", ErrUntrustedLog, ev.WitnessedAt.Format(time.RFC3339))
+	at := ev.WitnessedAt
+	if at.IsZero() {
+		at = time.Unix(0, covered.TS)
+	}
+	if !logKey.validAt(at) {
+		return ev, fmt.Errorf("%w: log key not valid at %s", ErrUntrustedLog, at.UTC().Format(time.RFC3339))
 	}
 	return ev, nil
 }
@@ -204,6 +209,7 @@ func checkEntry(entry []byte, chainID string, covered audit.CheckpointRef, pub e
 }
 
 func (v *ReceiptVerifier) witness(n *note.Note, ev *audit.AnchorEvidence) error {
+	var times []time.Time
 	for _, s := range n.Sigs {
 		if !v.isWitness(s) {
 			continue
@@ -212,14 +218,17 @@ func (v *ReceiptVerifier) witness(n *note.Note, ev *audit.AnchorEvidence) error 
 		if err != nil {
 			return fmt.Errorf("%w: %w", ErrInvalidReceipt, err)
 		}
-		ev.Witnesses++
-		if ev.WitnessedAt.IsZero() || t.Before(ev.WitnessedAt) {
-			ev.WitnessedAt = t
-		}
+		times = append(times, t)
 	}
+	ev.Witnesses = len(times)
 	if ev.Witnesses < v.trust.minWitnesses {
 		return fmt.Errorf("%w: %d of %d", ErrWitnessQuorum, ev.Witnesses, v.trust.minWitnesses)
 	}
+	if len(times) == 0 {
+		return nil
+	}
+	slices.SortFunc(times, time.Time.Compare)
+	ev.WitnessedAt = times[max(v.trust.minWitnesses, 1)-1]
 	return nil
 }
 
