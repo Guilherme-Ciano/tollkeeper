@@ -4,6 +4,7 @@ import (
 	"os"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/Guilherme-Ciano/tollkeeper/internal/audit"
 	"github.com/Guilherme-Ciano/tollkeeper/internal/audit/anchor"
@@ -31,7 +32,10 @@ func TestRekorPublicInstanceRoundTrip(t *testing.T) {
 		t.Fatal(err)
 	}
 	k := key(t)
-	r := audit.CheckpointRef{ChainID: "tollkeeper-integration-test", Seq: 1, Hash: audit.HashBytes([]byte(t.Name()))}
+	r := audit.CheckpointRef{
+		ChainID: "tollkeeper-integration-test", Seq: 1, Hash: audit.HashBytes([]byte(t.Name())),
+		TS: time.Now().UnixNano(),
+	}
 	sub, err := anchor.Sign(k, r)
 	if err != nil {
 		t.Fatal(err)
@@ -46,8 +50,8 @@ func TestRekorPublicInstanceRoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatalf("receipt from %s does not verify: %v", url, err)
 	}
-	t.Logf("anchored at %s#%d in a tree of %d, %d witnesses, witnessed at %s",
-		ev.Log, ev.LogIndex, ev.TreeSize, ev.Witnesses, ev.WitnessedAt)
+	t.Logf("anchored at %s#%d in a tree of %d, %d trusted witnesses, %d signature lines in the checkpoint",
+		ev.Log, ev.LogIndex, ev.TreeSize, ev.Witnesses, strings.Count(rec.Checkpoint, "\n\u2014 "))
 }
 
 func TestSigstoreTimestampAuthorityRoundTrip(t *testing.T) {
