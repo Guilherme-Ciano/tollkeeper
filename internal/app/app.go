@@ -19,9 +19,11 @@ import (
 
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"github.com/redis/go-redis/v9"
+	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
 	"golang.org/x/sync/errgroup"
 
 	"github.com/Guilherme-Ciano/tollkeeper/internal/audit"
+	"github.com/Guilherme-Ciano/tollkeeper/internal/audit/anchor"
 	"github.com/Guilherme-Ciano/tollkeeper/internal/audit/pgsink"
 	"github.com/Guilherme-Ciano/tollkeeper/internal/authn"
 	"github.com/Guilherme-Ciano/tollkeeper/internal/catalog"
@@ -49,6 +51,7 @@ type App struct {
 	redis     redis.UniversalClient
 	auditLog  *audit.Log
 	auditPG   *pgsink.Sink
+	anchorer  *anchor.Anchorer
 	catalog   *catalog.Catalog
 	upstreams []*upstream.Upstream
 	gateway   *gateway.Gateway
@@ -237,32 +240,10 @@ func (a *App) openAudit(ctx context.Context) error {
 			Written:    func(n int) { a.metrics.AuditWritten.Add(float64(n)) },
 		},
 	}
-	if dsn := a.cfg.Audit.Postgres.DSN; dsn != "" {
-		ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
-		defer cancel()
-		connect := pgsink.Connect
-		if a.cfg.Audit.Postgres.Migrate {
-			connect = pgsink.Open
-		}
-		sink, err := connect(ctx, dsn)
-		if err != nil {
+	if a.cfg.Audit.Postgres.DSN != "" {
+		if err := a.openMirror(ctx, &opts); err != nil {
 			return err
 		}
-		a.auditPG = sink
-		if err := sink.RequireSchema(ctx); err != nil {
-			return err
-		}
-		privs, err := sink.ExcessPrivileges(ctx)
-		if err != nil {
-			return err
-		}
-		if len(privs) > 0 {
-			a.log.WarnContext(ctx,
-				"the audit database role can modify or disable the audit table; grant it only INSERT and SELECT",
-				slog.Any("excess_privileges", privs))
-		}
-		opts.Mirror = sink
-		opts.MirrorTimeout = a.cfg.Audit.Postgres.Timeout
 	}
 	if a.cfg.Audit.Checkpoint.SigningKeyFile != "" {
 		k, err := audit.LoadPrivateKey(a.cfg.Audit.Checkpoint.SigningKeyFile)
@@ -273,12 +254,140 @@ func (a *App) openAudit(ctx context.Context) error {
 	} else {
 		a.log.WarnContext(ctx, "audit checkpoints disabled: no signing key configured")
 	}
+	if a.cfg.Audit.Anchor.Enabled {
+		if err := a.openAnchorer(ctx, &opts); err != nil {
+			return err
+		}
+	}
 	l, err := audit.OpenContext(ctx, opts)
 	if err != nil {
 		return err
 	}
 	a.auditLog = l
+	if ref, ok := l.RecoveredCheckpoint(); ok && a.anchorer != nil {
+		a.anchorer.Offer(ref)
+	}
 	return nil
+}
+
+func (a *App) openMirror(ctx context.Context, opts *audit.Options) error {
+	dsn := a.cfg.Audit.Postgres.DSN
+	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	defer cancel()
+	connect := pgsink.Connect
+	if a.cfg.Audit.Postgres.Migrate {
+		connect = pgsink.Open
+	}
+	sink, err := connect(ctx, dsn)
+	if err != nil {
+		return err
+	}
+	a.auditPG = sink
+	if err := sink.RequireSchema(ctx); err != nil {
+		return err
+	}
+	if a.cfg.Audit.Anchor.Enabled {
+		if err := sink.RequireAnchorKind(ctx); err != nil {
+			return err
+		}
+	}
+	privs, err := sink.ExcessPrivileges(ctx)
+	if err != nil {
+		return err
+	}
+	if len(privs) > 0 {
+		a.log.WarnContext(ctx,
+			"the audit database role can modify or disable the audit table; grant it only INSERT and SELECT",
+			slog.Any("excess_privileges", privs))
+	}
+	opts.Mirror = sink
+	opts.MirrorTimeout = a.cfg.Audit.Postgres.Timeout
+	return nil
+}
+
+type anchorSink struct {
+	app *App
+}
+
+func (s anchorSink) AppendAnchor(ref audit.CheckpointRef, an *audit.Anchor) error {
+	if s.app.auditLog == nil {
+		return audit.ErrClosed
+	}
+	return s.app.auditLog.AppendAnchor(ref, an)
+}
+
+func (a *App) openAnchorer(ctx context.Context, opts *audit.Options) error {
+	ac := a.cfg.Audit.Anchor
+	trust, err := anchor.LoadTrust(ac.TrustFiles, ac.Origin)
+	if err != nil {
+		return err
+	}
+	client, err := anchor.NewClient(ac.RekorURL, "tollkeeper", otelhttp.NewTransport(http.DefaultTransport))
+	if err != nil {
+		return err
+	}
+	if ac.Required {
+		pctx, cancel := context.WithTimeout(ctx, ac.Timeout)
+		defer cancel()
+		cp, err := client.Checkpoint(pctx)
+		if err != nil {
+			return fmt.Errorf("audit anchoring required but the transparency log is unreachable: %w", err)
+		}
+		if err := anchor.CheckLogCheckpoint(trust, cp); err != nil {
+			return fmt.Errorf("audit anchoring required: %w", err)
+		}
+	}
+	var stamper anchor.Timestamper
+	if ac.TSAURL != "" {
+		if !trust.HasTimestampAuthority() {
+			return fmt.Errorf("%w: audit.anchor.tsa_url is set but trust_files hold no timestamp authority",
+				anchor.ErrBadTrust)
+		}
+		tc, err := anchor.NewTimestampClient(ac.TSAURL, otelhttp.NewTransport(http.DefaultTransport))
+		if err != nil {
+			return err
+		}
+		stamper, trust = tc, trust.RequireTime()
+	}
+	an, err := anchor.New(anchor.Options{
+		ChainID:     a.cfg.Audit.ChainID,
+		Key:         opts.Signer,
+		Timestamper: stamper,
+		Every:       ac.Every,
+		Interval:    ac.Interval,
+		Timeout:     ac.Timeout,
+		MaxBackoff:  ac.MaxBackoff,
+		MinSpacing:  ac.MinSpacing,
+		Verifier:    anchor.NewReceiptVerifier(trust),
+		Logger:      a.log,
+		Hooks: anchor.Hooks{
+			Attempt:  func(o string) { a.metrics.AnchorAttempts.WithLabelValues(o).Inc() },
+			Duration: func(d time.Duration) { a.metrics.AnchorDuration.Observe(d.Seconds()) },
+			Anchored: func(seq uint64, at time.Time) {
+				a.metrics.AnchorLastSuccess.Set(float64(at.Unix()))
+				a.metrics.AnchorCoveredSeq.Set(float64(seq))
+			},
+		},
+	}, client, anchorSink{app: a})
+	if err != nil {
+		return err
+	}
+	a.anchorer = an
+	opts.CheckpointCommitted = an.Offer
+	opts.AnchorCommitted = an.Committed
+	opts.AnchorDropped = func(error) { a.metrics.AnchorAttempts.WithLabelValues(anchor.OutcomeDropped).Inc() }
+	a.log.InfoContext(ctx, "audit anchoring enabled", slog.String("rekor_url", ac.RekorURL),
+		slog.String("tsa_url", ac.TSAURL),
+		slog.Int("every", ac.Every), slog.Duration("interval", ac.Interval), slog.Bool("required", ac.Required))
+	return nil
+}
+
+func (a *App) anchorStale() bool {
+	if a.anchorer == nil || !a.cfg.Audit.Anchor.Required {
+		return false
+	}
+	ac := a.cfg.Audit.Anchor
+	return a.anchorer.Stale(time.Now(), 2*ac.Interval+ac.Timeout+ac.MaxBackoff)
 }
 
 func (a *App) Gateway() *gateway.Gateway {
@@ -321,6 +430,10 @@ func (a *App) adminHandler() http.Handler {
 		}
 		if !slices.ContainsFunc(a.upstreams, a.serving) {
 			http.Error(w, "no upstream connected and synced", http.StatusServiceUnavailable)
+			return
+		}
+		if a.anchorStale() {
+			http.Error(w, "audit anchoring stale", http.StatusServiceUnavailable)
 			return
 		}
 		w.WriteHeader(http.StatusOK)
@@ -491,6 +604,9 @@ func (a *App) Run(ctx context.Context) error {
 	}
 	if a.pins != nil && a.cfg.Pinning.File != "" {
 		bg.Go(func() { a.pinLoop(bgCtx) })
+	}
+	if a.anchorer != nil {
+		bg.Go(func() { a.anchorer.Run(bgCtx) })
 	}
 	for _, u := range a.upstreams {
 		bg.Go(func() { u.Run(bgCtx) })

@@ -346,6 +346,46 @@ func (c *Config) validateAudit(v *validator) {
 	if c.Audit.Checkpoint.SigningKeyFile != "" && c.Audit.Checkpoint.Every < 1 && c.Audit.Checkpoint.Interval <= 0 {
 		v.add("audit.checkpoint", "set every or interval when a signing key is configured")
 	}
+	c.validateAnchor(v)
+}
+
+func (c *Config) validateAnchor(v *validator) {
+	a := c.Audit.Anchor
+	if !a.Enabled {
+		return
+	}
+	if u, err := url.Parse(a.RekorURL); err != nil || !safeLogURL(u) {
+		v.add("audit.anchor.rekor_url", "must be an https URL (http only for loopback) without credentials, "+
+			"query or fragment")
+	}
+	if u, err := url.Parse(a.TSAURL); a.TSAURL != "" && (err != nil || !safeLogURL(u)) {
+		v.add("audit.anchor.tsa_url", "must be an https URL (http only for loopback) without credentials, "+
+			"query or fragment")
+	}
+	if c.Audit.Checkpoint.SigningKeyFile == "" {
+		v.add("audit.checkpoint.signing_key_file", "required when audit.anchor.enabled is true")
+	}
+	if len(a.TrustFiles) == 0 {
+		v.add("audit.anchor.trust_files", "at least one Sigstore trusted_root.json or PEM log key is required")
+	}
+	if a.Every < 0 {
+		v.add("audit.anchor.every", "must not be negative")
+	}
+	if a.Every == 0 && a.Interval <= 0 {
+		v.add("audit.anchor", "set every or interval")
+	}
+	if a.Interval != 0 && a.Interval < time.Minute {
+		v.add("audit.anchor.interval", "must be 0 or at least 1m to respect the public log's rate limits")
+	}
+	if a.Timeout < 20*time.Second || a.Timeout > 5*time.Minute {
+		v.add("audit.anchor.timeout", "must be within [20s, 5m]; Rekor v2 answers once the entry is in a checkpoint")
+	}
+	if u, err := url.Parse(a.RekorURL); a.MinSpacing < time.Minute && (err != nil || u.Scheme != "http") {
+		v.add("audit.anchor.min_spacing", "must be at least 1m except for a loopback test log")
+	}
+	if a.MaxBackoff < time.Second || a.MaxBackoff > time.Hour {
+		v.add("audit.anchor.max_backoff", "must be within [1s, 1h]")
+	}
 }
 
 func Loopback(addr string) bool {
@@ -380,4 +420,20 @@ func ParseRate(s string) (count int, per time.Duration, err error) {
 		return 0, 0, fmt.Errorf("%q: %w", s, ErrBadRate)
 	}
 	return count, per, nil
+}
+
+func safeLogURL(u *url.URL) bool {
+	if u.Host == "" || u.User != nil || u.RawQuery != "" || u.Fragment != "" {
+		return false
+	}
+	switch u.Scheme {
+	case "https":
+		return true
+	case "http":
+		host := u.Hostname()
+		ip := net.ParseIP(host)
+		return host == "localhost" || (ip != nil && ip.IsLoopback())
+	default:
+		return false
+	}
 }

@@ -133,13 +133,13 @@ linters:
       - path: cmd/
         linters: [gochecknoglobals]
         text: "^(version|commit|date) is a global variable"
-      - path: (internal/config/load\.go|internal/audit/keys\.go|internal/cli/|internal/pin/pin\.go|internal/tools/covbadge/)
+      - path: (internal/config/load\.go|internal/audit/keys\.go|internal/audit/anchor/trust\.go|internal/cli/|internal/pin/pin\.go|internal/tools/covbadge/)
         linters: [gosec]
         text: "G304"
       - path: internal/upstream/transport\.go
         linters: [gosec]
         text: "G204"
-      - path: internal/upstream/upstream\.go
+      - path: (internal/upstream/upstream\.go|internal/audit/anchor/anchorer\.go)
         linters: [gosec]
         text: "G404"
       - path: internal/devissuer/

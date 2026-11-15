@@ -239,3 +239,82 @@ func TestBareNamingPolicyGlobWithSeparatorWarns(t *testing.T) {
 		t.Fatalf("bare naming = %+v", n)
 	}
 }
+
+func TestValidateAuditAnchor(t *testing.T) {
+	t.Parallel()
+	if Defaults().Audit.Anchor.Enabled {
+		t.Fatal("anchoring must be opt-in")
+	}
+	cfg := Defaults()
+	cfg.Audit.Anchor = AuditAnchor{
+		Enabled: true, RekorURL: "http://rekor.example.com", Every: -1, Interval: time.Second,
+		Timeout: time.Second, MaxBackoff: 2 * time.Hour,
+	}
+	err := cfg.Validate()
+	for _, field := range []string{
+		"audit.anchor.rekor_url", "audit.checkpoint.signing_key_file", "audit.anchor.trust_files",
+		"audit.anchor.every", "audit.anchor.interval", "audit.anchor.timeout", "audit.anchor.max_backoff",
+	} {
+		if err == nil || !strings.Contains(err.Error(), field+":") {
+			t.Errorf("missing error for %s in: %v", field, err)
+		}
+	}
+	ok := Defaults()
+	ok.Audit.Checkpoint.SigningKeyFile = "/keys/audit.pem"
+	ok.Audit.Anchor.Enabled = true
+	ok.Audit.Anchor.RekorURL = "https://log2025-1.rekor.sigstore.dev"
+	ok.Audit.Anchor.TrustFiles = []string{"/etc/tollkeeper/trusted_root.json"}
+	if err := ok.Validate(); err != nil && strings.Contains(err.Error(), "audit.anchor") {
+		t.Fatalf("valid anchor config rejected: %v", err)
+	}
+	ok.Audit.Anchor.RekorURL = "http://127.0.0.1:3000"
+	if err := ok.Validate(); err != nil && strings.Contains(err.Error(), "audit.anchor.rekor_url") {
+		t.Fatalf("loopback http rejected: %v", err)
+	}
+}
+
+func TestAnchorURLAndSpacingRules(t *testing.T) {
+	t.Parallel()
+	for url, ok := range map[string]bool{
+		"https://log2025-1.rekor.sigstore.dev": true, "http://localhost": true, "http://[::1]": true,
+		"http://127.0.0.1:3000": true, "http://rekor.example.com": false, "https://u:p@rekor.example.com": false,
+		"https://rekor.example.com?x=1": false,
+	} {
+		cfg := Defaults()
+		cfg.Audit.Checkpoint.SigningKeyFile = "/k.pem"
+		cfg.Audit.Anchor.Enabled = true
+		cfg.Audit.Anchor.TrustFiles = []string{"/root.json"}
+		cfg.Audit.Anchor.RekorURL = url
+		err := cfg.Validate()
+		bad := err != nil && strings.Contains(err.Error(), "audit.anchor.rekor_url:")
+		if bad == ok {
+			t.Errorf("%s: accepted=%t, err=%v", url, !bad, err)
+		}
+	}
+	cfg := Defaults()
+	cfg.Audit.Checkpoint.SigningKeyFile = "/k.pem"
+	cfg.Audit.Anchor = AuditAnchor{
+		Enabled: true, RekorURL: "https://rekor.example.com", TrustFiles: []string{"/r.json"},
+		Interval: time.Hour, Timeout: time.Minute, MaxBackoff: time.Minute, MinSpacing: time.Second,
+	}
+	if err := cfg.Validate(); err == nil || !strings.Contains(err.Error(), "audit.anchor.min_spacing:") {
+		t.Fatalf("sub-minute spacing against a public log accepted: %v", err)
+	}
+}
+
+func TestAnchorTimestampURL(t *testing.T) {
+	t.Parallel()
+	cfg := Defaults()
+	cfg.Audit.Checkpoint.SigningKeyFile = "/k.pem"
+	cfg.Audit.Anchor.Enabled = true
+	cfg.Audit.Anchor.RekorURL = "https://log2025-1.rekor.sigstore.dev"
+	cfg.Audit.Anchor.TrustFiles = []string{"/root.json"}
+	cfg.Audit.Anchor.TSAURL = "http://tsa.example.com"
+	if err := cfg.Validate(); err == nil || !strings.Contains(err.Error(), "audit.anchor.tsa_url:") {
+		t.Fatalf("plain http timestamp authority accepted: %v", err)
+	}
+	cfg.Audit.Anchor.TSAURL = "https://timestamp.sigstore.dev/api/v1/timestamp"
+	if err := cfg.Validate(); err != nil && strings.Contains(err.Error(), "audit.anchor.tsa_url") {
+		t.Fatalf("sigstore TSA rejected: %v", err)
+	}
+}
