@@ -51,7 +51,7 @@ services:
     profiles: ["bench"]
 
   jaeger:
-    image: docker.io/jaegertracing/jaeger:2.11.0@sha256:b585df1b6299bbbd16bf7c679da30389349736e4b6bc8f4f500142a75bf26ca8
+    image: docker.io/jaegertracing/jaeger:2.23.0@sha256:3823829974ccfc2485d2e48b165579091f32295022ae80ca49704e2f4834116e
     profiles: ["obs"]
     ports: ["127.0.0.1:16686:16686"]
 
