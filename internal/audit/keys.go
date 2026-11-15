@@ -20,6 +20,8 @@ var (
 	ErrSinkFailed   = errors.New("audit sink failing")
 	ErrCorrupt      = errors.New("audit log tail may be inconsistent; writes stopped")
 	ErrKeyExposed   = errors.New("signing key is readable by group or others")
+	ErrAnchorQueue  = errors.New("audit anchor queue full")
+	ErrAnchorStale  = errors.New("anchor covers a checkpoint too far behind the head")
 )
 
 func GenerateKeyPair() (privPEM, pubPEM []byte, err error) {

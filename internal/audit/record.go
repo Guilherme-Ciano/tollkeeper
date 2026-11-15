@@ -3,6 +3,7 @@ package audit
 import (
 	"crypto/ed25519"
 	"crypto/sha256"
+	"crypto/sha512"
 	"encoding/binary"
 	"encoding/hex"
 	"encoding/json"
@@ -22,6 +23,9 @@ const (
 	PhaseDecision = "decision"
 
 	checkpointDomain = "tollkeeper-ckpt-v1"
+	anchorDomain     = "tollkeeper-anchor-v1"
+
+	MaxAnchorLagCheckpoints = 1 << 16
 )
 
 const ZeroHash = "0000000000000000000000000000000000000000000000000000000000000000"
@@ -60,6 +64,25 @@ type Checkpoint struct {
 	Signature  string `json:"sig"`
 }
 
+type Anchor struct {
+	CoversSeq  uint64   `json:"covers_seq"`
+	CoversHash string   `json:"covers_hash"`
+	KeyID      string   `json:"key_id"`
+	Log        string   `json:"log"`
+	LogIndex   uint64   `json:"log_index"`
+	Entry      []byte   `json:"entry"`
+	Proof      [][]byte `json:"proof"`
+	Checkpoint string   `json:"checkpoint"`
+}
+
+type CheckpointRef struct {
+	ChainID string
+	Seq     uint64
+	Hash    string
+	TS      int64
+	Ordinal uint64
+}
+
 type Body struct {
 	Seq        uint64      `json:"seq"`
 	TS         int64       `json:"ts"`
@@ -67,6 +90,17 @@ type Body struct {
 	Prev       string      `json:"prev"`
 	Event      *Event      `json:"event,omitempty"`
 	Checkpoint *Checkpoint `json:"checkpoint,omitempty"`
+	Anchor     *Anchor     `json:"anchor,omitempty"`
+}
+
+func (b *Body) kinds() int {
+	n := 0
+	for _, set := range []bool{b.Event != nil, b.Checkpoint != nil, b.Anchor != nil} {
+		if set {
+			n++
+		}
+	}
+	return n
 }
 
 type Record struct {
@@ -97,19 +131,35 @@ func Seal(b *Body) (Record, error) {
 	return Record{Body: raw, Hash: hash}, nil
 }
 
-func checkpointMessage(chainID string, seq uint64, hashHex string) ([]byte, error) {
+func domainMessage(domain, chainID string, seq uint64, hashHex string) ([]byte, error) {
 	h, err := hex.DecodeString(hashHex)
 	if err != nil || len(h) != sha256.Size {
-		return nil, fmt.Errorf("checkpoint hash %q: %w", hashHex, ErrMalformed)
+		return nil, fmt.Errorf("record hash %q: %w", hashHex, ErrMalformed)
 	}
-	msg := make([]byte, 0, len(checkpointDomain)+1+len(chainID)+1+8+len(h))
-	msg = append(msg, checkpointDomain...)
+	msg := make([]byte, 0, len(domain)+1+len(chainID)+1+8+len(h))
+	msg = append(msg, domain...)
 	msg = append(msg, 0)
 	msg = append(msg, chainID...)
 	msg = append(msg, 0)
 	msg = binary.BigEndian.AppendUint64(msg, seq)
 	msg = append(msg, h...)
 	return msg, nil
+}
+
+func checkpointMessage(chainID string, seq uint64, hashHex string) ([]byte, error) {
+	return domainMessage(checkpointDomain, chainID, seq, hashHex)
+}
+
+func AnchorStatement(chainID string, seq uint64, recordHashHex string) ([]byte, error) {
+	return domainMessage(anchorDomain, chainID, seq, recordHashHex)
+}
+
+func AnchorDigest(chainID string, seq uint64, recordHashHex string) ([sha512.Size]byte, error) {
+	msg, err := AnchorStatement(chainID, seq, recordHashHex)
+	if err != nil {
+		return [sha512.Size]byte{}, err
+	}
+	return sha512.Sum512(msg), nil
 }
 
 func KeyID(pub ed25519.PublicKey) string {

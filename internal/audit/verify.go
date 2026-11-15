@@ -8,6 +8,8 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"slices"
+	"time"
 )
 
 type Report struct {
@@ -21,7 +23,35 @@ type Report struct {
 	LastHash      string
 	LastSignedSeq uint64
 	UnsignedTail  uint64
+
+	Anchors            uint64
+	UnverifiedAnchors  uint64
+	LastAnchoredSeq    uint64
+	RecordsAfterAnchor uint64
+	LastAnchorLog      string
+	LastAnchorIndex    uint64
+	LastWitnessedAt    time.Time
+	MaxAnchorDelay     time.Duration
 }
+
+type AnchorEvidence struct {
+	Log         string
+	LogIndex    uint64
+	TreeSize    uint64
+	Witnesses   int
+	WitnessedAt time.Time
+}
+
+type AnchorVerifier interface {
+	VerifyAnchor(chainID string, a *Anchor, covered CheckpointRef, pub ed25519.PublicKey) (AnchorEvidence, error)
+}
+
+type VerifyOptions struct {
+	PublicKey ed25519.PublicKey
+	Anchors   AnchorVerifier
+}
+
+var ErrAnchorNeedsKey = errors.New("verifying anchors requires the checkpoint public key")
 
 type VerifyError struct {
 	Line   int
@@ -51,15 +81,52 @@ func strictDecode(data []byte, v any) error {
 	return nil
 }
 
+type checkpointRing struct {
+	refs []CheckpointRef
+}
+
+func (c *checkpointRing) add(ref CheckpointRef) {
+	if len(c.refs) >= 2*MaxAnchorLagCheckpoints {
+		c.refs = append(c.refs[:0], c.refs[len(c.refs)-MaxAnchorLagCheckpoints:]...)
+	}
+	c.refs = append(c.refs, ref)
+}
+
+func (c *checkpointRing) find(seq uint64) (CheckpointRef, bool) {
+	i, ok := slices.BinarySearchFunc(c.refs, seq, func(r CheckpointRef, s uint64) int {
+		switch {
+		case r.Seq < s:
+			return -1
+		case r.Seq > s:
+			return 1
+		default:
+			return 0
+		}
+	})
+	if !ok || len(c.refs)-1-i >= MaxAnchorLagCheckpoints {
+		return CheckpointRef{}, false
+	}
+	return c.refs[i], true
+}
+
 type verifier struct {
-	pub    ed25519.PublicKey
-	rep    Report
-	prev   string
-	lineNo int
+	pub     ed25519.PublicKey
+	anchors AnchorVerifier
+	rep     Report
+	prev    string
+	lineNo  int
+	ckpts   checkpointRing
 }
 
 func Verify(r io.Reader, pub ed25519.PublicKey) (Report, error) {
-	v := &verifier{pub: pub, prev: ZeroHash}
+	return VerifyWith(r, VerifyOptions{PublicKey: pub})
+}
+
+func VerifyWith(r io.Reader, o VerifyOptions) (Report, error) {
+	if o.Anchors != nil && o.PublicKey == nil {
+		return Report{}, ErrAnchorNeedsKey
+	}
+	v := &verifier{pub: o.PublicKey, anchors: o.Anchors, prev: ZeroHash}
 	br := bufio.NewReaderSize(r, 1<<20)
 	for {
 		line, err := br.ReadBytes('\n')
@@ -78,6 +145,7 @@ func Verify(r io.Reader, pub ed25519.PublicKey) (Report, error) {
 	}
 	v.rep.LastHash = v.prev
 	v.rep.UnsignedTail = v.rep.LastSeq - v.rep.LastSignedSeq
+	v.rep.RecordsAfterAnchor = v.rep.LastSeq - v.rep.LastAnchoredSeq
 	return v.rep, nil
 }
 
@@ -116,10 +184,10 @@ func (v *verifier) line(line []byte, terminated bool) error {
 	if want != rec.Hash {
 		return v.fail(body.Seq, "hash mismatch: record content was modified")
 	}
-	if (body.Event == nil) == (body.Checkpoint == nil) {
-		return v.fail(body.Seq, "record must hold exactly one of event or checkpoint")
+	if body.kinds() != 1 {
+		return v.fail(body.Seq, "record must hold exactly one of event, checkpoint or anchor")
 	}
-	if err := v.account(&body); err != nil {
+	if err := v.account(&body, rec.Hash); err != nil {
 		return err
 	}
 	v.prev = rec.Hash
@@ -128,15 +196,58 @@ func (v *verifier) line(line []byte, terminated bool) error {
 	return nil
 }
 
-func (v *verifier) account(body *Body) error {
-	if body.Event != nil {
+func (v *verifier) account(body *Body, hash string) error {
+	switch {
+	case body.Event != nil:
 		v.rep.Events++
 		if body.Event.Decision == DecisionGap {
 			v.rep.Gaps++
 			v.rep.DroppedEvents += body.Event.Dropped
 		}
 		return nil
+	case body.Anchor != nil:
+		return v.anchor(body)
 	}
+	if err := v.checkpoint(body); err != nil {
+		return err
+	}
+	v.ckpts.add(CheckpointRef{ChainID: body.ChainID, Seq: body.Seq, Hash: hash, TS: body.TS})
+	return nil
+}
+
+func (v *verifier) anchor(body *Body) error {
+	a := body.Anchor
+	covered, ok := v.ckpts.find(a.CoversSeq)
+	if !ok || covered.Hash != a.CoversHash {
+		return v.fail(body.Seq, "anchor covers an unknown or different checkpoint at seq %d", a.CoversSeq)
+	}
+	if v.pub != nil && a.KeyID != KeyID(v.pub) {
+		return v.fail(body.Seq, "anchor signed by unknown key %s", a.KeyID)
+	}
+	v.rep.Anchors++
+	if v.anchors == nil {
+		v.rep.UnverifiedAnchors++
+		return nil
+	}
+	ev, err := v.anchors.VerifyAnchor(body.ChainID, a, covered, v.pub)
+	if err != nil {
+		return v.fail(body.Seq, "anchor for seq %d: %v", a.CoversSeq, err)
+	}
+	if a.CoversSeq >= v.rep.LastAnchoredSeq {
+		v.rep.LastAnchoredSeq = a.CoversSeq
+		v.rep.LastAnchorLog = ev.Log
+		v.rep.LastAnchorIndex = ev.LogIndex
+	}
+	if !ev.WitnessedAt.IsZero() {
+		if ev.WitnessedAt.After(v.rep.LastWitnessedAt) {
+			v.rep.LastWitnessedAt = ev.WitnessedAt
+		}
+		v.rep.MaxAnchorDelay = max(v.rep.MaxAnchorDelay, ev.WitnessedAt.Sub(time.Unix(0, covered.TS)))
+	}
+	return nil
+}
+
+func (v *verifier) checkpoint(body *Body) error {
 	ck := body.Checkpoint
 	if ck.CoversSeq != body.Seq-1 || ck.CoversHash != body.Prev {
 		return v.fail(body.Seq, "checkpoint does not cover the preceding record")
