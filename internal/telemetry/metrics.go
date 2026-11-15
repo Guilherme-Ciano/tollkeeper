@@ -26,6 +26,11 @@ type Metrics struct {
 	CatalogRejected *prometheus.CounterVec
 	PinUnapproved   *prometheus.GaugeVec
 	RateBackendErrs prometheus.Counter
+
+	AnchorAttempts    *prometheus.CounterVec
+	AnchorDuration    prometheus.Histogram
+	AnchorLastSuccess prometheus.Gauge
+	AnchorCoveredSeq  prometheus.Gauge
 }
 
 func latencyBuckets() []float64 {
@@ -110,6 +115,21 @@ func NewMetrics() *Metrics {
 			Name: "mcpgw_ratelimit_backend_errors_total",
 			Help: "Shared rate limit backend failures answered by the configured fallback.",
 		}),
+		AnchorAttempts: prometheus.NewCounterVec(prometheus.CounterOpts{
+			Name: "mcpgw_audit_anchor_attempts_total",
+			Help: "Checkpoint anchoring attempts by outcome: ok, retry, rejected, invalid_receipt, dropped.",
+		}, []string{"outcome"}),
+		AnchorDuration: prometheus.NewHistogram(prometheus.HistogramOpts{
+			Name: "mcpgw_audit_anchor_duration_seconds", Help: "Time to submit a checkpoint to the transparency log.",
+			Buckets: []float64{0.1, 0.25, 0.5, 1, 2.5, 5, 10, 20, 40, 60},
+		}),
+		AnchorLastSuccess: prometheus.NewGauge(prometheus.GaugeOpts{
+			Name: "mcpgw_audit_anchor_last_success_timestamp_seconds",
+			Help: "Unix time of the last checkpoint anchored in the transparency log.",
+		}),
+		AnchorCoveredSeq: prometheus.NewGauge(prometheus.GaugeOpts{
+			Name: "mcpgw_audit_anchor_covered_seq", Help: "Audit sequence number covered by the latest anchor.",
+		}),
 	}
 	reg.MustRegister(
 		collectors.NewGoCollector(),
@@ -117,6 +137,7 @@ func NewMetrics() *Metrics {
 		m.Requests, m.Duration, m.Overhead, m.UpstreamLatency, m.PolicyDecisions, m.RateLimited, m.AuthFailures,
 		m.AuditQueue, m.AuditDropped, m.AuditErrors, m.AuditWritten, m.UpstreamUp, m.BreakerState,
 		m.CatalogTools, m.CatalogRejected, m.PinUnapproved, m.RateBackendErrs,
+		m.AnchorAttempts, m.AnchorDuration, m.AnchorLastSuccess, m.AnchorCoveredSeq,
 	)
 	return m
 }

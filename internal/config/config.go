@@ -164,6 +164,21 @@ type Audit struct {
 	RecordArgs     string        `koanf:"record_args"`
 	Checkpoint     Checkpoint    `koanf:"checkpoint"`
 	Postgres       AuditPostgres `koanf:"postgres"`
+	Anchor         AuditAnchor   `koanf:"anchor"`
+}
+
+type AuditAnchor struct {
+	Enabled    bool          `koanf:"enabled"`
+	RekorURL   string        `koanf:"rekor_url"`
+	TrustFiles []string      `koanf:"trust_files"`
+	TSAURL     string        `koanf:"tsa_url"`
+	Origin     string        `koanf:"origin"`
+	Every      int           `koanf:"every"`
+	Interval   time.Duration `koanf:"interval"`
+	Timeout    time.Duration `koanf:"timeout"`
+	MaxBackoff time.Duration `koanf:"max_backoff"`
+	MinSpacing time.Duration `koanf:"min_spacing"`
+	Required   bool          `koanf:"required"`
 }
 
 type AuditPostgres struct {
@@ -223,6 +238,9 @@ func Defaults() Config {
 			RecordArgs:     RecordArgsHash,
 			Checkpoint:     Checkpoint{Every: 1000, Interval: 30 * time.Second},
 			Postgres:       AuditPostgres{Timeout: 5 * time.Second},
+			Anchor: AuditAnchor{
+				Interval: 15 * time.Minute, Timeout: time.Minute, MaxBackoff: 10 * time.Minute, MinSpacing: time.Minute,
+			},
 		},
 		Pinning: Pinning{Mode: PinModeWarn, ReloadInterval: 5 * time.Second},
 		Telemetry: Telemetry{

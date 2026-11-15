@@ -13,6 +13,7 @@ import (
 const (
 	KindEvent      = "event"
 	KindCheckpoint = "checkpoint"
+	KindAnchor     = "anchor"
 
 	reconcileBatch = 1000
 	maxLineBytes   = 16 << 20
@@ -45,8 +46,11 @@ type Mirror interface {
 
 func rowFor(b *Body, rec Record) Row {
 	kind := KindEvent
-	if b.Checkpoint != nil {
+	switch {
+	case b.Checkpoint != nil:
 		kind = KindCheckpoint
+	case b.Anchor != nil:
+		kind = KindAnchor
 	}
 	return Row{
 		ChainID: b.ChainID,

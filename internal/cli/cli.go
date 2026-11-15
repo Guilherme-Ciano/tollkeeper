@@ -15,6 +15,7 @@ import (
 
 	"github.com/Guilherme-Ciano/tollkeeper/internal/app"
 	"github.com/Guilherme-Ciano/tollkeeper/internal/audit"
+	"github.com/Guilherme-Ciano/tollkeeper/internal/audit/anchor"
 	"github.com/Guilherme-Ciano/tollkeeper/internal/audit/pgsink"
 	"github.com/Guilherme-Ciano/tollkeeper/internal/config"
 	"github.com/Guilherme-Ciano/tollkeeper/internal/devissuer"
@@ -209,6 +210,16 @@ type verifyOpts struct {
 	chainID      string
 	maxUnsigned  uint64
 	noSignatures bool
+
+	rekorTrust     []string
+	rekorOrigin    string
+	witnesses      []string
+	minWitnesses   int
+	requireAnchors bool
+	maxUnanchored  uint64
+	maxAnchorDelay time.Duration
+	maxAnchorAge   time.Duration
+	now            func() time.Time
 }
 
 func verifyCmd() *cobra.Command {
@@ -230,7 +241,138 @@ func verifyCmd() *cobra.Command {
 		Uint64Var(&o.maxUnsigned, "max-unsigned", 1000, "maximum records allowed after the last signed checkpoint")
 	verify.Flags().
 		BoolVar(&o.noSignatures, "no-signatures", false, "only check the hash chain; it does not prove authenticity")
+	verify.Flags().StringArrayVar(&o.rekorTrust, "rekor-trust", nil,
+		"Sigstore trusted_root.json or PEM log key used to verify anchor receipts (repeatable)")
+	verify.Flags().StringVar(&o.rekorOrigin, "rekor-origin", "", "log origin for a PEM --rekor-trust key")
+	verify.Flags().StringArrayVar(&o.witnesses, "witness", nil,
+		"witness cosignature verifier key name+hash+base64 (repeatable); witnessed time proves when a checkpoint existed")
+	verify.Flags().IntVar(&o.minWitnesses, "min-witnesses", 0, "witness cosignatures each anchor needs")
+	verify.Flags().BoolVar(&o.requireAnchors, "require-anchors", false,
+		"fail unless at least one anchor verifies against --rekor-trust")
+	verify.Flags().Uint64Var(&o.maxUnanchored, "max-unanchored", 0,
+		"maximum records after the last verified anchor; 0 disables the check")
+	verify.Flags().DurationVar(&o.maxAnchorDelay, "max-anchor-delay", 0,
+		"maximum time between a record and the witnessed anchor that first covers it; needs witnesses; 0 disables")
+	verify.Flags().DurationVar(&o.maxAnchorAge, "max-anchor-age", 0,
+		"fail when the newest witnessed anchor is older than this, which detects a log cut back to an old anchor; "+
+			"needs witnesses; 0 disables")
 	return verify
+}
+
+func (o *verifyOpts) checkFlags() error {
+	if len(o.witnesses) > 0 && o.minWitnesses == 0 {
+		o.minWitnesses = 1
+	}
+	switch {
+	case len(o.rekorTrust) > 0 && o.chainID == "" && o.postgres == "":
+		return fmt.Errorf(
+			"%w: --rekor-trust needs --chain-id, or another chain signed by the same key passes",
+			ErrVerify,
+		)
+	case len(o.rekorTrust) > 0 && o.noSignatures:
+		return fmt.Errorf("%w: --rekor-trust needs --pubkey; anchors are bound to the checkpoint key", ErrVerify)
+	case (o.requireAnchors || o.maxUnanchored > 0) && len(o.rekorTrust) == 0:
+		return fmt.Errorf("%w: --require-anchors and --max-unanchored need --rekor-trust", ErrVerify)
+	case len(o.witnesses) > 0 && len(o.rekorTrust) == 0:
+		return fmt.Errorf("%w: --witness needs --rekor-trust", ErrVerify)
+	}
+	return nil
+}
+
+func (o *verifyOpts) anchorVerifier() (*anchor.ReceiptVerifier, error) {
+	trust, err := anchor.LoadTrust(o.rekorTrust, o.rekorOrigin)
+	if err != nil {
+		return nil, err
+	}
+	trust, err = trust.WithWitnesses(o.witnesses, o.minWitnesses)
+	if err != nil {
+		return nil, err
+	}
+	if o.maxAnchorDelay > 0 || o.maxAnchorAge > 0 {
+		if o.minWitnesses < 1 && !trust.HasTimestampAuthority() {
+			return nil, fmt.Errorf("%w: --max-anchor-delay and --max-anchor-age need a time source: --witness keys "+
+				"or a timestamp authority in --rekor-trust", ErrVerify)
+		}
+		trust = trust.RequireTime()
+	}
+	return anchor.NewReceiptVerifier(trust), nil
+}
+
+func checkAnchors(rep audit.Report, o verifyOpts) error {
+	verified := rep.Anchors - rep.UnverifiedAnchors
+	if o.requireAnchors && (verified == 0 || rep.LastAnchoredSeq == 0) {
+		return fmt.Errorf("%w: no verified anchor in %d records", ErrVerify, rep.Records)
+	}
+	if o.maxUnanchored > 0 && rep.RecordsAfterAnchor > o.maxUnanchored {
+		return fmt.Errorf("%w: %d records after the last anchored checkpoint (seq %d) exceed --max-unanchored %d",
+			ErrVerify, rep.RecordsAfterAnchor, rep.LastAnchoredSeq, o.maxUnanchored)
+	}
+	if o.maxAnchorDelay > 0 && rep.MaxAnchorDelay > o.maxAnchorDelay {
+		return fmt.Errorf("%w: a record was first witnessed %s after it was written, more than --max-anchor-delay %s",
+			ErrVerify, rep.MaxAnchorDelay, o.maxAnchorDelay)
+	}
+	if o.maxAnchorAge > 0 {
+		now := time.Now
+		if o.now != nil {
+			now = o.now
+		}
+		if rep.LastAnchorTime.IsZero() || now().Sub(rep.LastAnchorTime) > o.maxAnchorAge {
+			return fmt.Errorf("%w: newest anchor time (%s) is older than --max-anchor-age %s",
+				ErrVerify, anchorTime(rep), o.maxAnchorAge)
+		}
+	}
+	return nil
+}
+
+func (o *verifyOpts) options() (audit.VerifyOptions, error) {
+	if err := o.checkFlags(); err != nil {
+		return audit.VerifyOptions{}, err
+	}
+	var vo audit.VerifyOptions
+	if o.pubkey != "" {
+		k, err := audit.LoadPublicKey(o.pubkey)
+		if err != nil {
+			return vo, err
+		}
+		vo.PublicKey = k
+	}
+	if len(o.rekorTrust) > 0 {
+		v, err := o.anchorVerifier()
+		if err != nil {
+			return vo, err
+		}
+		vo.Anchors = v
+	}
+	return vo, nil
+}
+
+func printVerifyWarnings(out io.Writer, rep audit.Report) error {
+	if err := printAnchors(out, rep); err != nil {
+		return err
+	}
+	if rep.Gaps == 0 {
+		return nil
+	}
+	return printf(out, "WARN %d gap records cover %d dropped events\n", rep.Gaps, rep.DroppedEvents)
+}
+
+func printAnchors(out io.Writer, rep audit.Report) error {
+	if rep.Anchors == 0 {
+		return nil
+	}
+	if rep.UnverifiedAnchors > 0 {
+		return printf(out, "WARN %d anchors not verified: pass --rekor-trust\n", rep.UnverifiedAnchors)
+	}
+	return printf(out, "ANCHORED anchors=%d anchored_seq=%d after_anchor=%d log=%s#%d anchor_time=%s\n",
+		rep.Anchors, rep.LastAnchoredSeq, rep.RecordsAfterAnchor, rep.LastAnchorLog, rep.LastAnchorIndex,
+		anchorTime(rep))
+}
+
+func anchorTime(rep audit.Report) string {
+	if rep.LastAnchorTime.IsZero() {
+		return "none"
+	}
+	return rep.LastAnchorTime.UTC().Format(time.RFC3339)
 }
 
 func checkSignatures(rep audit.Report, o verifyOpts) error {
@@ -258,20 +400,16 @@ func runVerify(out io.Writer, o verifyOpts) error {
 	if o.pubkey == "" && !o.noSignatures {
 		return fmt.Errorf("%w: pass --pubkey, or --no-signatures to check only the hash chain", ErrVerify)
 	}
+	vo, err := o.options()
+	if err != nil {
+		return err
+	}
 	src, err := openVerifySource(o)
 	if err != nil {
 		return err
 	}
 	defer src.Close()
-	var pub []byte
-	if o.pubkey != "" {
-		k, err := audit.LoadPublicKey(o.pubkey)
-		if err != nil {
-			return err
-		}
-		pub = k
-	}
-	rep, err := audit.Verify(src, pub)
+	rep, err := audit.VerifyWith(src, vo)
 	if errors.Is(err, ErrSource) {
 		return errors.Join(printf(out, "ERROR %s\n", err), err)
 	}
@@ -283,6 +421,9 @@ func runVerify(out io.Writer, o verifyOpts) error {
 		return errors.Join(printf(out, "FAIL %s\n", err), err)
 	}
 	if err := checkSignatures(rep, o); err != nil {
+		return errors.Join(printf(out, "FAIL %s\n", err), err)
+	}
+	if err := checkAnchors(rep, o); err != nil {
 		return errors.Join(printf(out, "FAIL %s\n", err), err)
 	}
 	if err := printf(
@@ -298,15 +439,8 @@ func runVerify(out io.Writer, o verifyOpts) error {
 	); err != nil {
 		return err
 	}
-	if rep.Gaps > 0 {
-		if err := printf(
-			out,
-			"WARN %d gap records cover %d dropped events\n",
-			rep.Gaps,
-			rep.DroppedEvents,
-		); err != nil {
-			return err
-		}
+	if err := printVerifyWarnings(out, rep); err != nil {
+		return err
 	}
 	if o.noSignatures {
 		return printf(out, "WARN signatures not checked: the hash chain alone does not prove authenticity\n")

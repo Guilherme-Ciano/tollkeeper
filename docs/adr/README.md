@@ -13,5 +13,6 @@ Each record states the context, the decision, the alternatives that lost and wha
 | [0007](0007-tool-pinning.md) | Tool definition pinning with operator approval | Accepted |
 | [0008](0008-zero-code-comments.md) | Zero code comments | Accepted |
 | [0009](0009-shared-state-redis-postgres.md) | Redis for shared rate limits, Postgres as an immutable audit sink | Accepted |
+| [0010](0010-rekor-checkpoint-anchoring.md) | Anchor audit checkpoints in a Rekor v2 transparency log | Accepted |
 
 The threat model that ties these together is in [../threat-model.md](../threat-model.md).

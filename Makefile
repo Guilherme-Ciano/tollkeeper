@@ -39,6 +39,7 @@ fuzz: ## Run every fuzz target for FUZZTIME
 	$(GO) test -run='^$$' -fuzz='^FuzzVerify$$' -fuzztime=$(FUZZTIME) ./internal/audit
 	$(GO) test -run='^$$' -fuzz='^FuzzPolicyArgs$$' -fuzztime=$(FUZZTIME) ./internal/policy
 	$(GO) test -run='^$$' -fuzz='^FuzzQualify$$' -fuzztime=$(FUZZTIME) ./internal/catalog
+	$(GO) test -run='^$$' -fuzz='^FuzzReceiptVerifier$$' -fuzztime=$(FUZZTIME) ./internal/audit/anchor
 
 .PHONY: bench
 bench: ## Micro-benchmarks (count=10) into bench/results/raw
