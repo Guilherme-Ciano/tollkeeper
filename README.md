@@ -207,7 +207,7 @@ policy:
 | `audit.anchor.enabled` | `false` | Anchor checkpoints in a Rekor v2 log (`rekor_url`, `trust_files`, `tsa_url`, `interval` 15m, `min_spacing` 1m); entries are public and permanent ([anchoring](docs/operations/anchoring.md)) |
 | `audit.record_args` | `hash` | `none`, `hash`, `full` (raw arguments may be personal data) |
 | `audit.on_backpressure` | `fail_closed` | Calls are refused if their intent record cannot be queued |
-| `server.namespace_tools` | `true` | `false` exposes upstream tool names unchanged; only allowed with exactly one upstream, for deployments that front a single server for auth and audit |
+| `server.namespace_tools` | `true` | `false` exposes upstream tool names unchanged; only allowed with exactly one upstream, for deployments that front a single server for auth and audit. Policy and rate-limit globs then match bare names, so `config validate` warns about globs that still contain the separator |
 | `pinning.mode` | `warn` | `off`, `warn` (serve and report unapproved definitions) or `enforce` (hide and refuse them until approved) |
 | `pinning.file` | | Lockfile written by `tollkeeper pin approve`; required for `enforce`, reloaded every `pinning.reload_interval` (5 s); refused if group or world writable |
 | `pinning.report_token` | | Bearer token for `GET /pins`; without it the report is only served on a loopback admin listener |
