@@ -1,3 +1,5 @@
+<p align="center"><img src="docs/img/banner.png" alt="tollkeeper: a single Go binary between your AI agents and their MCP tools, with OAuth 2.1, CEL policies, GCRA rate limits and an Ed25519-signed audit log." width="100%"></p>
+
 # tollkeeper
 
 **A single Go binary between your agents and their MCP tools: OAuth 2.1 resource server, policy-as-code in CEL, GCRA rate limits, and an audit log you can cryptographically verify.**
