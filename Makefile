@@ -36,6 +36,7 @@ cover: ## Coverage report
 fuzz: ## Run every fuzz target for FUZZTIME
 	$(GO) test -run='^$$' -fuzz='^FuzzParseEnvelope$$' -fuzztime=$(FUZZTIME) ./internal/gateway
 	$(GO) test -run='^$$' -fuzz='^FuzzRejectDuplicateKeys$$' -fuzztime=$(FUZZTIME) ./internal/gateway
+	$(GO) test -run='^$$' -fuzz='^FuzzOpenRequestState$$' -fuzztime=$(FUZZTIME) ./internal/gateway
 	$(GO) test -run='^$$' -fuzz='^FuzzVerify$$' -fuzztime=$(FUZZTIME) ./internal/audit
 	$(GO) test -run='^$$' -fuzz='^FuzzPolicyArgs$$' -fuzztime=$(FUZZTIME) ./internal/policy
 	$(GO) test -run='^$$' -fuzz='^FuzzQualify$$' -fuzztime=$(FUZZTIME) ./internal/catalog
