@@ -133,13 +133,18 @@ type diffSide struct {
 
 func newDiffSide(tb testing.TB, disableFast bool, descriptor map[string]any) *diffSide {
 	tb.Helper()
+	return newDiffSideWith(tb, disableFast, descriptor, config.Policy{Default: config.EffectAllow})
+}
+
+func newDiffSideWith(tb testing.TB, disableFast bool, descriptor map[string]any, pc config.Policy) *diffSide {
+	tb.Helper()
 	cfg := config.Defaults()
 	cfg.Server.PublicURL = "http://127.0.0.1/mcp"
 	cfg.Server.DisableFastPath = disableFast
 	cfg.Auth.Mode = config.AuthModeNone
 	cfg.Audit.Enabled = true
 	cfg.Audit.RecordArgs = config.RecordArgsFull
-	pol, err := policy.New(config.Policy{Default: config.EffectAllow})
+	pol, err := policy.New(pc)
 	if err != nil {
 		tb.Fatal(err)
 	}

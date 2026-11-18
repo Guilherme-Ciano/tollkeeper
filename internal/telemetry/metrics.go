@@ -5,7 +5,10 @@ import (
 	"github.com/prometheus/client_golang/prometheus/collectors"
 )
 
-const labelUpstream = "upstream"
+const (
+	labelUpstream = "upstream"
+	labelRule     = "rule"
+)
 
 type Metrics struct {
 	Registry        *prometheus.Registry
@@ -15,6 +18,7 @@ type Metrics struct {
 	CallDispatch    *prometheus.CounterVec
 	UpstreamLatency *prometheus.HistogramVec
 	PolicyDecisions *prometheus.CounterVec
+	PolicyShadow    *prometheus.CounterVec
 	RateLimited     *prometheus.CounterVec
 	AuthFailures    *prometheus.CounterVec
 	AuditQueue      prometheus.Gauge
@@ -79,12 +83,16 @@ func NewMetrics() *Metrics {
 			Name: "mcpgw_upstream_duration_seconds", Help: "Upstream tools/call duration.",
 			Buckets: latencyBuckets(), NativeHistogramBucketFactor: 1.1,
 		}, []string{labelUpstream}),
+		PolicyShadow: prometheus.NewCounterVec(prometheus.CounterOpts{
+			Name: "mcpgw_policy_shadow_decisions_total",
+			Help: "Calls a shadow rule would have decided, by rule, its effect and the effect actually applied.",
+		}, []string{labelRule, "shadow_effect", "effect"}),
 		PolicyDecisions: prometheus.NewCounterVec(prometheus.CounterOpts{
 			Name: "mcpgw_policy_decisions_total", Help: "Policy decisions by effect and rule.",
-		}, []string{"effect", "rule"}),
+		}, []string{"effect", labelRule}),
 		RateLimited: prometheus.NewCounterVec(prometheus.CounterOpts{
 			Name: "mcpgw_ratelimit_rejections_total", Help: "Requests rejected by rate limit rule.",
-		}, []string{"rule"}),
+		}, []string{labelRule}),
 		AuthFailures: prometheus.NewCounterVec(prometheus.CounterOpts{
 			Name: "mcpgw_auth_failures_total", Help: "Rejected bearer tokens by reason.",
 		}, []string{"reason"}),
@@ -139,11 +147,29 @@ func NewMetrics() *Metrics {
 	reg.MustRegister(
 		collectors.NewGoCollector(),
 		collectors.NewProcessCollector(collectors.ProcessCollectorOpts{}),
-		m.Requests, m.Duration, m.Overhead, m.CallDispatch, m.UpstreamLatency, m.PolicyDecisions, m.RateLimited,
+		m.Requests,
+		m.Duration,
+		m.Overhead,
+		m.CallDispatch,
+		m.UpstreamLatency,
+		m.PolicyDecisions,
+		m.PolicyShadow,
+		m.RateLimited,
 		m.AuthFailures,
-		m.AuditQueue, m.AuditDropped, m.AuditErrors, m.AuditWritten, m.UpstreamUp, m.BreakerState,
-		m.CatalogTools, m.CatalogRejected, m.PinUnapproved, m.RateBackendErrs,
-		m.AnchorAttempts, m.AnchorDuration, m.AnchorLastSuccess, m.AnchorCoveredSeq,
+		m.AuditQueue,
+		m.AuditDropped,
+		m.AuditErrors,
+		m.AuditWritten,
+		m.UpstreamUp,
+		m.BreakerState,
+		m.CatalogTools,
+		m.CatalogRejected,
+		m.PinUnapproved,
+		m.RateBackendErrs,
+		m.AnchorAttempts,
+		m.AnchorDuration,
+		m.AnchorLastSuccess,
+		m.AnchorCoveredSeq,
 	)
 	return m
 }

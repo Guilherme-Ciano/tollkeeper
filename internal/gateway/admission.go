@@ -301,6 +301,9 @@ func (g *Gateway) admitCall(w http.ResponseWriter, r *http.Request, a *Admission
 	})
 	a.Decision = d
 	g.metrics.PolicyDecisions.WithLabelValues(d.Effect.String(), d.Rule).Inc()
+	if d.Shadow != nil {
+		g.metrics.PolicyShadow.WithLabelValues(d.Shadow.Rule, d.Shadow.Effect.String(), d.Effect.String()).Inc()
+	}
 	if !g.applyDecision(ctx, w, a, d) {
 		return false
 	}
@@ -410,6 +413,9 @@ func (g *Gateway) event(a *Admission, phase, decision, rule, reason string) audi
 	}
 	if g.recordArgs == config.RecordArgsFull {
 		e.Args = a.Envelope.Arguments
+	}
+	if sh := a.Decision.Shadow; sh != nil {
+		e.ShadowRule, e.ShadowDecision = sh.Rule, sh.Effect.String()
 	}
 	return e
 }

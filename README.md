@@ -162,6 +162,7 @@ FAIL line 9 (seq 10): sequence gap: expected seq 9 after 8 valid records
 | `tollkeeper serve -c config.yaml` | Run the gateway |
 | `tollkeeper config validate -c config.yaml` | Validate config, compile CEL rules and rate limits, report every bad field with its path |
 | `tollkeeper policy test -c config.yaml -f policies_test.yaml` | Table-driven policy fixtures for CI ([example](deploy/compose/policies_test.yaml)) |
+| `tollkeeper policy explain -c config.yaml --sub alice --scope notes:write --tool notes__create --args '{"body":"x"}'` | Rule-by-rule trace of one decision (`--prompt` and `--resource` for the other kinds), including shadow rules and visibility |
 | `tollkeeper audit verify -f audit.jsonl --pubkey audit.pub` | Recompute the chain, check signatures, report the first broken record. `--postgres DSN --chain-id ID` verifies a chain stored in Postgres instead. Fails when a log has no signed checkpoint or more than `--max-unsigned` (default 1000) records after the last one; `--chain-id` pins the chain; `--no-signatures` checks only the hash chain. `--rekor-trust trusted_root.json --chain-id ID` verifies anchor receipts; `--witness`, `--min-witnesses`, `--require-anchors`, `--max-unanchored`, `--max-anchor-delay` and `--max-anchor-age` bound time and the unanchored tail ([anchoring](docs/operations/anchoring.md)) |
 | `tollkeeper audit keygen -o dir` | Ed25519 checkpoint key pair |
 | `tollkeeper pin status [--check]` | List catalog tools as `approved`, `new` or `changed` against the lockfile; `--check` fails when anything is pending |
@@ -197,6 +198,8 @@ policy:
       resources: ["file:///docs/*"]
       effect: allow
 ```
+
+A rule with `mode: shadow` is evaluated but never decides: the first shadow rule that would have decided is written to the call's audit records (`shadow_rule`, `shadow_decision`) and counted in `mcpgw_policy_shadow_decisions_total{rule, shadow_effect, effect}`, so a new deny can be watched against real traffic before it is enforced. Shadow rules never make anything visible.
 
 A rule applies to tools, prompts or resources only through its own `tools`, `prompts` or `resources` globs, so `tools: ["*"]` never exposes a resource. Globs use `path.Match`, where `*` stops at `/`; a bare `*` matches everything. A resource the caller may not see answers exactly like a missing one (`-32602` with `data.uri`), and lists only show what the caller may read.
 
@@ -313,7 +316,7 @@ Shipped in v1.1:
 Next:
 
 - [x] v1.2 (unreleased): direct `tools/call` path, sealed MRTR state, progress forwarding, input-required pass-through
-- [ ] v1.3: ~~resources and prompts aggregation~~ (done, unreleased), the tasks extension (SEP-2663), hot config reload, RFC 7662 introspection, OTLP log sink
+- [ ] v1.3: ~~resources and prompts aggregation~~, ~~shadow policy rules and `policy explain`~~ (done, unreleased), the tasks extension (SEP-2663), hot config reload, RFC 7662 introspection, OTLP log sink
 - [ ] v2.0: RFC 8693 token exchange to upstreams, DPoP, Helm chart
 
 ## Development

@@ -109,6 +109,7 @@ type Rule struct {
 	Prompts   []string `koanf:"prompts"`
 	Resources []string `koanf:"resources"`
 	When      string   `koanf:"when"`
+	Mode      string   `koanf:"mode"`
 	Effect    string   `koanf:"effect"`
 	OnDeny    OnDeny   `koanf:"on_deny"`
 }
@@ -123,6 +124,11 @@ type Subjects struct {
 type OnDeny struct {
 	StepUpScopes []string `koanf:"step_up_scopes"`
 }
+
+const (
+	RuleModeEnforce = "enforce"
+	RuleModeShadow  = "shadow"
+)
 
 const (
 	RateStoreMemory = "memory"

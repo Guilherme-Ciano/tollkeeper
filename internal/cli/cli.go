@@ -198,7 +198,7 @@ func policyCmd() *cobra.Command {
 	}
 	test.Flags().StringVarP(&path, "config", "c", "tollkeeper.yaml", "config file")
 	test.Flags().StringVarP(&fixtures, "fixtures", "f", "policies_test.yaml", "fixture file")
-	cmd.AddCommand(test)
+	cmd.AddCommand(test, explainCmd())
 	return cmd
 }
 

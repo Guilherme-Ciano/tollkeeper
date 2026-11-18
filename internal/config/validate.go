@@ -279,6 +279,9 @@ func (c *Config) validatePolicy(v *validator) {
 		v.globs(f+".subjects.subs", r.Subjects.Subs)
 		v.globs(f+".subjects.client_ids", r.Subjects.ClientIDs)
 		v.oneOf(f+".effect", r.Effect, EffectAllow, EffectDeny)
+		if r.Mode != "" {
+			v.oneOf(f+".mode", r.Mode, RuleModeEnforce, RuleModeShadow)
+		}
 		if len(r.OnDeny.StepUpScopes) > 0 && r.Effect != EffectAllow {
 			v.add(f+".on_deny", "step_up_scopes only make sense on allow rules")
 		}

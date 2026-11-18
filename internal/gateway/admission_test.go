@@ -116,3 +116,29 @@ func TestUnknownToolLooksLikeDeniedTool(t *testing.T) {
 		t.Fatalf("denial leaks rule data: %s", denied)
 	}
 }
+
+func TestShadowDecisionIsAuditedAndCounted(t *testing.T) {
+	t.Parallel()
+	schema := map[string]any{"name": "up__t", "inputSchema": map[string]any{"type": "object"}}
+	for _, disable := range []bool{false, true} {
+		s := newDiffSideWith(t, disable, schema, config.Policy{Default: config.EffectAllow, Rules: []config.Rule{
+			{Name: "would-block", Tools: []string{"up__*"}, Effect: config.EffectDeny, Mode: config.RuleModeShadow},
+		}})
+		got := s.do(t, statelessHeaders(), callBody(`1`, `"arguments":{"mode":"text"},`+statelessMeta))
+		if got.status != http.StatusOK || strings.Contains(got.body, `"error"`) {
+			t.Fatalf("disable=%t: shadow rule blocked the call: %+v", disable, got)
+		}
+		events := s.audit.take()
+		if len(events) != 2 {
+			t.Fatalf("disable=%t: %d events", disable, len(events))
+		}
+		for _, e := range events {
+			if e.ShadowRule != "would-block" || e.ShadowDecision != "deny" {
+				t.Fatalf("disable=%t: %s record without shadow: %+v", disable, e.Phase, e)
+			}
+		}
+		if v := testutil.ToFloat64(s.m.PolicyShadow.WithLabelValues("would-block", "deny", "allow")); v != 1 {
+			t.Fatalf("disable=%t: shadow metric %v", disable, v)
+		}
+	}
+}
