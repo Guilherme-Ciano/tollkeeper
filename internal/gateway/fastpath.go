@@ -15,6 +15,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/modelcontextprotocol/go-sdk/jsonrpc"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
@@ -28,6 +29,9 @@ const (
 	metaClientCapabilities = "io.modelcontextprotocol/clientCapabilities"
 
 	msgContentAndInput = "server bug: result has both content and inputRequests"
+
+	codeMissingCapabilities = -32021
+	codeUnsupportedVersion  = -32022
 )
 
 type fastCall struct {
@@ -222,7 +226,7 @@ func (g *Gateway) serveFast(w http.ResponseWriter, r *http.Request, a *Admission
 		out.err = errNilResult
 	case res.InputRequests != nil && (len(res.Content) > 0 || res.StructuredContent != nil):
 		g.log.WarnContext(ctx, "handler returned both content and inputRequests")
-		out.err = &rpcCodeError{code: CodeInternal, msg: msgContentAndInput}
+		out.err = &jsonrpc.Error{Code: jsonrpc.CodeInternalError, Message: msgContentAndInput}
 	default:
 		encoded, eerr := encodeCallResult(res)
 		var annotated []byte
@@ -233,40 +237,40 @@ func (g *Gateway) serveFast(w http.ResponseWriter, r *http.Request, a *Admission
 			body, eerr = json.Marshal(fastResponse{JSONRPC: jsonrpcVersion, ID: fc.id, Result: annotated})
 		}
 		if eerr != nil {
-			out.err = &rpcCodeError{code: CodeInternal, msg: "internal error"}
+			out.err = &jsonrpc.Error{Code: jsonrpc.CodeInternalError, Message: "internal error"}
 			break
 		}
 		out.result, out.encoded, out.isError = res, encoded, res.IsError
 		out.inputRequired = res.InputRequests != nil
 	}
+	status := http.StatusOK
 	if out.err != nil {
-		body = encodeFastError(fc.id, out.err)
+		body, status = encodeFastError(fc.id, out.err)
 	}
 	g.finishCall(ctx, span, a, out)
-	writeFast(ctx, w, body)
-}
-
-type rpcCodeError struct {
-	code int64
-	msg  string
-}
-
-func (e *rpcCodeError) Error() string {
-	return e.msg
+	writeFast(ctx, w, status, body)
 }
 
 var errNilResult = errors.New("tool handler returned a nil result")
 
-func encodeFastError(id []byte, err error) []byte {
+func encodeFastError(id []byte, err error) (body []byte, status int) {
 	fe := &fastError{Message: err.Error()}
-	if ce, ok := errors.AsType[*rpcCodeError](err); ok {
-		fe.Code = ce.code
+	status = http.StatusOK
+	if je, ok := errors.AsType[*jsonrpc.Error](err); ok {
+		fe.Code = je.Code
+		switch je.Code {
+		case jsonrpc.CodeMethodNotFound:
+			status = http.StatusNotFound
+		case jsonrpc.CodeInvalidParams, codeMissingCapabilities, codeUnsupportedVersion:
+			status = http.StatusBadRequest
+		}
 	}
 	b, merr := json.Marshal(fastResponse{JSONRPC: jsonrpcVersion, ID: id, Error: fe})
 	if merr != nil {
-		return []byte(`{"jsonrpc":"2.0","id":` + string(id) + `,"error":{"code":-32603,"message":"internal error"}}`)
+		fallback := `{"jsonrpc":"2.0","id":` + string(id) + `,"error":{"code":-32603,"message":"internal error"}}`
+		return []byte(fallback), status
 	}
-	return b
+	return b, status
 }
 
 func encodeCallResult(res *mcp.CallToolResult) ([]byte, error) {
@@ -321,12 +325,12 @@ func (g *Gateway) withServerInfo(res *mcp.CallToolResult, encoded []byte) ([]byt
 	return encodeCallResult(&shadow)
 }
 
-func writeFast(ctx context.Context, w http.ResponseWriter, body []byte) {
+func writeFast(ctx context.Context, w http.ResponseWriter, status int, body []byte) {
 	hd := w.Header()
 	hd.Set("Cache-Control", "no-cache, no-transform")
 	hd.Set("Content-Type", "application/json")
 	hd.Set("Content-Length", strconv.Itoa(len(body)))
-	w.WriteHeader(http.StatusOK)
+	w.WriteHeader(status)
 	if _, err := w.Write(body); err != nil {
 		slog.DebugContext(ctx, "tools/call response not delivered", slog.String("error", err.Error()))
 	}

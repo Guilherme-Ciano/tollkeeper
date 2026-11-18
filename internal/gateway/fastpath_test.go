@@ -12,6 +12,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/prometheus/client_golang/prometheus/testutil"
@@ -105,6 +106,11 @@ func compact(raw json.RawMessage) json.RawMessage {
 	return b.Bytes()
 }
 
+var (
+	diffStateKey = bytes.Repeat([]byte("k"), MinStateKeyLen)
+	diffNow      = time.Date(2026, 11, 18, 12, 0, 0, 0, time.UTC)
+)
+
 type diffSide struct {
 	gw     *Gateway
 	srv    *httptest.Server
@@ -135,6 +141,7 @@ func newDiffSide(tb testing.TB, disableFast bool, descriptor map[string]any) *di
 		Config: cfg, Policy: pol, Limiter: lim, Catalog: cat, Upstreams: map[string]Caller{"up": s.caller},
 		Metrics: s.m, Tracer: noop.NewTracerProvider().Tracer("t"), Propagator: propagation.TraceContext{},
 		Log: slog.New(slog.DiscardHandler), Audit: s.audit,
+		StateKey: diffStateKey, Now: func() time.Time { return diffNow },
 	})
 	desc, err := json.Marshal(descriptor)
 	if err != nil {
@@ -224,6 +231,12 @@ func TestFastPathMatchesSDKPath(t *testing.T) {
 		{"upstream failure", `9`, `"arguments":{"mode":"upstream_err"},` + statelessMeta},
 		{"retry with state", `10`, `"arguments":{"mode":"text"},"requestState":"st-1",` +
 			`"inputResponses":{"ask":{"action":"accept","content":{"name":"ada"}}},` + statelessMeta},
+		{"sealed retry", `11`, `"arguments":{"mode":"text"},"requestState":"` + diffSeal(t, "t") + `",` +
+			statelessMeta},
+		{"tampered state", `12`, `"arguments":{"mode":"text"},"requestState":"` + diffSeal(t, "t") + `x",` +
+			statelessMeta},
+		{"state for another tool", `13`, `"arguments":{"mode":"text"},"requestState":"` +
+			diffSeal(t, "other") + `",` + statelessMeta},
 		{"large id", `9007199254740991`, `"arguments":{"mode":"text"},` + statelessMeta},
 		{"negative id", `-4`, `"arguments":{"mode":"text"},` + statelessMeta},
 	}
@@ -395,4 +408,14 @@ func TestClientCapabilitiesReachTheUpstream(t *testing.T) {
 			t.Fatalf("disable=%t: capabilities not forwarded: %#v", disable, calls[0].Meta)
 		}
 	}
+}
+
+func diffSeal(t *testing.T, tool string) string {
+	t.Helper()
+	sealer := newStateSealer(diffStateKey, time.Minute)
+	tok, err := sealer.seal(statePayload{Upstream: "up", Tool: tool, Inner: "st-1"}, diffNow)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return tok
 }
