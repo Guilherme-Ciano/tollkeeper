@@ -75,7 +75,7 @@ func allowedMethod(m string) bool {
 	switch m {
 	case "initialize", "ping", "server/discover", "tools/list", MethodToolsCall,
 		MethodResourcesList, MethodTemplatesList, MethodPromptsList,
-		MethodPromptsGet, MethodResourcesRead, "completion/complete",
+		MethodPromptsGet, MethodResourcesRead, "completion/complete", "subscriptions/listen",
 		"notifications/initialized", "notifications/cancelled", "notifications/progress",
 		"notifications/roots/list_changed":
 		return true

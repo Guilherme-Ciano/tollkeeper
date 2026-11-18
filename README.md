@@ -309,7 +309,7 @@ Report vulnerabilities as described in [SECURITY.md](SECURITY.md).
 - Rate limits are per replica unless `rate_limits.store: redis` is set. Each replica writes its own audit chain (`chain_id`), also when they share one Postgres table.
 - Upstream results pass through unchanged apart from the sealed `requestState`, including the upstream's `_meta` server info.
 - Records written after the last checkpoint are protected only by the hash chain until the next checkpoint (`checkpoint.every`/`interval`); `audit verify --max-unsigned` bounds how many are accepted. With anchoring, `--max-unanchored` bounds the unanchored tail. Rekor v2 records no time itself and the public instance does not promise witnessed checkpoints yet, so anchors prove time only when `audit.anchor.tsa_url` adds an RFC 3161 timestamp.
-- `subscriptions/listen` is not offered and `tools.listChanged` is not advertised; clients re-list tools.
+- `subscriptions/listen` delivers `tools`, `prompts` and `resources` list-changed notifications, relayed whenever an upstream signals a change (the gateway keeps its own listen stream to each upstream that supports one, and polls every 60 s otherwise) and after a policy reload. `resources/subscribe` for single resources is not offered.
 - Rate-limit tokens are spent by calls that are later denied by policy, and the idle-key janitor can grant at most one extra request on a key it races with.
 - Intent and decision records share one audit queue, so a flood of rejected calls can delay intents (bounded by rate limits and the 100 ms intent deadline).
 - A torn last line (only possible with `fsync: false`) makes startup refuse to continue the chain until the file is repaired.

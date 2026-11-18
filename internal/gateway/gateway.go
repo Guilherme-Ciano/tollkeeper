@@ -2,6 +2,7 @@ package gateway
 
 import (
 	"context"
+	"crypto/rand"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -103,6 +104,8 @@ type Gateway struct {
 	infoPrefix   []byte
 	hidden       atomic.Pointer[map[string]struct{}]
 
+	notifyMu    sync.Mutex
+	sentinel    string
 	regMu       sync.Mutex
 	quarantined map[string]string
 	unapproved  map[string]pin.Status
@@ -161,6 +164,7 @@ func New(d Deps) *Gateway {
 	}
 	states := newStateSealer(stateKey, d.Config.Server.RequestStateTTL)
 	g.states = states
+	g.sentinel = "tollkeeper-list-changed-" + strings.ToLower(rand.Text()[:10])
 	if g.verifier == nil {
 		g.verifier = anonymousVerifier{}
 	}
@@ -394,9 +398,9 @@ func (g *Gateway) addTool(t *catalog.Tool) (err error) {
 	mt.Name = t.Name
 	schema, ok := mt.InputSchema.(map[string]any)
 	if mt.InputSchema == nil {
-		schema, ok = map[string]any{"type": "object"}, true
+		schema, ok = map[string]any{"type": schemaObject}, true
 	}
-	if !ok || schema["type"] != "object" {
+	if !ok || schema["type"] != schemaObject {
 		return errBadSchema
 	}
 	mt.InputSchema = schema

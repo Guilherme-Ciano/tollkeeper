@@ -66,6 +66,7 @@ func (f *fakeReader) Complete(_ context.Context, p *mcp.CompleteParams) (*mcp.Co
 }
 
 type dirFixture struct {
+	gw     *Gateway
 	srv    *httptest.Server
 	reader *fakeReader
 	audit  *recordingAuditor
@@ -112,6 +113,7 @@ func newDirFixture(t *testing.T) *dirFixture {
 		Log: slog.New(slog.DiscardHandler), Audit: f.audit, StateKey: diffStateKey,
 		Now: func() time.Time { return diffNow },
 	})
+	f.gw = gw
 	f.srv = httptest.NewServer(gw.Handler())
 	t.Cleanup(f.srv.Close)
 	return f

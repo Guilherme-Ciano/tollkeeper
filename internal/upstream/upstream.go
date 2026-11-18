@@ -52,6 +52,7 @@ type Upstream struct {
 	up        atomic.Bool
 	gen       atomic.Uint64
 
+	signalled   atomic.Uint32
 	progress    sync.Map
 	progressSeq atomic.Uint64
 
@@ -129,6 +130,27 @@ func (u *Upstream) Ready() <-chan struct{} {
 	return u.ready
 }
 
+type Changed uint32
+
+const (
+	ChangedTools Changed = 1 << iota
+	ChangedPrompts
+	ChangedResources
+)
+
+func (u *Upstream) signal(c Changed) {
+	u.Restore(c)
+	u.notify()
+}
+
+func (u *Upstream) Restore(c Changed) {
+	u.signalled.Or(uint32(c))
+}
+
+func (u *Upstream) TakeSignalled() Changed {
+	return Changed(u.signalled.Swap(0))
+}
+
 func (u *Upstream) notify() {
 	select {
 	case u.changes <- struct{}{}:
@@ -162,14 +184,14 @@ func (u *Upstream) connect(ctx context.Context) (*mcp.ClientSession, func(), err
 	}
 	client := mcp.NewClient(&mcp.Implementation{Name: "tollkeeper", Version: u.version}, &mcp.ClientOptions{
 		ToolListChangedHandler: func(context.Context, *mcp.ToolListChangedRequest) {
-			u.notify()
+			u.signal(ChangedTools)
 		},
 		MultiRoundTrip: &mcp.MultiRoundTripOptions{Disabled: true},
 		PromptListChangedHandler: func(context.Context, *mcp.PromptListChangedRequest) {
-			u.notify()
+			u.signal(ChangedPrompts)
 		},
 		ResourceListChangedHandler: func(context.Context, *mcp.ResourceListChangedRequest) {
-			u.notify()
+			u.signal(ChangedResources)
 		},
 		ProgressNotificationHandler: func(_ context.Context, req *mcp.ProgressNotificationClientRequest) {
 			u.relayProgress(req.Params)

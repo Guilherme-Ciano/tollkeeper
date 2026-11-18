@@ -555,6 +555,7 @@ func (a *App) serving(u *upstream.Upstream) bool {
 }
 
 func (a *App) resync(ctx context.Context, u *upstream.Upstream) {
+	signalled := u.TakeSignalled()
 	var tools []catalog.Tool
 	gen := u.Generation()
 	up := u.Up()
@@ -569,6 +570,7 @@ func (a *App) resync(ctx context.Context, u *upstream.Upstream) {
 				slog.String("error", err.Error()),
 			)
 			if u.Up() {
+				u.Restore(signalled)
 				return
 			}
 			tools, up = nil, false
@@ -584,13 +586,16 @@ func (a *App) resync(ctx context.Context, u *upstream.Upstream) {
 		)
 		return
 	}
+	if signalled&upstream.ChangedTools != 0 && delta.Empty() {
+		a.gateway.NotifyListChanged(true, false, false)
+	}
 	if !delta.Empty() {
 		a.gateway.Apply(delta)
 		a.log.InfoContext(ctx, "catalog updated", slog.String("upstream", u.ID()),
 			slog.Int("upserted", len(delta.Upserted)), slog.Int("removed", len(delta.Removed)),
 			slog.Uint64("version", a.catalog.Snapshot().Version))
 	}
-	a.resyncDirectory(ctx, u, up)
+	a.resyncDirectory(ctx, u, up, signalled)
 	if up {
 		a.synced[u.ID()].Store(gen)
 	} else {
@@ -717,7 +722,7 @@ func readStateKey(path string) ([]byte, error) {
 	return key, nil
 }
 
-func (a *App) resyncDirectory(ctx context.Context, u *upstream.Upstream, up bool) {
+func (a *App) resyncDirectory(ctx context.Context, u *upstream.Upstream, up bool, signalled upstream.Changed) {
 	var entries []catalog.Entry
 	if up {
 		var err error
@@ -737,6 +742,13 @@ func (a *App) resyncDirectory(ctx context.Context, u *upstream.Upstream, up bool
 		a.log.ErrorContext(ctx, "directory update rejected",
 			slog.String("upstream", u.ID()), slog.String("error", err.Error()))
 		return
+	}
+	switch {
+	case changed:
+		a.gateway.NotifyListChanged(false, true, true)
+	case signalled&(upstream.ChangedPrompts|upstream.ChangedResources) != 0:
+		a.gateway.NotifyListChanged(false, signalled&upstream.ChangedPrompts != 0,
+			signalled&upstream.ChangedResources != 0)
 	}
 	if changed {
 		a.log.InfoContext(ctx, "directory updated", slog.String("upstream", u.ID()),

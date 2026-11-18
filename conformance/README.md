@@ -20,7 +20,7 @@ flowchart LR
 |---|---|
 | `tasks-*` | The tasks extension (SEP-2663) is not proxied. Neither go-sdk (v1.8.0, v1.9.0-pre.1) nor its reference fixture implements it: run directly against the fixture, the suite fails the same 30 checks, so there is no upstream to proxy tasks to yet |
 
-Apart from the baseline, the gateway passes every check the fixture passes when tested directly. Five `server-stateless` checks are skipped through the gateway because it does not offer `subscriptions/listen`.
+Apart from the baseline, the gateway passes every check the fixture passes when tested directly, including the `subscriptions/listen` checks.
 
 Each entry is removed in the change that makes its scenario pass, so the file only shrinks as features land.
 

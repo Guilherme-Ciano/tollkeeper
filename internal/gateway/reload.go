@@ -17,6 +17,7 @@ const (
 func (g *Gateway) Swap(p *policy.Engine, l *ratelimit.Limiter) {
 	g.policy.Store(p)
 	g.limiter.Store(l)
+	g.NotifyListChanged(true, true, true)
 }
 
 func (g *Gateway) RecordConfig(ctx context.Context, action, digest, detail string) error {

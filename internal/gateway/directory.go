@@ -39,10 +39,10 @@ type Reader interface {
 var errUpstreamFailed = &jsonrpc.Error{Code: CodeUpstreamFailed, Message: "upstream call failed"}
 
 func (g *Gateway) capabilities() *mcp.ServerCapabilities {
-	caps := &mcp.ServerCapabilities{Tools: &mcp.ToolCapabilities{}}
+	caps := &mcp.ServerCapabilities{Tools: &mcp.ToolCapabilities{ListChanged: true}}
 	if g.directory != nil {
-		caps.Prompts = &mcp.PromptCapabilities{}
-		caps.Resources = &mcp.ResourceCapabilities{}
+		caps.Prompts = &mcp.PromptCapabilities{ListChanged: true}
+		caps.Resources = &mcp.ResourceCapabilities{ListChanged: true}
 		caps.Completions = &mcp.CompletionCapabilities{}
 	}
 	return caps
