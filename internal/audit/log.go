@@ -37,6 +37,7 @@ type Options struct {
 	Hooks              Hooks
 	Mirror             Mirror
 	MirrorTimeout      time.Duration
+	Committed          func([]Row)
 
 	CheckpointCommitted func(CheckpointRef)
 	AnchorCommitted     func(CheckpointRef)
@@ -457,7 +458,7 @@ func (l *Log) appendBody(b *Body) error {
 	if b.Event != nil {
 		l.unsigned++
 	}
-	if l.opts.Mirror != nil {
+	if l.opts.Mirror != nil || l.opts.Committed != nil {
 		l.rows = append(l.rows, rowFor(b, rec))
 	}
 	atomic.StoreUint64(&l.seq, b.Seq)
@@ -598,6 +599,9 @@ func (l *Log) commit(ctx context.Context) error {
 				l.opts.Hooks.SinkError(fmt.Errorf("commit audit mirror, will catch up from the file: %w", err))
 			}
 		}
+	}
+	if l.opts.Committed != nil {
+		l.opts.Committed(l.rows)
 	}
 	return nil
 }

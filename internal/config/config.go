@@ -188,6 +188,17 @@ type Audit struct {
 	Checkpoint     Checkpoint    `koanf:"checkpoint"`
 	Postgres       AuditPostgres `koanf:"postgres"`
 	Anchor         AuditAnchor   `koanf:"anchor"`
+	OTLP           AuditOTLP     `koanf:"otlp"`
+}
+
+type AuditOTLP struct {
+	Endpoint      string            `koanf:"endpoint"`
+	Headers       map[string]string `koanf:"headers"`
+	Batch         int               `koanf:"batch"`
+	Queue         int               `koanf:"queue"`
+	Interval      time.Duration     `koanf:"interval"`
+	Timeout       time.Duration     `koanf:"timeout"`
+	AllowInsecure bool              `koanf:"allow_insecure"`
 }
 
 type AuditAnchor struct {
@@ -263,6 +274,7 @@ func Defaults() Config {
 			RecordArgs:     RecordArgsHash,
 			Checkpoint:     Checkpoint{Every: 1000, Interval: 30 * time.Second},
 			Postgres:       AuditPostgres{Timeout: 5 * time.Second},
+			OTLP:           AuditOTLP{Batch: 512, Queue: 10000, Interval: 2 * time.Second, Timeout: 5 * time.Second},
 			Anchor: AuditAnchor{
 				Interval: 15 * time.Minute, Timeout: time.Minute, MaxBackoff: 10 * time.Minute, MinSpacing: time.Minute,
 			},

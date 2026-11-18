@@ -222,6 +222,7 @@ A rule applies to tools, prompts or resources only through its own `tools`, `pro
 | `rate_limits.store` | `memory` | `redis` shares limits across replicas; set `rate_limits.redis.addrs`, `key_prefix`, `timeout` (50 ms) and `on_error` (`local` fallback or `deny`) |
 | `audit.postgres.dsn` | | Mirror the audit chain to Postgres ([roles and grants](docs/operations/postgres.md)); `audit.postgres.migrate: true` only in development; requires `audit.chain_id` and `audit.fsync` |
 | `audit.anchor.enabled` | `false` | Anchor checkpoints in a Rekor v2 log (`rekor_url`, `trust_files`, `tsa_url`, `interval` 15m, `min_spacing` 1m); entries are public and permanent ([anchoring](docs/operations/anchoring.md)) |
+| `audit.otlp.endpoint` | | Also send every committed audit record to an OpenTelemetry collector as an OTLP/HTTP JSON log (`/v1/logs`), with chain, sequence, hash, decision, tool and subject as attributes and the exact record as the body. Best effort and never authoritative: a bounded queue (`queue` 10000, `batch` 512, `interval` 2s) drops records instead of slowing the gateway, counted in `mcpgw_audit_otlp_records_total{result}`; the file stays the source of truth. `headers` for collector credentials |
 | `audit.record_args` | `hash` | `none`, `hash`, `full` (raw arguments may be personal data) |
 | `audit.on_backpressure` | `fail_closed` | Calls are refused if their intent record cannot be queued |
 | `server.namespace_tools` | `true` | `false` exposes upstream tool names unchanged; only allowed with exactly one upstream, for deployments that front a single server for auth and audit. Policy and rate-limit globs then match bare names, so `config validate` warns about globs that still contain the separator |
@@ -318,7 +319,7 @@ Shipped in v1.1:
 Next:
 
 - [x] v1.2 (unreleased): direct `tools/call` path, sealed MRTR state, progress forwarding, input-required pass-through
-- [ ] v1.3: ~~resources and prompts aggregation~~, ~~shadow policy rules and `policy explain`~~, ~~hot config reload~~, ~~RFC 7662 introspection~~ (done, unreleased), the tasks extension (SEP-2663), OTLP log sink
+- [ ] v1.3: ~~resources and prompts aggregation~~, ~~shadow policy rules and `policy explain`~~, ~~hot config reload~~, ~~RFC 7662 introspection~~, ~~OTLP log sink~~ (done, unreleased), the tasks extension (SEP-2663)
 - [ ] v2.0: RFC 8693 token exchange to upstreams, DPoP, Helm chart
 
 ## Development

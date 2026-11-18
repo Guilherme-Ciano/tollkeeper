@@ -26,6 +26,7 @@ import (
 
 	"github.com/Guilherme-Ciano/tollkeeper/internal/audit"
 	"github.com/Guilherme-Ciano/tollkeeper/internal/audit/anchor"
+	"github.com/Guilherme-Ciano/tollkeeper/internal/audit/otlpsink"
 	"github.com/Guilherme-Ciano/tollkeeper/internal/audit/pgsink"
 	"github.com/Guilherme-Ciano/tollkeeper/internal/authn"
 	"github.com/Guilherme-Ciano/tollkeeper/internal/catalog"
@@ -55,6 +56,8 @@ type App struct {
 	auditLog  *audit.Log
 	auditPG   *pgsink.Sink
 	anchorer  *anchor.Anchorer
+	otlp      *otlpsink.Sink
+	version   string
 	catalog   *catalog.Catalog
 	directory *catalog.Directory
 	upstreams []*upstream.Upstream
@@ -71,7 +74,7 @@ type App struct {
 
 func Build(ctx context.Context, cfg config.Config, log *slog.Logger, version string) (built *App, err error) {
 	a := &App{
-		cfg: cfg, log: log, metrics: telemetry.NewMetrics(), catalog: catalog.New(maxCatalogTools),
+		cfg: cfg, log: log, version: version, metrics: telemetry.NewMetrics(), catalog: catalog.New(maxCatalogTools),
 		directory: catalog.NewDirectory(maxDirectoryEntries), synced: map[string]*atomic.Uint64{},
 	}
 	defer func() {
@@ -250,6 +253,21 @@ func (a *App) openAudit(ctx context.Context) error {
 		if err := a.openMirror(ctx, &opts); err != nil {
 			return err
 		}
+	}
+	if o := a.cfg.Audit.OTLP; o.Endpoint != "" {
+		a.otlp = otlpsink.New(otlpsink.Options{
+			Endpoint: o.Endpoint, Headers: o.Headers, Service: "tollkeeper", Version: a.version,
+			Batch: o.Batch, Queue: o.Queue, Interval: o.Interval,
+			Client: &http.Client{Timeout: o.Timeout, CheckRedirect: upstream.NoRedirects},
+			Hooks: otlpsink.Hooks{
+				Exported: func(n int) { a.metrics.AuditExport.WithLabelValues("exported").Add(float64(n)) },
+				Dropped:  func(n int) { a.metrics.AuditExport.WithLabelValues("dropped").Add(float64(n)) },
+				Failed: func(err error) {
+					a.log.WarnContext(ctx, "otlp audit export failed", slog.String("error", err.Error()))
+				},
+			},
+		})
+		opts.Committed = a.otlp.Committed
 	}
 	if a.cfg.Audit.Checkpoint.SigningKeyFile != "" {
 		k, err := audit.LoadPrivateKey(a.cfg.Audit.Checkpoint.SigningKeyFile)
@@ -611,6 +629,9 @@ func (a *App) Run(ctx context.Context) error {
 	}
 	if a.pins != nil && a.cfg.Pinning.File != "" {
 		bg.Go(func() { a.pinLoop(bgCtx) })
+	}
+	if a.otlp != nil {
+		bg.Go(func() { a.otlp.Run(bgCtx) })
 	}
 	if a.anchorer != nil {
 		bg.Go(func() { a.anchorer.Run(bgCtx) })

@@ -26,6 +26,7 @@ type Metrics struct {
 	AuditDropped    prometheus.Counter
 	AuditErrors     prometheus.Counter
 	AuditWritten    prometheus.Counter
+	AuditExport     *prometheus.CounterVec
 	UpstreamUp      *prometheus.GaugeVec
 	BreakerState    *prometheus.GaugeVec
 	CatalogTools    prometheus.Gauge
@@ -110,6 +111,10 @@ func NewMetrics() *Metrics {
 		AuditErrors: prometheus.NewCounter(prometheus.CounterOpts{
 			Name: "mcpgw_audit_sink_errors_total", Help: "Audit sink write failures.",
 		}),
+		AuditExport: prometheus.NewCounterVec(prometheus.CounterOpts{
+			Name: "mcpgw_audit_otlp_records_total",
+			Help: "Audit records sent to the OTLP log sink, by result: exported or dropped.",
+		}, []string{"result"}),
 		AuditWritten: prometheus.NewCounter(prometheus.CounterOpts{
 			Name: "mcpgw_audit_records_written_total", Help: "Audit events written.",
 		}),
@@ -166,6 +171,7 @@ func NewMetrics() *Metrics {
 		m.AuditDropped,
 		m.AuditErrors,
 		m.AuditWritten,
+		m.AuditExport,
 		m.UpstreamUp,
 		m.BreakerState,
 		m.CatalogTools,

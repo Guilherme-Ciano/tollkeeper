@@ -331,6 +331,7 @@ func (c *Config) validateAudit(v *validator) {
 	if !c.Audit.Enabled {
 		return
 	}
+	c.validateAuditOTLP(v)
 	if c.Audit.Postgres.DSN != "" && (c.Audit.Postgres.Timeout <= 0 || c.Audit.Postgres.Timeout > time.Minute) {
 		v.add("audit.postgres.timeout", "must be within (0, 1m]")
 	}
@@ -470,4 +471,35 @@ func (c *Config) validateIntrospection(v *validator) {
 	if in.Timeout <= 0 || in.Timeout > 30*time.Second {
 		v.add("auth.introspection.timeout", "must be within (0, 30s]")
 	}
+}
+
+func (c *Config) validateAuditOTLP(v *validator) {
+	o := c.Audit.OTLP
+	if o.Endpoint == "" {
+		return
+	}
+	v.url("audit.otlp.endpoint", o.Endpoint, "http", "https")
+	if strings.HasPrefix(o.Endpoint, "http://") && !o.AllowInsecure && !Loopback(hostPort(o.Endpoint)) {
+		v.add("audit.otlp.endpoint", "plain http to a non-loopback collector requires audit.otlp.allow_insecure: true")
+	}
+	if o.Batch < 1 || o.Batch > 10000 {
+		v.add("audit.otlp.batch", "must be within [1, 10000]")
+	}
+	if o.Queue < o.Batch || o.Queue > 1_000_000 {
+		v.add("audit.otlp.queue", "must be within [batch, 1000000]")
+	}
+	if o.Interval <= 0 || o.Interval > time.Minute {
+		v.add("audit.otlp.interval", "must be within (0, 1m]")
+	}
+	if o.Timeout <= 0 || o.Timeout > time.Minute {
+		v.add("audit.otlp.timeout", "must be within (0, 1m]")
+	}
+}
+
+func hostPort(raw string) string {
+	u, err := url.Parse(raw)
+	if err != nil {
+		return ""
+	}
+	return u.Host
 }
