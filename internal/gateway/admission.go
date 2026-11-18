@@ -39,6 +39,7 @@ type Admission struct {
 	Start         time.Time
 	Principal     identity.Principal
 	Envelope      Envelope
+	Kind          catalog.Kind
 	Tool          catalog.Tool
 	Decision      policy.Decision
 	ArgsHash      string
@@ -73,7 +74,8 @@ func AdmissionFrom(ctx context.Context) (*Admission, bool) {
 func allowedMethod(m string) bool {
 	switch m {
 	case "initialize", "ping", "server/discover", "tools/list", MethodToolsCall,
-		"resources/list", "resources/templates/list", "prompts/list",
+		MethodResourcesList, MethodTemplatesList, MethodPromptsList,
+		MethodPromptsGet, MethodResourcesRead, "completion/complete",
 		"notifications/initialized", "notifications/cancelled", "notifications/progress",
 		"notifications/roots/list_changed":
 		return true
@@ -198,7 +200,7 @@ func (g *Gateway) admission(next http.Handler) http.Handler {
 		if sc := trace.SpanContextFromContext(r.Context()); sc.IsValid() {
 			a.TraceID = sc.TraceID().String()
 		}
-		if env.Method == MethodToolsCall && !g.admitCall(w, r, a) {
+		if admitted(env.Method) && !g.admitCall(w, r, a) {
 			return
 		}
 		fc, fast := g.fastCandidate(r, a)
@@ -217,10 +219,12 @@ func (g *Gateway) admission(next http.Handler) http.Handler {
 		}
 		total := g.now().Sub(start)
 		g.metrics.Duration.WithLabelValues(env.Method).Observe(total.Seconds())
-		if env.Method != MethodToolsCall {
+		if !admitted(env.Method) {
 			return
 		}
-		g.metrics.Overhead.Observe(max(total-a.Upstream(), 0).Seconds())
+		if env.Method == MethodToolsCall {
+			g.metrics.Overhead.Observe(max(total-a.Upstream(), 0).Seconds())
+		}
 		if !a.dispatched.Load() {
 			g.recordNotDispatched(r.Context(), a)
 		}
@@ -234,13 +238,29 @@ func (g *Gateway) fastCandidate(r *http.Request, a *Admission) (fastCall, bool) 
 	return g.fastPath(r, a)
 }
 
+func admitted(method string) bool {
+	return method == MethodToolsCall || method == MethodPromptsGet || method == MethodResourcesRead
+}
+
+func (g *Gateway) resolveTarget(a *Admission) (catalog.Tool, bool) {
+	a.Kind = targetKind(a.Envelope.Method)
+	if a.Kind == "" {
+		return g.catalog.Lookup(a.Envelope.Name)
+	}
+	e, ok := g.lookupEntry(a.Kind, a.Envelope.Name)
+	if !ok || !g.policy.VisibleAs(a.Principal, e.Kind, e.Name) {
+		return catalog.Tool{}, false
+	}
+	return entryTarget(e, a.Envelope.Name), true
+}
+
 func (g *Gateway) admitCall(w http.ResponseWriter, r *http.Request, a *Admission) bool {
 	ctx := r.Context()
 	env := a.Envelope
 	if g.recordArgs != config.RecordArgsNone && len(env.Arguments) > 0 {
 		a.ArgsHash = audit.HashBytes(env.Arguments)
 	}
-	tool, known := g.catalog.Lookup(env.Name)
+	tool, known := g.resolveTarget(a)
 	subject := ratelimit.Subject{Sub: a.Principal.Subject, ClientID: a.Principal.ClientID}
 	if known {
 		a.Tool = tool
@@ -251,17 +271,27 @@ func (g *Gateway) admitCall(w http.ResponseWriter, r *http.Request, a *Admission
 	}
 	if !known {
 		g.metrics.Requests.WithLabelValues(env.Method, "unknown", "", "unknown_tool").Inc()
-		g.recordDecision(ctx, a, audit.DecisionRejected, "", "unknown tool")
+		g.recordDecision(ctx, a, audit.DecisionRejected, "", "unknown "+kindLabel(a.Kind))
+		if a.Kind != "" {
+			nf := notFoundError(a.Kind, env.Name)
+			status := http.StatusOK
+			if r.Header.Get("Mcp-Protocol-Version") >= protocolStateless {
+				status = http.StatusBadRequest
+			}
+			writeRPCError(w, status, env.ID, int(nf.Code), nf.Message, nf.Data)
+			return false
+		}
 		writeRPCError(w, http.StatusOK, env.ID, CodePolicyDenied, "denied by policy", nil)
 		return false
 	}
-	if g.pinBlocked(tool) {
+	if a.Kind == "" && g.pinBlocked(tool) {
 		g.metrics.Requests.WithLabelValues(env.Method, tool.Name, tool.Upstream, "unapproved_tool").Inc()
 		g.recordDecision(ctx, a, audit.DecisionRejected, "", "tool definition not approved")
 		writeRPCError(w, http.StatusOK, env.ID, CodePolicyDenied, "denied by policy", nil)
 		return false
 	}
 	d := g.policy.Decide(ctx, policy.Input{
+		Kind:       a.Kind,
 		Principal:  a.Principal,
 		Method:     env.Method,
 		Tool:       tool,
@@ -370,7 +400,7 @@ func (g *Gateway) event(a *Admission, phase, decision, rule, reason string) audi
 		ClientVersion:   truncate(a.Envelope.ClientVersion, maxClientField),
 		ProtocolVersion: truncate(a.Envelope.ProtocolVersion, maxProtocolField),
 		Method:          a.Envelope.Method,
-		Tool:            truncate(a.Envelope.Name, catalog.MaxNameLen),
+		Tool:            truncate(a.Envelope.Name, nameLimit(a.Kind)),
 		Upstream:        a.Tool.Upstream,
 		Decision:        decision,
 		Rule:            rule,
@@ -395,4 +425,18 @@ func (g *Gateway) recordDecision(ctx context.Context, a *Admission, decision, ru
 	if err := g.audit.Append(actx, e); err != nil {
 		g.log.WarnContext(ctx, "audit append failed", slog.String("error", err.Error()))
 	}
+}
+
+func kindLabel(k catalog.Kind) string {
+	if k == "" {
+		return "tool"
+	}
+	return string(k)
+}
+
+func nameLimit(k catalog.Kind) int {
+	if k == catalog.KindResource || k == catalog.KindTemplate {
+		return catalog.MaxURILen
+	}
+	return catalog.MaxNameLen
 }

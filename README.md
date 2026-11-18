@@ -25,7 +25,7 @@
 | Concern | How |
 |---|---|
 | Transport | Stateless Streamable HTTP for MCP `2026-07-28`, with fallback for `2025-11-25` clients (go-sdk v1.8.0) |
-| Aggregation | N upstreams (stdio subprocesses and Streamable HTTP) under `upstream__tool` names, sorted and deterministic, re-synced on upstream `list_changed` and a 60 s poll, with health probes and crash-loop backoff |
+| Aggregation | N upstreams (stdio subprocesses and Streamable HTTP) under `upstream__tool` names, sorted and deterministic, re-synced on upstream `list_changed` and a 60 s poll, with health probes and crash-loop backoff. Prompts are namespaced the same way; resources and resource templates keep their URIs and are routed to the upstream that listed them; `completion/complete` follows its reference |
 | Authentication | RFC 9728 protected-resource metadata, JWT via JWKS (`iss`, `aud` = canonical URI per RFC 8707, `exp`, algorithm allowlist), RFC 6750 challenges with `error=` and all required scopes |
 | No passthrough | Upstream HTTP clients are built from config only and never see the inbound request; covered by tests |
 | Authorization | First-match rules: static RBAC fast path plus optional CEL `when` over principal, tool annotations, arguments and time; default deny; `tools/list` filtered per caller; step-up challenges (`403 insufficient_scope`) |
@@ -191,7 +191,14 @@ policy:
       when: '"files:write" in principal.scopes'
       effect: allow
       on_deny: { step_up_scopes: ["files:write"] }
+    - name: docs-and-prompts
+      subjects: { scopes_any: ["mcp:tools"] }
+      prompts: ["notes__*"]
+      resources: ["file:///docs/*"]
+      effect: allow
 ```
+
+A rule applies to tools, prompts or resources only through its own `tools`, `prompts` or `resources` globs, so `tools: ["*"]` never exposes a resource. Globs use `path.Match`, where `*` stops at `/`; a bare `*` matches everything. A resource the caller may not see answers exactly like a missing one (`-32602` with `data.uri`), and lists only show what the caller may read.
 
 | Key | Default | Notes |
 |---|---|---|
@@ -217,7 +224,7 @@ policy:
 | `pinning.file` | | Lockfile written by `tollkeeper pin approve`; required for `enforce`, reloaded every `pinning.reload_interval` (5 s); refused if group or world writable |
 | `pinning.report_token` | | Bearer token for `GET /pins`; without it the report is only served on a loopback admin listener |
 
-CEL variables: `principal{sub, client_id, scopes, claims}`, `tool{name, upstream, original, pin_hash, annotations}`, `args`, `request{method, client_name}`, `now`. Programs are compiled at load time with a cost limit and a 50 ms evaluation timeout, and arguments are only decoded when a rule references `args`.
+CEL variables: `principal{sub, client_id, scopes, claims}`, `tool{name, upstream, original, pin_hash, annotations}` (for prompts and resources: the prompt name or URI, its upstream and the upstream's own name), `args` (prompt arguments for `prompts/get`), `request{kind, method, client_name}` with `kind` one of `tool`, `prompt`, `resource`, `template`, and `now`. Programs are compiled at load time with a cost limit and a 50 ms evaluation timeout, and arguments are only decoded when a rule references `args`.
 
 ## Benchmarks
 
@@ -278,7 +285,7 @@ Report vulnerabilities as described in [SECURITY.md](SECURITY.md).
 
 ## Known limitations
 
-- **Tools only.** Resources and prompts are not aggregated yet; go-sdk has no dynamic `resources/list` handler ([go-sdk#998](https://github.com/modelcontextprotocol/go-sdk/issues/998)).
+- **Prompts and resources go through the go-sdk path**, not the direct `tools/call` path, and are re-listed on the same schedule as tools. A resource URI listed by two upstreams belongs to the first one; templates are tried in sorted order. `resources/subscribe` and the tasks extension (SEP-2663) are not proxied.
 - **Progress is relayed only on protocol 2026-07-28.** When a `tools/call` carries `_meta.progressToken`, the gateway gives the upstream its own token and streams the notifications back as server-sent events under the client's token, with the result last. go-sdk can hand a notification to the client after the result ([go-sdk#1337](https://github.com/modelcontextprotocol/go-sdk/issues/1337)), so such calls wait for 10 ms without a new notification (100 ms at most) before answering; anything later is dropped. Older protocol versions get no progress.
 - **Sealed, not encrypted.** The gateway seals an upstream's `requestState` with HMAC-SHA256 and binds it to the upstream, tool, subject and client id. A retry with a tampered, expired or foreign state gets JSON-RPC `-32602`. The upstream's own state stays readable by the client, as it was before the gateway.
 - Rate limits are per replica unless `rate_limits.store: redis` is set. Each replica writes its own audit chain (`chain_id`), also when they share one Postgres table.
@@ -306,7 +313,7 @@ Shipped in v1.1:
 Next:
 
 - [x] v1.2 (unreleased): direct `tools/call` path, sealed MRTR state, progress forwarding, input-required pass-through
-- [ ] v1.3: resources and prompts aggregation, the tasks extension (SEP-2663), hot config reload, RFC 7662 introspection, OTLP log sink
+- [ ] v1.3: ~~resources and prompts aggregation~~ (done, unreleased), the tasks extension (SEP-2663), hot config reload, RFC 7662 introspection, OTLP log sink
 - [ ] v2.0: RFC 8693 token exchange to upstreams, DPoP, Helm chart
 
 ## Development

@@ -55,6 +55,7 @@ type Deps struct {
 	Limiter    *ratelimit.Limiter
 	Audit      Auditor
 	Catalog    *catalog.Catalog
+	Directory  *catalog.Directory
 	Upstreams  map[string]Caller
 	Metrics    *telemetry.Metrics
 	Tracer     trace.Tracer
@@ -82,6 +83,7 @@ type Gateway struct {
 	limiter        *ratelimit.Limiter
 	audit          Auditor
 	catalog        *catalog.Catalog
+	directory      *catalog.Directory
 	upstreams      map[string]Caller
 	metrics        *telemetry.Metrics
 	tracer         trace.Tracer
@@ -134,6 +136,7 @@ func New(d Deps) *Gateway {
 		limiter:        d.Limiter,
 		audit:          d.Audit,
 		catalog:        d.Catalog,
+		directory:      d.Directory,
 		upstreams:      d.Upstreams,
 		metrics:        d.Metrics,
 		tracer:         d.Tracer,
@@ -176,7 +179,7 @@ func New(d Deps) *Gateway {
 	g.impl = &mcp.Implementation{Name: "tollkeeper", Version: d.Version}
 	g.infoPrefix = serverInfoPrefix(g.impl)
 	g.server = mcp.NewServer(g.impl, &mcp.ServerOptions{
-		Capabilities: &mcp.ServerCapabilities{Tools: &mcp.ToolCapabilities{}},
+		Capabilities: g.capabilities(),
 		PageSize:     10000,
 		SetCacheable: func(_ context.Context, _ mcp.Request, c *mcp.Cacheable) {
 			c.CacheScope = "private"
@@ -576,6 +579,12 @@ func (g *Gateway) middleware(next mcp.MethodHandler) mcp.MethodHandler {
 			return g.listTools(ctx, next, method, req)
 		case MethodToolsCall:
 			return g.callTool(ctx, next, method, req)
+		case MethodPromptsList, MethodResourcesList, MethodTemplatesList:
+			return g.listDirectory(ctx, method)
+		case MethodPromptsGet, MethodResourcesRead:
+			return g.readEntry(ctx, method, req)
+		case "completion/complete":
+			return g.complete(ctx, req)
 		default:
 			return next(ctx, method, req)
 		}
@@ -633,8 +642,8 @@ func (g *Gateway) callTool(
 	defer span.End()
 	res, err := next(ctx, method, req)
 	out := callOutcome{err: err}
-	if cr, ok := res.(*mcp.CallToolResult); ok && err == nil {
-		out.result, out.isError, out.inputRequired = cr, cr.IsError, cr.NeedsInput()
+	if cr, ok := res.(*mcp.CallToolResult); ok && err == nil && cr != nil {
+		out.hasResult, out.isError, out.inputRequired = true, cr.IsError, cr.NeedsInput()
 		if b, merr := json.Marshal(cr); merr == nil {
 			out.encoded = b
 		}
@@ -644,7 +653,7 @@ func (g *Gateway) callTool(
 }
 
 type callOutcome struct {
-	result        *mcp.CallToolResult
+	hasResult     bool
 	encoded       []byte
 	isError       bool
 	inputRequired bool
@@ -679,7 +688,7 @@ func (g *Gateway) finishCall(ctx context.Context, span trace.Span, a *Admission,
 		outcome = "error"
 		e.Error = out.err.Error()
 		span.SetStatus(codes.Error, "call failed")
-	case out.result != nil:
+	case out.hasResult:
 		e.IsError = out.isError
 		e.ResultType = "complete"
 		if out.inputRequired {
@@ -699,5 +708,5 @@ func (g *Gateway) finishCall(ctx context.Context, span trace.Span, a *Admission,
 		}
 		cancel()
 	}
-	g.metrics.Requests.WithLabelValues(MethodToolsCall, a.Tool.Name, a.Tool.Upstream, outcome).Inc()
+	g.metrics.Requests.WithLabelValues(a.Envelope.Method, a.Tool.Name, a.Tool.Upstream, outcome).Inc()
 }

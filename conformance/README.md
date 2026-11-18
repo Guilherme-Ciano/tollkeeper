@@ -18,8 +18,6 @@ flowchart LR
 
 | Scenarios | Reason |
 |---|---|
-| `resources-read-*`, `resources-templates-read`, `sep-2164-resource-not-found`, `prompts-get-*`, `completion-complete`, `input-required-result-non-tool-request` | Only tools are aggregated; go-sdk has no dynamic `resources/list` handler ([go-sdk#998](https://github.com/modelcontextprotocol/go-sdk/issues/998)) |
-| `server-stateless` | One check out of 25: `server/discover` does not declare prompts, because prompts are not aggregated |
 | `tasks-*` | The tasks extension (SEP-2663) is not proxied: task-only tools are not offered and `tasks/*` methods are not routed |
 
 Each entry is removed in the change that makes its scenario pass, so the file only shrinks as features land.

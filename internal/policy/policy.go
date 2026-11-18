@@ -57,6 +57,7 @@ type Decision struct {
 type Input struct {
 	Principal  identity.Principal
 	Method     string
+	Kind       catalog.Kind
 	Tool       catalog.Tool
 	Args       json.RawMessage
 	ClientName string
@@ -153,6 +154,9 @@ func New(cfg config.Policy) (*Engine, error) {
 
 func globMatch(globs []string, s string) bool {
 	for _, g := range globs {
+		if g == "*" {
+			return true
+		}
 		if ok, err := path.Match(g, s); err == nil && ok {
 			return true
 		}
@@ -206,6 +210,7 @@ func activation(in Input, withArgs bool) (map[string]any, error) {
 			},
 		},
 		"request": map[string]any{
+			"kind":        kindName(in.Kind),
 			"method":      in.Method,
 			"client_name": in.ClientName,
 		},
@@ -243,8 +248,17 @@ func (ev *evaluation) activation(needArgs bool) (map[string]any, error) {
 	return act, nil
 }
 
-func (r *rule) applies(tool string, p identity.Principal) bool {
-	return globMatch(r.cfg.Tools, tool) && subjectsMatch(r.cfg.Subjects, p)
+func (r *rule) applies(kind catalog.Kind, name string, p identity.Principal) bool {
+	var globs []string
+	switch kind {
+	case catalog.KindPrompt:
+		globs = r.cfg.Prompts
+	case catalog.KindResource, catalog.KindTemplate:
+		globs = r.cfg.Resources
+	default:
+		globs = r.cfg.Tools
+	}
+	return globMatch(globs, name) && subjectsMatch(r.cfg.Subjects, p)
 }
 
 func (e *Engine) Decide(ctx context.Context, in Input) Decision {
@@ -254,7 +268,7 @@ func (e *Engine) Decide(ctx context.Context, in Input) Decision {
 	ev := &evaluation{in: in}
 	for i := range e.rules {
 		r := &e.rules[i]
-		if !r.applies(in.Tool.Name, in.Principal) {
+		if !r.applies(in.Kind, in.Tool.Name, in.Principal) {
 			continue
 		}
 		if d, done := e.decideRule(ctx, r, ev); done {
@@ -305,9 +319,13 @@ func (e *Engine) eval(ctx context.Context, r *rule, act map[string]any) (bool, e
 }
 
 func (e *Engine) Visible(p identity.Principal, t catalog.Tool) bool {
+	return e.VisibleAs(p, "", t.Name)
+}
+
+func (e *Engine) VisibleAs(p identity.Principal, kind catalog.Kind, name string) bool {
 	for i := range e.rules {
 		r := &e.rules[i]
-		if !r.applies(t.Name, p) {
+		if !r.applies(kind, name, p) {
 			continue
 		}
 		if r.effect == Allow {
@@ -318,4 +336,11 @@ func (e *Engine) Visible(p identity.Principal, t catalog.Tool) bool {
 		}
 	}
 	return e.defaultEffect == Allow
+}
+
+func kindName(k catalog.Kind) string {
+	if k == "" {
+		return "tool"
+	}
+	return string(k)
 }

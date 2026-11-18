@@ -165,6 +165,12 @@ func (u *Upstream) connect(ctx context.Context) (*mcp.ClientSession, func(), err
 			u.notify()
 		},
 		MultiRoundTrip: &mcp.MultiRoundTripOptions{Disabled: true},
+		PromptListChangedHandler: func(context.Context, *mcp.PromptListChangedRequest) {
+			u.notify()
+		},
+		ResourceListChangedHandler: func(context.Context, *mcp.ResourceListChangedRequest) {
+			u.notify()
+		},
 		ProgressNotificationHandler: func(_ context.Context, req *mcp.ProgressNotificationClientRequest) {
 			u.relayProgress(req.Params)
 		},

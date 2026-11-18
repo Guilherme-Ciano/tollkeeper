@@ -39,8 +39,9 @@ import (
 )
 
 const (
-	maxCatalogTools = 5000
-	pollInterval    = 60 * time.Second
+	maxCatalogTools     = 5000
+	maxDirectoryEntries = 20000
+	pollInterval        = 60 * time.Second
 )
 
 type App struct {
@@ -55,6 +56,7 @@ type App struct {
 	auditPG   *pgsink.Sink
 	anchorer  *anchor.Anchorer
 	catalog   *catalog.Catalog
+	directory *catalog.Directory
 	upstreams []*upstream.Upstream
 	gateway   *gateway.Gateway
 	pins      *pin.Guard
@@ -66,7 +68,7 @@ type App struct {
 func Build(ctx context.Context, cfg config.Config, log *slog.Logger, version string) (built *App, err error) {
 	a := &App{
 		cfg: cfg, log: log, metrics: telemetry.NewMetrics(), catalog: catalog.New(maxCatalogTools),
-		synced: map[string]*atomic.Uint64{},
+		directory: catalog.NewDirectory(maxDirectoryEntries), synced: map[string]*atomic.Uint64{},
 	}
 	defer func() {
 		if err != nil {
@@ -162,6 +164,7 @@ func Build(ctx context.Context, cfg config.Config, log *slog.Logger, version str
 		Limiter:    lim,
 		Audit:      auditor,
 		Catalog:    a.catalog,
+		Directory:  a.directory,
 		Upstreams:  callers,
 		Metrics:    a.metrics,
 		Tracer:     tr.Tracer(),
@@ -577,6 +580,7 @@ func (a *App) resync(ctx context.Context, u *upstream.Upstream) {
 			slog.Int("upserted", len(delta.Upserted)), slog.Int("removed", len(delta.Removed)),
 			slog.Uint64("version", a.catalog.Snapshot().Version))
 	}
+	a.resyncDirectory(ctx, u, up)
 	if up {
 		a.synced[u.ID()].Store(gen)
 	} else {
@@ -692,4 +696,31 @@ func readStateKey(path string) ([]byte, error) {
 		return nil, fmt.Errorf("request state key %s: need at least %d bytes", path, gateway.MinStateKeyLen)
 	}
 	return key, nil
+}
+
+func (a *App) resyncDirectory(ctx context.Context, u *upstream.Upstream, up bool) {
+	var entries []catalog.Entry
+	if up {
+		var err error
+		entries, err = u.Directory(ctx)
+		if err != nil {
+			a.log.WarnContext(ctx, "prompt and resource sync failed",
+				slog.String("upstream", u.ID()), slog.String("error", err.Error()))
+			return
+		}
+	}
+	changed, rejected, err := a.directory.Replace(u.ID(), entries)
+	for _, rerr := range rejected {
+		a.log.WarnContext(ctx, "prompt or resource rejected",
+			slog.String("upstream", u.ID()), slog.String("error", rerr.Error()))
+	}
+	if err != nil {
+		a.log.ErrorContext(ctx, "directory update rejected",
+			slog.String("upstream", u.ID()), slog.String("error", err.Error()))
+		return
+	}
+	if changed {
+		a.log.InfoContext(ctx, "directory updated", slog.String("upstream", u.ID()),
+			slog.Int("entries", a.directory.Snapshot().Len()))
+	}
 }

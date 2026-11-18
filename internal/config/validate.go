@@ -270,10 +270,12 @@ func (c *Config) validatePolicy(v *validator) {
 			v.add(f+".name", "duplicate rule name %q", r.Name)
 		}
 		names[r.Name] = true
-		if len(r.Tools) == 0 {
-			v.add(f+".tools", "at least one tool glob is required")
+		if len(r.Tools) == 0 && len(r.Prompts) == 0 && len(r.Resources) == 0 {
+			v.add(f+".tools", "at least one tool, prompt or resource glob is required")
 		}
 		v.globs(f+".tools", r.Tools)
+		v.globs(f+".prompts", r.Prompts)
+		v.globs(f+".resources", r.Resources)
 		v.globs(f+".subjects.subs", r.Subjects.Subs)
 		v.globs(f+".subjects.client_ids", r.Subjects.ClientIDs)
 		v.oneOf(f+".effect", r.Effect, EffectAllow, EffectDeny)

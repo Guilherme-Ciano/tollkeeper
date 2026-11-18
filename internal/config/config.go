@@ -103,12 +103,14 @@ type Policy struct {
 }
 
 type Rule struct {
-	Name     string   `koanf:"name"`
-	Subjects Subjects `koanf:"subjects"`
-	Tools    []string `koanf:"tools"`
-	When     string   `koanf:"when"`
-	Effect   string   `koanf:"effect"`
-	OnDeny   OnDeny   `koanf:"on_deny"`
+	Name      string   `koanf:"name"`
+	Subjects  Subjects `koanf:"subjects"`
+	Tools     []string `koanf:"tools"`
+	Prompts   []string `koanf:"prompts"`
+	Resources []string `koanf:"resources"`
+	When      string   `koanf:"when"`
+	Effect    string   `koanf:"effect"`
+	OnDeny    OnDeny   `koanf:"on_deny"`
 }
 
 type Subjects struct {
