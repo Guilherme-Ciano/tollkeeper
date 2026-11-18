@@ -1,0 +1,71 @@
+rule_files: [alerts.yml]
+evaluation_interval: 1m
+tests:
+  - interval: 1m
+    input_series:
+      - series: 'up{job="tollkeeper", instance="gw-0"}'
+        values: "1 0 0 0"
+      - series: 'mcpgw_audit_sink_errors_total{instance="gw-0"}'
+        values: "0 0 1 1"
+      - series: 'mcpgw_upstream_up{instance="gw-0", upstream="notes"}'
+        values: "1 0 0 0 0"
+      - series: 'mcpgw_upstream_up{instance="gw-0", upstream="weather"}'
+        values: "1 1 1 1 1"
+      - series: 'mcpgw_breaker_state{instance="gw-0", upstream="notes"}'
+        values: "0 2 2 2"
+      - series: 'mcpgw_auth_failures_total{instance="gw-0", reason="keys_unavailable"}'
+        values: "0 0 3 3"
+      - series: 'mcpgw_auth_failures_total{instance="gw-0", reason="invalid"}'
+        values: "0 50 100 150"
+    alert_rule_test:
+      - eval_time: 3m
+        alertname: TollkeeperDown
+        exp_alerts:
+          - exp_labels: { severity: critical, job: tollkeeper, instance: gw-0 }
+            exp_annotations:
+              summary: "tollkeeper gw-0 is not being scraped"
+              description: "Agents behind this gateway cannot reach any tool."
+      - eval_time: 3m
+        alertname: TollkeeperAuditWriteErrors
+        exp_alerts:
+          - exp_labels: { severity: critical, instance: gw-0 }
+            exp_annotations:
+              summary: "audit log writes are failing on gw-0"
+              description: "With on_backpressure: fail_closed every tools/call is refused until the disk or mirror recovers."
+      - eval_time: 4m
+        alertname: TollkeeperUpstreamDown
+        exp_alerts:
+          - exp_labels: { severity: warning, instance: gw-0, upstream: notes }
+            exp_annotations:
+              summary: "upstream notes is down"
+              description: "Its tools are removed from the catalog until it recovers."
+      - eval_time: 3m
+        alertname: TollkeeperCircuitOpen
+        exp_alerts:
+          - exp_labels: { severity: warning, instance: gw-0, upstream: notes }
+            exp_annotations:
+              summary: "circuit breaker open for upstream notes"
+      - eval_time: 3m
+        alertname: TollkeeperTokenKeysUnavailable
+        exp_alerts:
+          - exp_labels: { severity: critical, instance: gw-0, reason: keys_unavailable }
+            exp_annotations:
+              summary: "JWKS or introspection endpoint unreachable from gw-0"
+              description: "Callers get 503 until the authorization server answers again."
+
+  - interval: 1m
+    input_series:
+      - series: 'mcpgw_policy_shadow_decisions_total{rule="block-deletes", shadow_effect="deny", effect="allow"}'
+        values: "0 1 2 3"
+      - series: 'mcpgw_policy_shadow_decisions_total{rule="agrees", shadow_effect="deny", effect="deny"}'
+        values: "0 5 10 15"
+    alert_rule_test:
+      - eval_time: 3m
+        alertname: TollkeeperShadowRuleWouldChangeDecisions
+        exp_alerts:
+          - exp_labels: { severity: info, rule: block-deletes, shadow_effect: deny, effect: allow }
+            exp_annotations:
+              summary: "shadow rule block-deletes would decide deny where the policy decides allow"
+      - eval_time: 3m
+        alertname: TollkeeperAuditDropped
+        exp_alerts: []

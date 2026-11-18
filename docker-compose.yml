@@ -58,8 +58,23 @@ services:
   prometheus:
     image: docker.io/prom/prometheus:v3.16.0@sha256:e04987641b57704f408e31f6373ba4138ecf27cb4a165d24aabb6c38fddd0f06
     profiles: ["obs"]
-    volumes: ["./deploy/compose/prometheus.yml:/etc/prometheus/prometheus.yml:ro"]
+    volumes:
+      - "./deploy/compose/prometheus.yml:/etc/prometheus/prometheus.yml:ro"
+      - "./deploy/prometheus/alerts.yml:/etc/prometheus/alerts.yml:ro"
     ports: ["127.0.0.1:9091:9090"]
+
+  grafana:
+    image: docker.io/grafana/grafana-oss:13.0.2@sha256:b8f6abae513b839b2f3487343fa5e44d9c9d7871271fdd17689c4c452cb8098e
+    profiles: ["obs"]
+    environment:
+      GF_AUTH_ANONYMOUS_ENABLED: "true"
+      GF_AUTH_ANONYMOUS_ORG_ROLE: Viewer
+      GF_DASHBOARDS_DEFAULT_HOME_DASHBOARD_PATH: /var/lib/grafana/dashboards/tollkeeper.json
+    volumes:
+      - "./deploy/grafana/provisioning:/etc/grafana/provisioning:ro"
+      - "./deploy/grafana/dashboards:/var/lib/grafana/dashboards:ro"
+    ports: ["127.0.0.1:3000:3000"]
+    depends_on: [prometheus]
 
 volumes:
   audit: {}

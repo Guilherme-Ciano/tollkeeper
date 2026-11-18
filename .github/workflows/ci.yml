@@ -102,6 +102,18 @@ jobs:
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with: { go-version-file: go.mod }
       - run: make build
+  ops:
+    runs-on: ubuntu-24.04
+    env:
+      PROMETHEUS_IMAGE: docker.io/prom/prometheus:v3.16.0@sha256:e04987641b57704f408e31f6373ba4138ecf27cb4a165d24aabb6c38fddd0f06
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Check and unit-test the alert rules
+        run: |
+          docker run --rm --entrypoint /bin/promtool -v "$PWD/deploy/prometheus:/rules:ro" "$PROMETHEUS_IMAGE" check rules /rules/alerts.yml
+          docker run --rm --entrypoint /bin/promtool -w /rules -v "$PWD/deploy/prometheus:/rules:ro" "$PROMETHEUS_IMAGE" test rules alerts_test.yml
+      - name: Dashboard is valid JSON
+        run: python3 -m json.tool deploy/grafana/dashboards/tollkeeper.json > /dev/null
   compose:
     runs-on: ubuntu-24.04
     steps:

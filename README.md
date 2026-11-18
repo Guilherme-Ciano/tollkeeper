@@ -151,6 +151,14 @@ FAIL line 7 (seq 7): hash mismatch: record content was modified after 6 valid re
 FAIL line 9 (seq 10): sequence gap: expected seq 9 after 8 valid records
 ```
 
+### Dashboards and alerts
+
+```bash
+docker compose --profile obs up -d
+```
+
+Grafana on `http://127.0.0.1:3000` opens on the provisioned tollkeeper dashboard (traffic by outcome, added latency, policy and shadow decisions, auth failures and 429s, upstream health and breakers, audit throughput, queue and anchoring, dispatch path, config reloads). Prometheus on `:9091` loads [`deploy/prometheus/alerts.yml`](deploy/prometheus/alerts.yml): gateway down, audit write errors or drops, audit queue filling, upstream down, circuit open, p99 overhead above 50 ms, JWKS or introspection unreachable, Redis backend errors, unapproved tools, rejected reloads, shadow rules that disagree with the policy, stale anchoring and OTLP drops. `promtool test rules deploy/prometheus/alerts_test.yml` covers the alerts in CI.
+
 ## Using it with popular MCP servers
 
 [examples/configs](examples/configs/README.md) has validated configurations for the [GitHub MCP server](examples/configs/github.yaml) (read-only tools for every agent, scoped writes with step-up, write-specific rate limits, enforced pinning) and the [reference filesystem server](examples/configs/filesystem.yaml) (reads anywhere in a share, writes only under one directory). A test keeps every example valid.
