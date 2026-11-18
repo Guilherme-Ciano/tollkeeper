@@ -460,6 +460,7 @@ func (g *Gateway) forward(name string) mcp.ToolHandler {
 			Arguments:      req.Params.Arguments,
 			InputResponses: req.Params.InputResponses,
 			RequestState:   inner,
+			Progress:       progressFrom(ctx),
 		})
 		if err != nil {
 			return toolError(upstreamMessage(err)), nil

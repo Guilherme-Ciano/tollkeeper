@@ -210,6 +210,11 @@ func canonicalID(id json.RawMessage) ([]byte, bool) {
 
 func (g *Gateway) serveFast(w http.ResponseWriter, r *http.Request, a *Admission, fc fastCall) {
 	ctx := g.dispatchContext(withAdmission(r.Context(), a), a)
+	var stream *progressStream
+	if token, ok := clientProgressToken(a.Envelope.meta); ok {
+		stream = newProgressStream(g.log, w, token)
+		ctx = withProgress(ctx, stream.send)
+	}
 	ctx, span := g.tracer.Start(ctx, callSpanName(a), callSpanAttributes(a))
 	defer span.End()
 	res, err := g.forward(a.Tool.Name)(ctx, &mcp.CallToolRequest{Params: &mcp.CallToolParamsRaw{
@@ -248,6 +253,9 @@ func (g *Gateway) serveFast(w http.ResponseWriter, r *http.Request, a *Admission
 		body, status = encodeFastError(fc.id, out.err)
 	}
 	g.finishCall(ctx, span, a, out)
+	if stream != nil && stream.finish(body) {
+		return
+	}
 	writeFast(ctx, w, status, body)
 }
 

@@ -6,7 +6,9 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"maps"
 	"math/rand/v2"
+	"strconv"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -47,6 +49,9 @@ type Upstream struct {
 	readyOnce sync.Once
 	up        atomic.Bool
 	gen       atomic.Uint64
+
+	progress    sync.Map
+	progressSeq atomic.Uint64
 
 	mu sync.RWMutex
 	cs *mcp.ClientSession
@@ -157,6 +162,9 @@ func (u *Upstream) connect(ctx context.Context) (*mcp.ClientSession, func(), err
 			u.notify()
 		},
 		MultiRoundTrip: &mcp.MultiRoundTripOptions{Disabled: true},
+		ProgressNotificationHandler: func(_ context.Context, req *mcp.ProgressNotificationClientRequest) {
+			u.relayProgress(req.Params)
+		},
 	})
 	cctx, cancel := context.WithTimeoutCause(ctx, u.cfg.Timeout, ErrTimeout)
 	defer cancel()
@@ -350,6 +358,7 @@ type Call struct {
 	Meta           map[string]any
 	InputResponses mcp.InputResponseMap
 	RequestState   string
+	Progress       func(*mcp.ProgressNotificationParams)
 }
 
 func (u *Upstream) CallTool(ctx context.Context, c Call) (*mcp.CallToolResult, error) {
@@ -365,6 +374,18 @@ func (u *Upstream) CallTool(ctx context.Context, c Call) (*mcp.CallToolResult, e
 		return nil, fmt.Errorf("%s: %w", u.cfg.ID, ErrSaturated)
 	}
 	defer func() { <-u.sem }()
+	if c.Progress != nil {
+		token := "tk-" + strconv.FormatUint(u.progressSeq.Add(1), 10)
+		tr := &progressTracker{relay: c.Progress}
+		u.progress.Store(token, tr)
+		defer u.progress.Delete(token)
+		defer tr.settle(ctx)
+		c.Meta = maps.Clone(c.Meta)
+		if c.Meta == nil {
+			c.Meta = map[string]any{}
+		}
+		c.Meta["progressToken"] = token
+	}
 	params := &mcp.CallToolParams{
 		Meta:           c.Meta,
 		Name:           c.Tool,
@@ -386,4 +407,52 @@ func (u *Upstream) CallTool(ctx context.Context, c Call) (*mcp.CallToolResult, e
 		return nil, fmt.Errorf("call %s/%s: %w", u.cfg.ID, c.Tool, err)
 	}
 	return res, nil
+}
+
+func (u *Upstream) relayProgress(p *mcp.ProgressNotificationParams) {
+	if p == nil {
+		return
+	}
+	token, ok := p.ProgressToken.(string)
+	if !ok {
+		return
+	}
+	if v, ok := u.progress.Load(token); ok {
+		if tr, ok := v.(*progressTracker); ok {
+			tr.deliver(p)
+		}
+	}
+}
+
+const (
+	progressQuiet  = 10 * time.Millisecond
+	progressSettle = 100 * time.Millisecond
+)
+
+type progressTracker struct {
+	relay func(*mcp.ProgressNotificationParams)
+	last  atomic.Int64
+}
+
+func (t *progressTracker) deliver(p *mcp.ProgressNotificationParams) {
+	t.last.Store(time.Now().UnixNano())
+	t.relay(p)
+}
+
+func (t *progressTracker) settle(ctx context.Context) {
+	t.last.CompareAndSwap(0, time.Now().UnixNano())
+	deadline := time.Now().Add(progressSettle)
+	for {
+		quietFor := time.Since(time.Unix(0, t.last.Load()))
+		if quietFor >= progressQuiet || !time.Now().Before(deadline) {
+			return
+		}
+		timer := time.NewTimer(min(progressQuiet-quietFor, time.Until(deadline)))
+		select {
+		case <-ctx.Done():
+			timer.Stop()
+			return
+		case <-timer.C:
+		}
+	}
 }

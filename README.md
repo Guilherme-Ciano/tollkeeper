@@ -279,7 +279,7 @@ Report vulnerabilities as described in [SECURITY.md](SECURITY.md).
 ## Known limitations
 
 - **Tools only.** Resources and prompts are not aggregated yet; go-sdk has no dynamic `resources/list` handler ([go-sdk#998](https://github.com/modelcontextprotocol/go-sdk/issues/998)).
-- **Progress notifications are not forwarded**, and if they were, go-sdk may deliver them after the result ([go-sdk#1337](https://github.com/modelcontextprotocol/go-sdk/issues/1337)).
+- **Progress is relayed only on protocol 2026-07-28.** When a `tools/call` carries `_meta.progressToken`, the gateway gives the upstream its own token and streams the notifications back as server-sent events under the client's token, with the result last. go-sdk can hand a notification to the client after the result ([go-sdk#1337](https://github.com/modelcontextprotocol/go-sdk/issues/1337)), so such calls wait for 10 ms without a new notification (100 ms at most) before answering; anything later is dropped. Older protocol versions get no progress.
 - **Sealed, not encrypted.** The gateway seals an upstream's `requestState` with HMAC-SHA256 and binds it to the upstream, tool, subject and client id. A retry with a tampered, expired or foreign state gets JSON-RPC `-32602`. The upstream's own state stays readable by the client, as it was before the gateway.
 - Rate limits are per replica unless `rate_limits.store: redis` is set. Each replica writes its own audit chain (`chain_id`), also when they share one Postgres table.
 - Upstream results pass through unchanged apart from the sealed `requestState`, including the upstream's `_meta` server info.

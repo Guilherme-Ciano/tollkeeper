@@ -225,3 +225,71 @@ func TestInputRequiredPassesThroughToTheCaller(t *testing.T) {
 		t.Fatalf("retry: %+v %v", res, err)
 	}
 }
+
+func TestProgressReachesTheCallThatAskedForIt(t *testing.T) {
+	t.Parallel()
+	srv := mcp.NewServer(&mcp.Implementation{Name: "up", Version: "1"}, nil)
+	srv.AddTool(
+		&mcp.Tool{Name: "slow", InputSchema: map[string]any{"type": "object"}},
+		func(ctx context.Context, req *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+			if tok := req.Params.GetProgressToken(); tok != nil {
+				for _, v := range []float64{10, 90} {
+					if err := req.Session.NotifyProgress(ctx, &mcp.ProgressNotificationParams{
+						ProgressToken: tok, Progress: v, Total: 100,
+					}); err != nil {
+						return nil, err
+					}
+				}
+			}
+			return &mcp.CallToolResult{Content: []mcp.Content{&mcp.TextContent{Text: "done"}}}, nil
+		},
+	)
+	hs := httptest.NewServer(mcp.NewStreamableHTTPHandler(
+		func(*http.Request) *mcp.Server { return srv },
+		&mcp.StreamableHTTPOptions{Stateless: true},
+	))
+	defer hs.Close()
+	u := New(
+		config.Upstream{
+			ID: "u", MaxConcurrency: 4, Timeout: 5 * time.Second,
+			Breaker: config.Breaker{Failures: 5, OpenFor: time.Second},
+		},
+		nameOnly(),
+		func(context.Context) (mcp.Transport, func(), error) {
+			return &mcp.StreamableClientTransport{Endpoint: hs.URL}, func() {}, nil
+		},
+		slog.New(slog.DiscardHandler),
+		Hooks{},
+		"test",
+	)
+	cs, cleanup, err := u.connect(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer cleanup()
+	defer cs.Close()
+	u.cs = cs
+	var mu sync.Mutex
+	var got []float64
+	_, err = u.CallTool(t.Context(), Call{Tool: "slow", Progress: func(p *mcp.ProgressNotificationParams) {
+		mu.Lock()
+		got = append(got, p.Progress)
+		mu.Unlock()
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := u.CallTool(t.Context(), Call{Tool: "slow"}); err != nil {
+		t.Fatal(err)
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	if !slices.Equal(got, []float64{10, 90}) {
+		t.Fatalf("progress %v", got)
+	}
+	n := 0
+	u.progress.Range(func(any, any) bool { n++; return true })
+	if n != 0 {
+		t.Fatalf("%d progress routes leaked", n)
+	}
+}
