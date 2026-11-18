@@ -17,6 +17,8 @@ import (
 
 	"github.com/modelcontextprotocol/go-sdk/jsonrpc"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
+
+	"github.com/Guilherme-Ciano/tollkeeper/internal/upstream"
 )
 
 const (
@@ -30,7 +32,7 @@ const (
 
 	msgContentAndInput = "server bug: result has both content and inputRequests"
 
-	codeMissingCapabilities = -32021
+	codeMissingCapabilities = upstream.CodeMissingCapabilities
 	codeUnsupportedVersion  = -32022
 )
 
@@ -59,8 +61,9 @@ type callResultWire struct {
 }
 
 type fastError struct {
-	Code    int64  `json:"code"`
-	Message string `json:"message"`
+	Code    int64           `json:"code"`
+	Message string          `json:"message"`
+	Data    json.RawMessage `json:"data,omitempty"`
 }
 
 type fastResponse struct {
@@ -265,7 +268,7 @@ func encodeFastError(id []byte, err error) (body []byte, status int) {
 	fe := &fastError{Message: err.Error()}
 	status = http.StatusOK
 	if je, ok := errors.AsType[*jsonrpc.Error](err); ok {
-		fe.Code = je.Code
+		fe.Code, fe.Data = je.Code, je.Data
 		switch je.Code {
 		case jsonrpc.CodeMethodNotFound:
 			status = http.StatusNotFound

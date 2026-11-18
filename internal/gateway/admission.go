@@ -172,7 +172,11 @@ func readEnvelope(w http.ResponseWriter, r *http.Request, limit int64) ([]byte, 
 		w.WriteHeader(http.StatusAccepted)
 		return nil, env, false
 	}
-	writeRPCError(w, http.StatusOK, env.ID, CodeMethodNotFound, "method not supported by gateway: "+env.Method, nil)
+	status := http.StatusOK
+	if r.Header.Get("Mcp-Protocol-Version") >= protocolStateless {
+		status = http.StatusNotFound
+	}
+	writeRPCError(w, status, env.ID, CodeMethodNotFound, "method not supported by gateway: "+env.Method, nil)
 	return nil, env, false
 }
 

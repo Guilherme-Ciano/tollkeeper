@@ -28,6 +28,8 @@ var (
 	ErrSaturated   = errors.New("upstream concurrency limit reached")
 )
 
+const CodeMissingCapabilities = -32021
+
 type Hooks struct {
 	Up           func(id string, up bool)
 	BreakerState func(id string, state int)
@@ -99,7 +101,8 @@ func clientFault(err error) bool {
 	}
 	if we, ok := errors.AsType[*jsonrpc.Error](err); ok {
 		switch we.Code {
-		case jsonrpc.CodeInvalidParams, jsonrpc.CodeInvalidRequest, jsonrpc.CodeMethodNotFound:
+		case jsonrpc.CodeInvalidParams, jsonrpc.CodeInvalidRequest, jsonrpc.CodeMethodNotFound,
+			CodeMissingCapabilities:
 			return true
 		}
 	}

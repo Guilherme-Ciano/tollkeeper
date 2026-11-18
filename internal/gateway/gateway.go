@@ -463,6 +463,9 @@ func (g *Gateway) forward(name string) mcp.ToolHandler {
 			Progress:       progressFrom(ctx),
 		})
 		if err != nil {
+			if pe := protocolError(err); pe != nil {
+				return nil, pe
+			}
 			return toolError(upstreamMessage(err)), nil
 		}
 		return g.sealResult(res, tool, principal)
@@ -541,6 +544,14 @@ func (g *Gateway) openState(token string, tool catalog.Tool, p identity.Principa
 		return "", ErrRequestState
 	}
 	return st.Inner, nil
+}
+
+func protocolError(err error) *jsonrpc.Error {
+	je, ok := errors.AsType[*jsonrpc.Error](err)
+	if !ok || (je.Code != jsonrpc.CodeInvalidParams && je.Code != upstream.CodeMissingCapabilities) {
+		return nil
+	}
+	return &jsonrpc.Error{Code: je.Code, Message: je.Message, Data: je.Data}
 }
 
 func upstreamMessage(err error) string {

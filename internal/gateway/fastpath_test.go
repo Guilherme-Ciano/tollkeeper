@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"log/slog"
 	"net/http"
@@ -14,6 +15,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/modelcontextprotocol/go-sdk/jsonrpc"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/prometheus/client_golang/prometheus/testutil"
 	"go.opentelemetry.io/otel/propagation"
@@ -68,6 +70,13 @@ var scripted = map[string]string{
 	"foreign_info": `{"_meta":{"io.modelcontextprotocol/serverInfo":{"name":"up","version":"9"}},"content":[]}`,
 }
 
+var scriptedErrors = map[string]*jsonrpc.Error{
+	"missing_caps": {Code: -32021, Message: "missing required client capability", Data: json.RawMessage(
+		`{"requiredCapabilities":{"sampling":{}}}`)},
+	"bad_params": {Code: jsonrpc.CodeInvalidParams, Message: "invalid arguments"},
+	"internal":   {Code: jsonrpc.CodeInternalError, Message: "secret stack trace"},
+}
+
 func (c *scriptedCaller) CallTool(_ context.Context, call upstream.Call) (*mcp.CallToolResult, error) {
 	c.mu.Lock()
 	call.Arguments = compact(call.Arguments)
@@ -78,6 +87,9 @@ func (c *scriptedCaller) CallTool(_ context.Context, call upstream.Call) (*mcp.C
 	}
 	if err := json.Unmarshal(call.Arguments, &args); err != nil {
 		return nil, err
+	}
+	if pe, ok := scriptedErrors[args.Mode]; ok {
+		return nil, fmt.Errorf("call up/t: %w", pe)
 	}
 	raw := scripted[args.Mode]
 	if raw == "" {
@@ -237,6 +249,9 @@ func TestFastPathMatchesSDKPath(t *testing.T) {
 			statelessMeta},
 		{"state for another tool", `13`, `"arguments":{"mode":"text"},"requestState":"` +
 			diffSeal(t, "other") + `",` + statelessMeta},
+		{"missing capability", `14`, `"arguments":{"mode":"missing_caps"},` + statelessMeta},
+		{"upstream invalid params", `15`, `"arguments":{"mode":"bad_params"},` + statelessMeta},
+		{"upstream internal error", `16`, `"arguments":{"mode":"internal"},` + statelessMeta},
 		{"large id", `9007199254740991`, `"arguments":{"mode":"text"},` + statelessMeta},
 		{"negative id", `-4`, `"arguments":{"mode":"text"},` + statelessMeta},
 	}
@@ -418,4 +433,33 @@ func diffSeal(t *testing.T, tool string) string {
 		t.Fatal(err)
 	}
 	return tok
+}
+
+func TestUpstreamProtocolErrors(t *testing.T) {
+	t.Parallel()
+	schema := map[string]any{"name": "up__t", "inputSchema": map[string]any{"type": "object"}}
+	s := newDiffSide(t, false, schema)
+	caps := s.do(t, statelessHeaders(), callBody(`1`, `"arguments":{"mode":"missing_caps"},`+statelessMeta))
+	if caps.status != 400 || !strings.Contains(caps.body, `"code":-32021`) ||
+		!strings.Contains(caps.body, `"requiredCapabilities"`) {
+		t.Fatalf("missing capability: %+v", caps)
+	}
+	internal := s.do(t, statelessHeaders(), callBody(`2`, `"arguments":{"mode":"internal"},`+statelessMeta))
+	if internal.status != 200 || strings.Contains(internal.body, "secret") ||
+		!strings.Contains(internal.body, `"isError":true`) {
+		t.Fatalf("internal upstream error leaked: %+v", internal)
+	}
+}
+
+func TestRemovedMethodIs404OnStatelessProtocol(t *testing.T) {
+	t.Parallel()
+	schema := map[string]any{"name": "up__t", "inputSchema": map[string]any{"type": "object"}}
+	s := newDiffSide(t, false, schema)
+	body := `{"jsonrpc":"2.0","id":1,"method":"logging/setLevel","params":{"level":"info"}}`
+	if got := s.do(t, map[string]string{"Mcp-Protocol-Version": "2026-07-28"}, body); got.status != 404 {
+		t.Fatalf("2026-07-28: %+v", got)
+	}
+	if got := s.do(t, map[string]string{"Mcp-Protocol-Version": "2025-11-25"}, body); got.status != 200 {
+		t.Fatalf("2025-11-25: %+v", got)
+	}
 }
