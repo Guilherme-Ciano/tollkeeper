@@ -42,7 +42,9 @@ jobs:
           ./bin/tollkeeper serve -c conformance/gateway.yaml > /tmp/tollkeeper-conformance/gateway.log 2>&1 &
           timeout 30 bash -c 'until curl -sf http://127.0.0.1:9090/readyz; do sleep 0.5; done'
       - name: Run conformance suite through tollkeeper
+        shell: bash
         run: |
+          set -o pipefail
           npx -y "@modelcontextprotocol/conformance@${CONFORMANCE_VERSION}" server \
             --url http://localhost:8080/mcp \
             --requirements "${{ matrix.requirements }}" \

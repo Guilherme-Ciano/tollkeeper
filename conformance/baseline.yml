@@ -1,13 +1,21 @@
 server:
+  - server-stateless
   - completion-complete
-  - resources-list
   - resources-read-text
   - resources-read-binary
   - resources-templates-read
   - sep-2164-resource-not-found
-  - prompts-list
   - prompts-get-simple
   - prompts-get-with-args
   - prompts-get-embedded-resource
   - prompts-get-with-image
-  - tools-call-with-progress
+  - input-required-result-non-tool-request
+  - tasks-lifecycle
+  - tasks-capability-negotiation
+  - tasks-wire-fields
+  - tasks-request-state-removal
+  - tasks-mrtr-input
+  - tasks-request-headers
+  - tasks-dispatch-and-envelope
+  - tasks-required-task-error
+  - tasks-mrtr-composition
