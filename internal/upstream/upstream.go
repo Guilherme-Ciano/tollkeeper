@@ -156,6 +156,7 @@ func (u *Upstream) connect(ctx context.Context) (*mcp.ClientSession, func(), err
 		ToolListChangedHandler: func(context.Context, *mcp.ToolListChangedRequest) {
 			u.notify()
 		},
+		MultiRoundTrip: &mcp.MultiRoundTripOptions{Disabled: true},
 	})
 	cctx, cancel := context.WithTimeoutCause(ctx, u.cfg.Timeout, ErrTimeout)
 	defer cancel()

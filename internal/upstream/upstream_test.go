@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/modelcontextprotocol/go-sdk/jsonrpc"
+	"github.com/modelcontextprotocol/go-sdk/mcp"
 
 	"github.com/Guilherme-Ciano/tollkeeper/internal/config"
 )
@@ -166,5 +167,61 @@ func TestCallToolFailsFastWhenSaturated(t *testing.T) {
 	u.cs = fakeSession()
 	if _, err := u.CallTool(t.Context(), Call{Tool: "t"}); !errors.Is(err, ErrSaturated) {
 		t.Fatalf("expected ErrSaturated, got %v", err)
+	}
+}
+
+func TestInputRequiredPassesThroughToTheCaller(t *testing.T) {
+	t.Parallel()
+	srv := mcp.NewServer(&mcp.Implementation{Name: "up", Version: "1"}, nil)
+	srv.AddTool(
+		&mcp.Tool{Name: "ask", InputSchema: map[string]any{"type": "object"}},
+		func(_ context.Context, req *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+			if req.Params.RequestState == "round-2" {
+				return &mcp.CallToolResult{Content: []mcp.Content{&mcp.TextContent{Text: "done"}}}, nil
+			}
+			return &mcp.CallToolResult{
+				InputRequests: mcp.InputRequestMap{"name": &mcp.ElicitParams{
+					Message:         "name?",
+					RequestedSchema: map[string]any{"type": "object"},
+				}},
+				RequestState: "round-2",
+			}, nil
+		},
+	)
+	hs := httptest.NewServer(mcp.NewStreamableHTTPHandler(
+		func(*http.Request) *mcp.Server { return srv },
+		&mcp.StreamableHTTPOptions{Stateless: true, JSONResponse: true},
+	))
+	defer hs.Close()
+	u := New(
+		config.Upstream{
+			ID: "u", MaxConcurrency: 4, Timeout: 5 * time.Second,
+			Breaker: config.Breaker{Failures: 5, OpenFor: time.Second},
+		},
+		nameOnly(),
+		func(context.Context) (mcp.Transport, func(), error) {
+			return &mcp.StreamableClientTransport{Endpoint: hs.URL}, func() {}, nil
+		},
+		slog.New(slog.DiscardHandler),
+		Hooks{},
+		"test",
+	)
+	cs, cleanup, err := u.connect(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer cleanup()
+	defer cs.Close()
+	u.cs = cs
+	res, err := u.CallTool(t.Context(), Call{Tool: "ask"})
+	if err != nil {
+		t.Fatalf("input_required result became an error: %v", err)
+	}
+	if !res.NeedsInput() || res.InputRequests["name"] == nil || res.RequestState != "round-2" {
+		t.Fatalf("input request not passed through: %+v", res)
+	}
+	res, err = u.CallTool(t.Context(), Call{Tool: "ask", RequestState: res.RequestState})
+	if err != nil || res.NeedsInput() {
+		t.Fatalf("retry: %+v %v", res, err)
 	}
 }

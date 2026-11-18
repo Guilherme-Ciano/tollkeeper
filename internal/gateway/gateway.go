@@ -448,6 +448,11 @@ func (g *Gateway) forward(name string) mcp.ToolHandler {
 		)
 		defer span.End()
 		g.propagator.Inject(ctx, metaCarrier(meta))
+		if a, ok := AdmissionFrom(ctx); ok {
+			if raw, present := a.Envelope.meta[metaClientCapabilities]; present && !isNull(raw) {
+				meta[metaClientCapabilities] = raw
+			}
+		}
 		start := g.now()
 		res, err := up.CallTool(ctx, upstream.Call{
 			Tool:           tool.Original,

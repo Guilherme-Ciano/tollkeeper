@@ -379,3 +379,20 @@ func BenchmarkToolsCallDispatch(b *testing.B) {
 		})
 	}
 }
+
+func TestClientCapabilitiesReachTheUpstream(t *testing.T) {
+	t.Parallel()
+	schema := map[string]any{"name": "up__t", "inputSchema": map[string]any{"type": "object"}}
+	for _, disable := range []bool{false, true} {
+		s := newDiffSide(t, disable, schema)
+		s.do(t, statelessHeaders(), callBody(`1`, `"arguments":{"mode":"text"},`+statelessMeta))
+		calls := s.caller.take()
+		if len(calls) != 1 {
+			t.Fatalf("disable=%t: %d upstream calls", disable, len(calls))
+		}
+		raw, ok := calls[0].Meta[metaClientCapabilities].(json.RawMessage)
+		if !ok || string(compact(raw)) != `{"elicitation":{}}` {
+			t.Fatalf("disable=%t: capabilities not forwarded: %#v", disable, calls[0].Meta)
+		}
+	}
+}
