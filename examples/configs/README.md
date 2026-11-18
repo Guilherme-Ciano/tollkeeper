@@ -22,3 +22,12 @@ The [reference filesystem server](https://github.com/modelcontextprotocol/server
 - `namespace_tools: false` keeps the original tool names, so existing agent prompts keep working.
 - Reads are allowed across the share; writes only under `/srv/shared/drafts/`, enforced on the `path` argument.
 - `record_args: full` keeps complete arguments in the audit log, which is reasonable for a single-user workstation and not for shared deployments (arguments may contain personal data).
+
+## [`keycloak-introspection.yaml`](keycloak-introspection.yaml): opaque tokens from Keycloak
+
+For identity providers that issue opaque access tokens, `auth.mode: introspection` checks each token at the RFC 7662 endpoint instead of verifying a JWT.
+
+- The gateway authenticates to the introspection endpoint with its own client credentials; the secret comes from the environment.
+- Results are cached by SHA-256 of the token for `cache_ttl`, never past the token's `exp`; inactive or invalid tokens are cached for 10 seconds. Concurrent requests with the same token share one lookup.
+- The token must be active, carry `sub`, name `https://mcp.example.com/mcp` in `aud` (RFC 8707) and, when `issuer` is set, come from that issuer. An unreachable endpoint answers `503` with `Retry-After` instead of rejecting the caller.
+- `notes__create` is watched by a shadow rule before it is enforced, and `docs:read` callers can list and read the notes server's prompts and resources.

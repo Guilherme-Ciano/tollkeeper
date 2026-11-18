@@ -100,20 +100,7 @@ func Build(ctx context.Context, cfg config.Config, log *slog.Logger, version str
 	if err != nil {
 		return nil, err
 	}
-	var verifier gateway.TokenVerifier
-	if cfg.Auth.Mode == config.AuthModeJWT {
-		a.keys = authn.NewKeySet(
-			cfg.Auth.JWT.JWKSURL,
-			&http.Client{Timeout: 10 * time.Second, CheckRedirect: upstream.NoRedirects},
-			cfg.Auth.JWT.JWKSMinRetry,
-		)
-		verifier = authn.NewVerifier(authn.FromKeySet(a.keys), authn.VerifierOptions{
-			Issuer: cfg.Auth.JWT.Issuer, Audiences: cfg.Auth.JWT.Audiences,
-			Algorithms: cfg.Auth.JWT.Algorithms, Leeway: cfg.Auth.JWT.ClockSkew, Types: cfg.Auth.JWT.Types,
-		})
-	} else {
-		log.WarnContext(ctx, "authentication disabled: every caller is anonymous")
-	}
+	verifier := a.verifier(ctx, cfg)
 	for _, w := range cfg.Warnings() {
 		log.WarnContext(ctx, "config warning", slog.String("detail", w))
 	}
@@ -733,5 +720,30 @@ func (a *App) resyncDirectory(ctx context.Context, u *upstream.Upstream, up bool
 	if changed {
 		a.log.InfoContext(ctx, "directory updated", slog.String("upstream", u.ID()),
 			slog.Int("entries", a.directory.Snapshot().Len()))
+	}
+}
+
+func (a *App) verifier(ctx context.Context, cfg config.Config) gateway.TokenVerifier {
+	switch cfg.Auth.Mode {
+	case config.AuthModeJWT:
+		a.keys = authn.NewKeySet(
+			cfg.Auth.JWT.JWKSURL,
+			&http.Client{Timeout: 10 * time.Second, CheckRedirect: upstream.NoRedirects},
+			cfg.Auth.JWT.JWKSMinRetry,
+		)
+		return authn.NewVerifier(authn.FromKeySet(a.keys), authn.VerifierOptions{
+			Issuer: cfg.Auth.JWT.Issuer, Audiences: cfg.Auth.JWT.Audiences,
+			Algorithms: cfg.Auth.JWT.Algorithms, Leeway: cfg.Auth.JWT.ClockSkew, Types: cfg.Auth.JWT.Types,
+		})
+	case config.AuthModeIntrospection:
+		in := cfg.Auth.Introspection
+		return authn.NewIntrospector(authn.IntrospectorOptions{
+			URL: in.URL, ClientID: in.ClientID, ClientSecret: in.ClientSecret, Issuer: in.Issuer,
+			Audiences: in.Audiences, CacheTTL: in.CacheTTL, Leeway: cfg.Auth.JWT.ClockSkew,
+			Client: &http.Client{Timeout: in.Timeout, CheckRedirect: upstream.NoRedirects},
+		})
+	default:
+		a.log.WarnContext(ctx, "authentication disabled: every caller is anonymous")
+		return nil
 	}
 }

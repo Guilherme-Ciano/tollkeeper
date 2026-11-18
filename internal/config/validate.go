@@ -139,8 +139,8 @@ func (c *Config) validateServer(v *validator) {
 }
 
 func (c *Config) validateAuth(v *validator) {
-	v.oneOf("auth.mode", c.Auth.Mode, AuthModeJWT, AuthModeNone)
-	if c.Auth.Mode != AuthModeJWT {
+	v.oneOf("auth.mode", c.Auth.Mode, AuthModeJWT, AuthModeIntrospection, AuthModeNone)
+	if c.Auth.Mode == AuthModeNone {
 		return
 	}
 	v.url("auth.resource", c.Auth.Resource, "http", "https")
@@ -149,6 +149,10 @@ func (c *Config) validateAuth(v *validator) {
 	}
 	for i, as := range c.Auth.AuthorizationServers {
 		v.url(fmt.Sprintf("auth.authorization_servers[%d]", i), as, "http", "https")
+	}
+	if c.Auth.Mode == AuthModeIntrospection {
+		c.validateIntrospection(v)
+		return
 	}
 	v.url("auth.jwt.issuer", c.Auth.JWT.Issuer, "http", "https")
 	v.url("auth.jwt.jwks_url", c.Auth.JWT.JWKSURL, "http", "https")
@@ -443,5 +447,27 @@ func safeLogURL(u *url.URL) bool {
 		return host == "localhost" || (ip != nil && ip.IsLoopback())
 	default:
 		return false
+	}
+}
+
+func (c *Config) validateIntrospection(v *validator) {
+	in := c.Auth.Introspection
+	v.url("auth.introspection.url", in.URL, "http", "https")
+	if strings.HasPrefix(in.URL, "http://") && !in.AllowInsecure {
+		v.add("auth.introspection.url", "plain http requires auth.introspection.allow_insecure: true")
+	}
+	v.require("auth.introspection.client_id", in.ClientID)
+	v.require("auth.introspection.client_secret", in.ClientSecret)
+	if in.Issuer != "" {
+		v.url("auth.introspection.issuer", in.Issuer, "http", "https")
+	}
+	if !slices.Contains(in.Audiences, c.Auth.Resource) {
+		v.add("auth.introspection.audiences", "must include auth.resource %q (RFC 8707)", c.Auth.Resource)
+	}
+	if in.CacheTTL <= 0 || in.CacheTTL > time.Hour {
+		v.add("auth.introspection.cache_ttl", "must be within (0, 1h]")
+	}
+	if in.Timeout <= 0 || in.Timeout > 30*time.Second {
+		v.add("auth.introspection.timeout", "must be within (0, 30s]")
 	}
 }

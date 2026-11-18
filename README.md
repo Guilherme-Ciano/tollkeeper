@@ -213,7 +213,7 @@ A rule applies to tools, prompts or resources only through its own `tools`, `pro
 | `server.request_state_key_file` | per-process key | HMAC key (at least 32 bytes) that seals upstream `requestState` for multi-round-trip calls; share one file across replicas so a retry can land on any of them |
 | `server.request_state_ttl` | `10m` | How long a sealed `requestState` stays valid |
 | `server.disable_fast_path` | `false` | Serve every `tools/call` through the go-sdk transport instead of the direct path for protocol 2026-07-28 |
-| `auth.mode` | `jwt` | `none` exists for local experiments and logs a warning |
+| `auth.mode` | `jwt` | `introspection` checks opaque tokens at an RFC 7662 endpoint (`auth.introspection.url`, `client_id`, `client_secret`, `audiences`, optional `issuer`); results are cached by token hash for `cache_ttl` (1m), never past `exp` ([example](examples/configs/keycloak-introspection.yaml)). `none` exists for local experiments and logs a warning |
 | `auth.jwt.algorithms` | RS256, ES256, EdDSA | HS* and `none` are never accepted |
 | `auth.jwt.types` | any | e.g. `["at+jwt"]` to accept only RFC 9068 access tokens |
 | `upstreams[].transport` | | `stdio` (explicit env allowlist, process-group kill) or `streamable_http` |
@@ -318,7 +318,7 @@ Shipped in v1.1:
 Next:
 
 - [x] v1.2 (unreleased): direct `tools/call` path, sealed MRTR state, progress forwarding, input-required pass-through
-- [ ] v1.3: ~~resources and prompts aggregation~~, ~~shadow policy rules and `policy explain`~~, ~~hot config reload~~ (done, unreleased), the tasks extension (SEP-2663), RFC 7662 introspection, OTLP log sink
+- [ ] v1.3: ~~resources and prompts aggregation~~, ~~shadow policy rules and `policy explain`~~, ~~hot config reload~~, ~~RFC 7662 introspection~~ (done, unreleased), the tasks extension (SEP-2663), OTLP log sink
 - [ ] v2.0: RFC 8693 token exchange to upstreams, DPoP, Helm chart
 
 ## Development

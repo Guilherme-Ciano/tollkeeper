@@ -47,12 +47,24 @@ type Server struct {
 }
 
 type Auth struct {
-	Mode                 string   `koanf:"mode"`
-	Resource             string   `koanf:"resource"`
-	AuthorizationServers []string `koanf:"authorization_servers"`
-	ScopesSupported      []string `koanf:"scopes_supported"`
-	RequiredScopes       []string `koanf:"required_scopes"`
-	JWT                  JWT      `koanf:"jwt"`
+	Mode                 string        `koanf:"mode"`
+	Resource             string        `koanf:"resource"`
+	AuthorizationServers []string      `koanf:"authorization_servers"`
+	ScopesSupported      []string      `koanf:"scopes_supported"`
+	RequiredScopes       []string      `koanf:"required_scopes"`
+	JWT                  JWT           `koanf:"jwt"`
+	Introspection        Introspection `koanf:"introspection"`
+}
+
+type Introspection struct {
+	URL           string        `koanf:"url"`
+	ClientID      string        `koanf:"client_id"`
+	ClientSecret  string        `koanf:"client_secret"`
+	Issuer        string        `koanf:"issuer"`
+	Audiences     []string      `koanf:"audiences"`
+	CacheTTL      time.Duration `koanf:"cache_ttl"`
+	Timeout       time.Duration `koanf:"timeout"`
+	AllowInsecure bool          `koanf:"allow_insecure"`
 }
 
 type JWT struct {
@@ -233,6 +245,7 @@ func Defaults() Config {
 				JWKSRefresh:  10 * time.Minute,
 				JWKSMinRetry: 5 * time.Second,
 			},
+			Introspection: Introspection{CacheTTL: time.Minute, Timeout: 5 * time.Second},
 		},
 		Policy: Policy{Default: EffectDeny},
 		RateLimits: RateLimits{
@@ -290,8 +303,9 @@ func defaultUpstream(u Upstream) Upstream {
 }
 
 const (
-	AuthModeJWT  = "jwt"
-	AuthModeNone = "none"
+	AuthModeJWT           = "jwt"
+	AuthModeIntrospection = "introspection"
+	AuthModeNone          = "none"
 
 	TransportStdio      = "stdio"
 	TransportStreamable = "streamable_http"
