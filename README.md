@@ -305,8 +305,8 @@ Shipped in v1.1:
 
 Next:
 
-- [ ] v1.2: sealed MRTR state, progress forwarding
-- [ ] v1.3: resources and prompts aggregation, hot config reload, RFC 7662 introspection, OTLP log sink
+- [x] v1.2 (unreleased): direct `tools/call` path, sealed MRTR state, progress forwarding, input-required pass-through
+- [ ] v1.3: resources and prompts aggregation, the tasks extension (SEP-2663), hot config reload, RFC 7662 introspection, OTLP log sink
 - [ ] v2.0: RFC 8693 token exchange to upstreams, DPoP, Helm chart
 
 ## Development
