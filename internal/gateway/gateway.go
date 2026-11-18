@@ -11,6 +11,7 @@ import (
 	"net/url"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/modelcontextprotocol/go-sdk/auth"
@@ -91,7 +92,11 @@ type Gateway struct {
 	prm            *oauthex.ProtectedResourceMetadata
 	prmPath        string
 
-	pins PinGuard
+	pins         PinGuard
+	fastDisabled bool
+	impl         *mcp.Implementation
+	infoPrefix   []byte
+	hidden       atomic.Pointer[map[string]struct{}]
 
 	regMu       sync.Mutex
 	quarantined map[string]string
@@ -138,6 +143,7 @@ func New(d Deps) *Gateway {
 		quarantined:    map[string]string{},
 		unapproved:     map[string]pin.Status{},
 		pins:           d.Pins,
+		fastDisabled:   d.Config.Server.DisableFastPath,
 	}
 	if !d.Config.Audit.Enabled {
 		g.recordArgs = config.RecordArgsNone
@@ -157,7 +163,9 @@ func New(d Deps) *Gateway {
 			ResourceName:           "tollkeeper MCP gateway",
 		}
 	}
-	g.server = mcp.NewServer(&mcp.Implementation{Name: "tollkeeper", Version: d.Version}, &mcp.ServerOptions{
+	g.impl = &mcp.Implementation{Name: "tollkeeper", Version: d.Version}
+	g.infoPrefix = serverInfoPrefix(g.impl)
+	g.server = mcp.NewServer(g.impl, &mcp.ServerOptions{
 		Capabilities: &mcp.ServerCapabilities{Tools: &mcp.ToolCapabilities{}},
 		PageSize:     10000,
 		SetCacheable: func(_ context.Context, _ mcp.Request, c *mcp.Cacheable) {
@@ -264,7 +272,30 @@ func (g *Gateway) applyLocked(d catalog.Delta) {
 		}
 		delete(g.quarantined, t.Name)
 	}
+	g.publishHidden()
 	g.publishCatalogGauges()
+}
+
+func (g *Gateway) publishHidden() {
+	hidden := make(map[string]struct{}, len(g.quarantined)+len(g.unapproved))
+	for n := range g.quarantined {
+		hidden[n] = struct{}{}
+	}
+	if g.pins != nil && g.pins.Mode() == pin.ModeEnforce {
+		for n := range g.unapproved {
+			hidden[n] = struct{}{}
+		}
+	}
+	g.hidden.Store(&hidden)
+}
+
+func (g *Gateway) registered(name string) bool {
+	h := g.hidden.Load()
+	if h == nil {
+		return true
+	}
+	_, hiddenTool := (*h)[name]
+	return !hiddenTool
 }
 
 func (g *Gateway) pinHides(t *catalog.Tool) bool {
@@ -515,37 +546,67 @@ func (g *Gateway) callTool(
 		g.metrics.Requests.WithLabelValues(method, "", "", "backstop_denied").Inc()
 		return nil, ErrNoAdmission
 	}
+	ctx, span := g.tracer.Start(g.dispatchContext(ctx, a), callSpanName(a), callSpanAttributes(a))
+	defer span.End()
+	res, err := next(ctx, method, req)
+	out := callOutcome{err: err}
+	if cr, ok := res.(*mcp.CallToolResult); ok && err == nil {
+		out.result, out.isError, out.inputRequired = cr, cr.IsError, cr.NeedsInput()
+		if b, merr := json.Marshal(cr); merr == nil {
+			out.encoded = b
+		}
+	}
+	g.finishCall(ctx, span, a, out)
+	return res, err
+}
+
+type callOutcome struct {
+	result        *mcp.CallToolResult
+	encoded       []byte
+	isError       bool
+	inputRequired bool
+	err           error
+}
+
+func (g *Gateway) dispatchContext(ctx context.Context, a *Admission) context.Context {
 	a.MarkDispatched()
 	if sc := trace.SpanContextFromContext(ctx); !sc.IsValid() && a.Envelope.TraceParent != "" {
 		ctx = g.propagator.Extract(ctx, metaCarrier{"traceparent": a.Envelope.TraceParent})
 	}
-	ctx, span := g.tracer.Start(ctx, "mcp.server tools/call "+name, trace.WithAttributes(
-		attribute.String("mcp.method.name", method), attribute.String("gen_ai.tool.name", name),
-		attribute.String("mcp.request.id", a.RequestID)))
-	defer span.End()
-	res, err := next(ctx, method, req)
+	return ctx
+}
+
+func callSpanName(a *Admission) string {
+	return "mcp.server tools/call " + a.Tool.Name
+}
+
+func callSpanAttributes(a *Admission) trace.SpanStartEventOption {
+	return trace.WithAttributes(
+		attribute.String("mcp.method.name", MethodToolsCall), attribute.String("gen_ai.tool.name", a.Tool.Name),
+		attribute.String("mcp.request.id", a.RequestID))
+}
+
+func (g *Gateway) finishCall(ctx context.Context, span trace.Span, a *Admission, out callOutcome) {
 	outcome := "ok"
 	e := g.event(a, audit.PhaseOutcome, audit.DecisionAllow, a.Decision.Rule, "")
 	e.LatencyMicros = g.now().Sub(a.Start).Microseconds()
 	e.UpstreamMicros = a.Upstream().Microseconds()
 	switch {
-	case err != nil:
+	case out.err != nil:
 		outcome = "error"
-		e.Error = err.Error()
+		e.Error = out.err.Error()
 		span.SetStatus(codes.Error, "call failed")
-	default:
-		if cr, ok := res.(*mcp.CallToolResult); ok {
-			e.IsError = cr.IsError
-			e.ResultType = "complete"
-			if cr.NeedsInput() {
-				e.ResultType = "input_required"
-			}
-			if b, merr := json.Marshal(cr); merr == nil {
-				e.ResultHash = audit.HashBytes(b)
-			}
-			if cr.IsError {
-				outcome = "tool_error"
-			}
+	case out.result != nil:
+		e.IsError = out.isError
+		e.ResultType = "complete"
+		if out.inputRequired {
+			e.ResultType = "input_required"
+		}
+		if out.encoded != nil {
+			e.ResultHash = audit.HashBytes(out.encoded)
+		}
+		if out.isError {
+			outcome = "tool_error"
 		}
 	}
 	if g.audit != nil {
@@ -555,6 +616,5 @@ func (g *Gateway) callTool(
 		}
 		cancel()
 	}
-	g.metrics.Requests.WithLabelValues(method, name, a.Tool.Upstream, outcome).Inc()
-	return res, err
+	g.metrics.Requests.WithLabelValues(MethodToolsCall, a.Tool.Name, a.Tool.Upstream, outcome).Inc()
 }

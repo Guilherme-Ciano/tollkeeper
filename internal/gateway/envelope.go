@@ -26,6 +26,8 @@ type Envelope struct {
 	ClientVersion   string
 	TraceParent     string
 	HasParams       bool
+	params          map[string]json.RawMessage
+	meta            map[string]json.RawMessage
 }
 
 func (e *Envelope) IsNotification() bool {
@@ -97,7 +99,10 @@ func strictObject(raw []byte, known ...string) (map[string]json.RawMessage, erro
 	return out, nil
 }
 
-const MaxArgumentTokens = 100_000
+const (
+	MaxArgumentTokens = 100_000
+	jsonrpcVersion    = "2.0"
+)
 
 var ErrTooComplex = errors.New("arguments too complex")
 
@@ -235,13 +240,14 @@ func ParseEnvelope(body []byte) (Envelope, error) {
 		}
 		return env, err
 	}
+	env.params = p
 	err = env.readParams(p)
 	return env, err
 }
 
 func (e *Envelope) readTop(top map[string]json.RawMessage) error {
 	ver, err := stringField(top, "jsonrpc")
-	if err != nil || ver != "2.0" {
+	if err != nil || ver != jsonrpcVersion {
 		return fmt.Errorf("%w: jsonrpc must be \"2.0\"", ErrEnvelope)
 	}
 	if e.Method, err = stringField(top, "method"); err != nil || e.Method == "" {
@@ -297,6 +303,7 @@ func (e *Envelope) readMeta(raw json.RawMessage) error {
 	if err != nil {
 		return fmt.Errorf("%w: _meta: %w", ErrEnvelope, err)
 	}
+	e.meta = m
 	e.ProtocolVersion = lenientString(m, "io.modelcontextprotocol/protocolVersion")
 	e.TraceParent = lenientString(m, "traceparent")
 	if ci, ok := m["io.modelcontextprotocol/clientInfo"]; ok {

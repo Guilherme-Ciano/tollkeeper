@@ -12,6 +12,7 @@ type Metrics struct {
 	Requests        *prometheus.CounterVec
 	Duration        *prometheus.HistogramVec
 	Overhead        prometheus.Histogram
+	CallDispatch    *prometheus.CounterVec
 	UpstreamLatency *prometheus.HistogramVec
 	PolicyDecisions *prometheus.CounterVec
 	RateLimited     *prometheus.CounterVec
@@ -70,6 +71,10 @@ func NewMetrics() *Metrics {
 			Name: "mcpgw_gateway_overhead_seconds", Help: "tools/call duration minus upstream call duration.",
 			Buckets: latencyBuckets(), NativeHistogramBucketFactor: 1.1,
 		}),
+		CallDispatch: prometheus.NewCounterVec(prometheus.CounterOpts{
+			Name: "mcpgw_tools_call_dispatch_total",
+			Help: "Admitted tools/call requests by dispatch path (fast or sdk).",
+		}, []string{"path"}),
 		UpstreamLatency: prometheus.NewHistogramVec(prometheus.HistogramOpts{
 			Name: "mcpgw_upstream_duration_seconds", Help: "Upstream tools/call duration.",
 			Buckets: latencyBuckets(), NativeHistogramBucketFactor: 1.1,
@@ -134,7 +139,8 @@ func NewMetrics() *Metrics {
 	reg.MustRegister(
 		collectors.NewGoCollector(),
 		collectors.NewProcessCollector(collectors.ProcessCollectorOpts{}),
-		m.Requests, m.Duration, m.Overhead, m.UpstreamLatency, m.PolicyDecisions, m.RateLimited, m.AuthFailures,
+		m.Requests, m.Duration, m.Overhead, m.CallDispatch, m.UpstreamLatency, m.PolicyDecisions, m.RateLimited,
+		m.AuthFailures,
 		m.AuditQueue, m.AuditDropped, m.AuditErrors, m.AuditWritten, m.UpstreamUp, m.BreakerState,
 		m.CatalogTools, m.CatalogRejected, m.PinUnapproved, m.RateBackendErrs,
 		m.AnchorAttempts, m.AnchorDuration, m.AnchorLastSuccess, m.AnchorCoveredSeq,

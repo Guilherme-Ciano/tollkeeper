@@ -39,7 +39,7 @@ func writeRPCError(w http.ResponseWriter, status int, id json.RawMessage, code i
 		id = json.RawMessage("null")
 	}
 	body, err := json.Marshal(
-		rpcResponse{JSONRPC: "2.0", ID: id, Error: rpcError{Code: code, Message: msg, Data: data}},
+		rpcResponse{JSONRPC: jsonrpcVersion, ID: id, Error: rpcError{Code: code, Message: msg, Data: data}},
 	)
 	if err != nil {
 		http.Error(w, "internal error", http.StatusInternalServerError)
