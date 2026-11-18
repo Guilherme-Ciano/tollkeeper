@@ -1,0 +1,32 @@
+publicURL: "https://mcp.example.com/mcp"
+auditSigningKey: { secretName: tollkeeper-keys }
+requestStateKey: { secretName: tollkeeper-state }
+redis: { enabled: true, addrs: ["redis-0.redis:6379", "redis-1.redis:6379"] }
+postgres: { enabled: true, dsnSecret: { name: tollkeeper-pg } }
+serviceMonitor: { enabled: true }
+prometheusRule: { enabled: true }
+networkPolicy:
+  enabled: true
+  ingressFrom: [{ namespaceSelector: { matchLabels: { kubernetes.io/metadata.name: agents } } }]
+config:
+  auth:
+    mode: jwt
+    resource: "https://mcp.example.com/mcp"
+    authorization_servers: ["https://sso.example.com/realms/agents"]
+    jwt:
+      issuer: "https://sso.example.com/realms/agents"
+      jwks_url: "https://sso.example.com/realms/agents/protocol/openid-connect/certs"
+      audiences: ["https://mcp.example.com/mcp"]
+  upstreams:
+    - id: notes
+      transport: streamable_http
+      url: "http://notes.tools.svc:8000/mcp"
+  policy:
+    default: deny
+    rules:
+      - name: notes
+        tools: ["notes__*"]
+        effect: allow
+  rate_limits:
+    rules:
+      - { name: per-agent, per: subject, rate: "600/m", burst: 60 }

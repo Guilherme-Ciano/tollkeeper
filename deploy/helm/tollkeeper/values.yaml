@@ -1,0 +1,95 @@
+image:
+  repository: ghcr.io/guilherme-ciano/tollkeeper
+  tag: ""
+  digest: ""
+  pullPolicy: IfNotPresent
+
+replicaCount: 2
+
+publicURL: "https://mcp.example.com/mcp"
+
+config:
+  auth:
+    mode: jwt
+  upstreams: []
+  policy:
+    default: deny
+    rules: []
+
+envFromSecret: ""
+env: []
+
+auditSigningKey:
+  secretName: ""
+  key: audit-ed25519.key
+
+requestStateKey:
+  secretName: ""
+  key: request-state.key
+
+redis:
+  enabled: false
+  addrs: []
+  keyPrefix: "{tollkeeper}:rl:"
+
+postgres:
+  enabled: false
+  dsnSecret:
+    name: ""
+    key: dsn
+
+persistence:
+  enabled: true
+  size: 5Gi
+  storageClassName: ""
+  accessModes: [ReadWriteOnce]
+
+service:
+  type: ClusterIP
+  port: 8080
+  annotations: {}
+
+adminService:
+  port: 9090
+
+resources:
+  requests: { cpu: 250m, memory: 128Mi }
+  limits: { memory: 512Mi }
+
+podSecurityContext:
+  runAsNonRoot: true
+  runAsUser: 65532
+  runAsGroup: 65532
+  fsGroup: 65532
+  seccompProfile: { type: RuntimeDefault }
+
+securityContext:
+  allowPrivilegeEscalation: false
+  readOnlyRootFilesystem: true
+  capabilities: { drop: [ALL] }
+
+podAnnotations: {}
+podLabels: {}
+nodeSelector: {}
+tolerations: []
+affinity: {}
+topologySpreadConstraints: []
+terminationGracePeriodSeconds: 30
+
+podDisruptionBudget:
+  enabled: true
+  minAvailable: 1
+
+serviceMonitor:
+  enabled: false
+  interval: 15s
+  labels: {}
+
+prometheusRule:
+  enabled: false
+  labels: {}
+
+networkPolicy:
+  enabled: false
+  ingressFrom: []
+  metricsFrom: []

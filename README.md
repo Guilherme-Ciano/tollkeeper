@@ -151,6 +151,10 @@ FAIL line 7 (seq 7): hash mismatch: record content was modified after 6 valid re
 FAIL line 9 (seq 10): sequence gap: expected seq 9 after 8 valid records
 ```
 
+### Kubernetes
+
+[`deploy/helm/tollkeeper`](deploy/helm/tollkeeper/README.md) runs the gateway as a StatefulSet with one audit chain and volume per pod, hardened pods, optional Redis and Postgres, a ServiceMonitor, the alert rules as a PrometheusRule and a NetworkPolicy.
+
 ### Dashboards and alerts
 
 ```bash
@@ -327,8 +331,8 @@ Shipped in v1.1:
 Next:
 
 - [x] v1.2 (unreleased): direct `tools/call` path, sealed MRTR state, progress forwarding, input-required pass-through
-- [ ] v1.3: ~~resources and prompts aggregation~~, ~~shadow policy rules and `policy explain`~~, ~~hot config reload~~, ~~RFC 7662 introspection~~, ~~OTLP log sink~~ (done, unreleased), the tasks extension (SEP-2663)
-- [ ] v2.0: RFC 8693 token exchange to upstreams, DPoP, Helm chart
+- [ ] v1.3: ~~resources and prompts aggregation~~, ~~shadow policy rules and `policy explain`~~, ~~hot config reload~~, ~~RFC 7662 introspection~~, ~~OTLP log sink~~, ~~Grafana dashboard, alerts and Helm chart~~ (done, unreleased), the tasks extension (SEP-2663)
+- [ ] v2.0: RFC 8693 token exchange to upstreams, DPoP, stdio upstream sandboxing
 
 ## Development
 
