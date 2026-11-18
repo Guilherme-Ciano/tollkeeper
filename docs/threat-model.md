@@ -106,7 +106,7 @@ Upstreams are **semi-trusted**: the operator chose them, but their tool definiti
 
 | | Threat | Mitigation |
 |---|---|---|
-| T | Malicious policy change | Policy lives in version control; `policy test` fixtures run in CI; the SHA-256 of the loaded config file is logged at startup |
+| T | Malicious policy change | Policy lives in version control; `policy test` fixtures run in CI; the SHA-256 of the config file is written to the audit chain at startup and on every SIGHUP reload, and a reload that cannot be audited is not applied |
 | I | Signing key read from disk | The gateway refuses to load a signing key readable by group or others; distroless non-root image; keys belong in a secret mount |
 | E | Container escape from a stdio server | Out of scope for v1.0; stdio sandboxing (rlimits, Landlock) is on the roadmap |
 

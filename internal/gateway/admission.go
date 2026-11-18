@@ -248,7 +248,7 @@ func (g *Gateway) resolveTarget(a *Admission) (catalog.Tool, bool) {
 		return g.catalog.Lookup(a.Envelope.Name)
 	}
 	e, ok := g.lookupEntry(a.Kind, a.Envelope.Name)
-	if !ok || !g.policy.VisibleAs(a.Principal, e.Kind, e.Name) {
+	if !ok || !g.policy.Load().VisibleAs(a.Principal, e.Kind, e.Name) {
 		return catalog.Tool{}, false
 	}
 	return entryTarget(e, a.Envelope.Name), true
@@ -290,7 +290,7 @@ func (g *Gateway) admitCall(w http.ResponseWriter, r *http.Request, a *Admission
 		writeRPCError(w, http.StatusOK, env.ID, CodePolicyDenied, "denied by policy", nil)
 		return false
 	}
-	d := g.policy.Decide(ctx, policy.Input{
+	d := g.policy.Load().Decide(ctx, policy.Input{
 		Kind:       a.Kind,
 		Principal:  a.Principal,
 		Method:     env.Method,
@@ -311,7 +311,7 @@ func (g *Gateway) admitCall(w http.ResponseWriter, r *http.Request, a *Admission
 }
 
 func (g *Gateway) takeRate(ctx context.Context, w http.ResponseWriter, a *Admission, s ratelimit.Subject) bool {
-	res := g.limiter.Allow(ctx, s)
+	res := g.limiter.Load().Allow(ctx, s)
 	if res.Allowed {
 		if res.Limit.Count > 0 {
 			setRateHeaders(w, res)

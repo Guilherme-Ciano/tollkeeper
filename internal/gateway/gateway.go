@@ -79,8 +79,8 @@ type Gateway struct {
 	authDisabled   bool
 	requiredScopes []string
 	challenge      challenge
-	policy         *policy.Engine
-	limiter        *ratelimit.Limiter
+	policy         atomic.Pointer[policy.Engine]
+	limiter        atomic.Pointer[ratelimit.Limiter]
 	audit          Auditor
 	catalog        *catalog.Catalog
 	directory      *catalog.Directory
@@ -132,8 +132,6 @@ func New(d Deps) *Gateway {
 		verifier:       d.Verifier,
 		authDisabled:   d.Config.Auth.Mode == config.AuthModeNone,
 		requiredScopes: d.Config.Auth.RequiredScopes,
-		policy:         d.Policy,
-		limiter:        d.Limiter,
 		audit:          d.Audit,
 		catalog:        d.Catalog,
 		directory:      d.Directory,
@@ -154,6 +152,8 @@ func New(d Deps) *Gateway {
 	if !d.Config.Audit.Enabled {
 		g.recordArgs = config.RecordArgsNone
 	}
+	g.policy.Store(d.Policy)
+	g.limiter.Store(d.Limiter)
 	stateKey := d.StateKey
 	if stateKey != nil && len(stateKey) < MinStateKeyLen {
 		d.Log.Error("request state key too short, using an ephemeral key")
@@ -613,7 +613,7 @@ func (g *Gateway) listTools(
 	visible := lr.Tools[:0:0]
 	for _, t := range lr.Tools {
 		ct, ok := g.catalog.Lookup(t.Name)
-		if ok && g.policy.Visible(p, ct) {
+		if ok && g.policy.Load().Visible(p, ct) {
 			visible = append(visible, t)
 		}
 	}

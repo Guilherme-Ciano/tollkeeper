@@ -100,7 +100,7 @@ func (g *Gateway) listDirectory(ctx context.Context, method string) (mcp.Result,
 			return out
 		}
 		for _, e := range snap.Entries(kind) {
-			if g.policy.VisibleAs(p, kind, e.Name) {
+			if g.policy.Load().VisibleAs(p, kind, e.Name) {
 				out = append(out, e)
 			}
 		}
@@ -253,7 +253,7 @@ func (g *Gateway) complete(ctx context.Context, req mcp.Request) (mcp.Result, er
 		kind, name = catalog.KindResource, p.Ref.URI
 	}
 	e, found := g.lookupEntry(kind, name)
-	if !found || !signedIn || !g.policy.VisibleAs(principal, e.Kind, e.Name) {
+	if !found || !signedIn || !g.policy.Load().VisibleAs(principal, e.Kind, e.Name) {
 		return nil, notFoundError(kind, name)
 	}
 	reader, ok := g.upstreams[e.Upstream].(Reader)

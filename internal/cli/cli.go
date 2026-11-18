@@ -112,6 +112,7 @@ func serveCmd(info BuildInfo) *cobra.Command {
 			if err != nil {
 				return err
 			}
+			a.WatchConfig(path)
 			return a.Run(cmd.Context())
 		},
 	}

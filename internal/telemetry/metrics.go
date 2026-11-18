@@ -19,6 +19,7 @@ type Metrics struct {
 	UpstreamLatency *prometheus.HistogramVec
 	PolicyDecisions *prometheus.CounterVec
 	PolicyShadow    *prometheus.CounterVec
+	ConfigReloads   *prometheus.CounterVec
 	RateLimited     *prometheus.CounterVec
 	AuthFailures    *prometheus.CounterVec
 	AuditQueue      prometheus.Gauge
@@ -83,6 +84,10 @@ func NewMetrics() *Metrics {
 			Name: "mcpgw_upstream_duration_seconds", Help: "Upstream tools/call duration.",
 			Buckets: latencyBuckets(), NativeHistogramBucketFactor: 1.1,
 		}, []string{labelUpstream}),
+		ConfigReloads: prometheus.NewCounterVec(prometheus.CounterOpts{
+			Name: "mcpgw_config_reloads_total",
+			Help: "Config reloads by result: ok, invalid or audit_failed.",
+		}, []string{"result"}),
 		PolicyShadow: prometheus.NewCounterVec(prometheus.CounterOpts{
 			Name: "mcpgw_policy_shadow_decisions_total",
 			Help: "Calls a shadow rule would have decided, by rule, its effect and the effect actually applied.",
@@ -154,6 +159,7 @@ func NewMetrics() *Metrics {
 		m.UpstreamLatency,
 		m.PolicyDecisions,
 		m.PolicyShadow,
+		m.ConfigReloads,
 		m.RateLimited,
 		m.AuthFailures,
 		m.AuditQueue,

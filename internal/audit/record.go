@@ -21,6 +21,7 @@ const (
 	PhaseIntent   = "intent"
 	PhaseOutcome  = "outcome"
 	PhaseDecision = "decision"
+	PhaseConfig   = "config"
 
 	checkpointDomain = "tollkeeper-ckpt-v1"
 	anchorDomain     = "tollkeeper-anchor-v1"

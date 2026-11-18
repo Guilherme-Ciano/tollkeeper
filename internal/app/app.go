@@ -63,6 +63,10 @@ type App struct {
 	ready     atomic.Bool
 	synced    map[string]*atomic.Uint64
 	listeners sync.Map
+
+	configPath string
+	backend    ratelimit.Backend
+	reloadMu   sync.Mutex
 }
 
 func Build(ctx context.Context, cfg config.Config, log *slog.Logger, version string) (built *App, err error) {
@@ -91,7 +95,8 @@ func Build(ctx context.Context, cfg config.Config, log *slog.Logger, version str
 		return nil, fmt.Errorf("compile policy: %w", err)
 	}
 	a.store = ratelimit.NewStore(nil)
-	lim, err := ratelimit.New(cfg.RateLimits, a.rateBackend(ctx))
+	a.backend = a.rateBackend(ctx)
+	lim, err := ratelimit.New(cfg.RateLimits, a.backend)
 	if err != nil {
 		return nil, err
 	}
@@ -626,6 +631,12 @@ func (a *App) Run(ctx context.Context) error {
 	for _, u := range a.upstreams {
 		bg.Go(func() { u.Run(bgCtx) })
 		bg.Go(func() { a.syncLoop(bgCtx, u) })
+	}
+	if path := a.configPath; path != "" {
+		bg.Go(func() { a.reloadLoop(bgCtx, path) })
+	}
+	if err := a.gateway.RecordConfig(ctx, gateway.ConfigLoaded, a.cfg.Digest, ""); err != nil {
+		a.log.WarnContext(ctx, "config load not audited", slog.String("error", err.Error()))
 	}
 	dataSrv := newServer(bgCtx, a.gateway.Handler())
 	adminSrv := newServer(bgCtx, a.adminHandler())

@@ -199,6 +199,8 @@ policy:
       effect: allow
 ```
 
+`kill -HUP` reloads the config file: policy rules and rate-limit rules are swapped atomically, an invalid file is rejected and the running config stays in force, and every load and reload writes a `config/load` or `config/reload` audit record carrying the file's SHA-256 (`mcpgw_config_reloads_total{result}` counts them). Changes to listeners, auth, upstreams, audit, telemetry, pinning or the rate-limit store are logged as needing a restart and are not applied. SIGHUP is not available on Windows.
+
 A rule with `mode: shadow` is evaluated but never decides: the first shadow rule that would have decided is written to the call's audit records (`shadow_rule`, `shadow_decision`) and counted in `mcpgw_policy_shadow_decisions_total{rule, shadow_effect, effect}`, so a new deny can be watched against real traffic before it is enforced. Shadow rules never make anything visible.
 
 A rule applies to tools, prompts or resources only through its own `tools`, `prompts` or `resources` globs, so `tools: ["*"]` never exposes a resource. Globs use `path.Match`, where `*` stops at `/`; a bare `*` matches everything. A resource the caller may not see answers exactly like a missing one (`-32602` with `data.uri`), and lists only show what the caller may read.
@@ -316,7 +318,7 @@ Shipped in v1.1:
 Next:
 
 - [x] v1.2 (unreleased): direct `tools/call` path, sealed MRTR state, progress forwarding, input-required pass-through
-- [ ] v1.3: ~~resources and prompts aggregation~~, ~~shadow policy rules and `policy explain`~~ (done, unreleased), the tasks extension (SEP-2663), hot config reload, RFC 7662 introspection, OTLP log sink
+- [ ] v1.3: ~~resources and prompts aggregation~~, ~~shadow policy rules and `policy explain`~~, ~~hot config reload~~ (done, unreleased), the tasks extension (SEP-2663), RFC 7662 introspection, OTLP log sink
 - [ ] v2.0: RFC 8693 token exchange to upstreams, DPoP, Helm chart
 
 ## Development
