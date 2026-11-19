@@ -124,6 +124,9 @@ func (c *Config) validateServer(v *validator) {
 	if c.Server.MaxBodyBytes <= 0 || c.Server.MaxBodyBytes > 64<<20 {
 		v.add("server.max_body_bytes", "must be within (0, 64MiB]")
 	}
+	if c.Server.RequestStateTTL <= 0 || c.Server.RequestStateTTL > 24*time.Hour {
+		v.add("server.request_state_ttl", "must be within (0, 24h]")
+	}
 	sep := c.Server.NamespaceSeparator
 	if sep == "" || strings.ContainsAny(sep, " *?[]") ||
 		!strings.ContainsFunc(

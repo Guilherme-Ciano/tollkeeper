@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.2.0](https://github.com/Guilherme-Ciano/tollkeeper/compare/v1.1.0...v1.2.0) (2026-11-19)
+
+
+### Features
+
+* Banner on readme docs ([#17](https://github.com/Guilherme-Ciano/tollkeeper/issues/17)) ([ee336bd](https://github.com/Guilherme-Ciano/tollkeeper/commit/ee336bd4abb7892eff1f8f45b0584918e3904606))
+
 ## [1.1.0](https://github.com/Guilherme-Ciano/tollkeeper/compare/v1.0.0...v1.1.0) (2026-11-15)
 
 

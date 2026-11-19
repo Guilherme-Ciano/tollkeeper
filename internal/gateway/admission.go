@@ -172,7 +172,11 @@ func readEnvelope(w http.ResponseWriter, r *http.Request, limit int64) ([]byte, 
 		w.WriteHeader(http.StatusAccepted)
 		return nil, env, false
 	}
-	writeRPCError(w, http.StatusOK, env.ID, CodeMethodNotFound, "method not supported by gateway: "+env.Method, nil)
+	status := http.StatusOK
+	if r.Header.Get("Mcp-Protocol-Version") >= protocolStateless {
+		status = http.StatusNotFound
+	}
+	writeRPCError(w, status, env.ID, CodeMethodNotFound, "method not supported by gateway: "+env.Method, nil)
 	return nil, env, false
 }
 
@@ -197,10 +201,20 @@ func (g *Gateway) admission(next http.Handler) http.Handler {
 		if env.Method == MethodToolsCall && !g.admitCall(w, r, a) {
 			return
 		}
-		r2 := r.WithContext(withAdmission(r.Context(), a))
-		r2.Body = io.NopCloser(bytes.NewReader(body))
-		r2.ContentLength = int64(len(body))
-		next.ServeHTTP(w, r2)
+		fc, fast := g.fastCandidate(r, a)
+		switch {
+		case fast:
+			g.metrics.CallDispatch.WithLabelValues("fast").Inc()
+			g.serveFast(w, r, a, fc)
+		default:
+			if env.Method == MethodToolsCall {
+				g.metrics.CallDispatch.WithLabelValues("sdk").Inc()
+			}
+			r2 := r.WithContext(withAdmission(r.Context(), a))
+			r2.Body = io.NopCloser(bytes.NewReader(body))
+			r2.ContentLength = int64(len(body))
+			next.ServeHTTP(w, r2)
+		}
 		total := g.now().Sub(start)
 		g.metrics.Duration.WithLabelValues(env.Method).Observe(total.Seconds())
 		if env.Method != MethodToolsCall {
@@ -211,6 +225,13 @@ func (g *Gateway) admission(next http.Handler) http.Handler {
 			g.recordNotDispatched(r.Context(), a)
 		}
 	})
+}
+
+func (g *Gateway) fastCandidate(r *http.Request, a *Admission) (fastCall, bool) {
+	if a.Envelope.Method != MethodToolsCall {
+		return fastCall{}, false
+	}
+	return g.fastPath(r, a)
 }
 
 func (g *Gateway) admitCall(w http.ResponseWriter, r *http.Request, a *Admission) bool {
