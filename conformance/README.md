@@ -24,6 +24,8 @@ Apart from the baseline, the gateway passes every check the fixture passes when 
 
 Each entry is removed in the change that makes its scenario pass, so the file only shrinks as features land.
 
+The `2025-11-25` run has its own [`baseline-2025-11-25.yml`](baseline-2025-11-25.yml). Clients on that version talk to the gateway through go-sdk's stateful fallback, and the gateway does not relay what an upstream sends back to such a client mid-call: sampling and elicitation requests (`tools-call-sampling`, `tools-call-elicitation`, `elicitation-*`), log messages (`logging-set-level`, `tools-call-with-logging`) and progress (`tools-call-with-progress`, relayed only on 2026-07-28). It also does not offer `resources/subscribe` (`resources-subscribe`, `resources-unsubscribe`) or the legacy standalone SSE stream (`server-sse-multiple-streams`). The 2026-07-28 equivalents of these features pass.
+
 The run step uses `set -o pipefail`. Without it, the `tee` that saves the output hid the suite's exit code, and the job passed even when scenarios outside the baseline failed.
 
 ## Running locally
