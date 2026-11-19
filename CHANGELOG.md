@@ -1,5 +1,29 @@
 # Changelog
 
+## [1.3.0](https://github.com/Guilherme-Ciano/tollkeeper/compare/v1.2.0...v1.3.0) (2026-11-19)
+
+
+### Features
+
+* aggregate prompts and resources from upstreams ([7f53642](https://github.com/Guilherme-Ciano/tollkeeper/commit/7f53642a668e363a03cf2fed6116a2084e3f7db0))
+* **app:** reload policy and rate limits on SIGHUP ([7f53642](https://github.com/Guilherme-Ciano/tollkeeper/commit/7f53642a668e363a03cf2fed6116a2084e3f7db0))
+* **audit:** export committed records to an OTLP log collector ([7f53642](https://github.com/Guilherme-Ciano/tollkeeper/commit/7f53642a668e363a03cf2fed6116a2084e3f7db0))
+* **authn:** RFC 7662 token introspection for opaque tokens ([7f53642](https://github.com/Guilherme-Ciano/tollkeeper/commit/7f53642a668e363a03cf2fed6116a2084e3f7db0))
+* **deploy:** Grafana dashboard and Prometheus alert rules ([7f53642](https://github.com/Guilherme-Ciano/tollkeeper/commit/7f53642a668e363a03cf2fed6116a2084e3f7db0))
+* **deploy:** Helm chart ([7f53642](https://github.com/Guilherme-Ciano/tollkeeper/commit/7f53642a668e363a03cf2fed6116a2084e3f7db0))
+* **gateway:** subscriptions/listen with relayed list-changed notifications ([7f53642](https://github.com/Guilherme-Ciano/tollkeeper/commit/7f53642a668e363a03cf2fed6116a2084e3f7db0))
+* **policy:** shadow rules and policy explain ([7f53642](https://github.com/Guilherme-Ciano/tollkeeper/commit/7f53642a668e363a03cf2fed6116a2084e3f7db0))
+
+
+### Benchmarks
+
+* republish the overhead benchmark for v1.3 ([7f53642](https://github.com/Guilherme-Ciano/tollkeeper/commit/7f53642a668e363a03cf2fed6116a2084e3f7db0))
+
+
+### Chores
+
+* release 1.3.0 ([ec9092d](https://github.com/Guilherme-Ciano/tollkeeper/commit/ec9092da93a874366d6ed7087ff8ebb4869dc2d0))
+
 ## [1.2.0](https://github.com/Guilherme-Ciano/tollkeeper/compare/v1.1.0...v1.2.0) (2026-11-19)
 
 
