@@ -1,3 +1,5 @@
+<p align="center"><img src="docs/img/banner.png" alt="tollkeeper: a single Go binary between your AI agents and their MCP tools, with OAuth 2.1, CEL policies, GCRA rate limits and an Ed25519-signed audit log." width="100%"></p>
+
 # tollkeeper
 
 **A single Go binary between your agents and their MCP tools: OAuth 2.1 resource server, policy-as-code in CEL, GCRA rate limits, and an audit log you can cryptographically verify.**
@@ -196,6 +198,9 @@ policy:
 | `server.listen` / `admin_listen` | `:8080` / `127.0.0.1:9090` | Admin serves `/metrics`, `/livez`, `/readyz`, `/pins`; `server.pprof: true` adds `/debug/pprof` and requires a loopback admin address |
 | `server.public_url` | required | Canonical MCP URL; also the RFC 9728 metadata path |
 | `server.max_body_bytes` | 1 MiB | Enforced before parsing |
+| `server.request_state_key_file` | per-process key | HMAC key (at least 32 bytes) that seals upstream `requestState` for multi-round-trip calls; share one file across replicas so a retry can land on any of them |
+| `server.request_state_ttl` | `10m` | How long a sealed `requestState` stays valid |
+| `server.disable_fast_path` | `false` | Serve every `tools/call` through the go-sdk transport instead of the direct path for protocol 2026-07-28 |
 | `auth.mode` | `jwt` | `none` exists for local experiments and logs a warning |
 | `auth.jwt.algorithms` | RS256, ES256, EdDSA | HS* and `none` are never accepted |
 | `auth.jwt.types` | any | e.g. `["at+jwt"]` to accept only RFC 9068 access tokens |
@@ -207,7 +212,7 @@ policy:
 | `audit.anchor.enabled` | `false` | Anchor checkpoints in a Rekor v2 log (`rekor_url`, `trust_files`, `tsa_url`, `interval` 15m, `min_spacing` 1m); entries are public and permanent ([anchoring](docs/operations/anchoring.md)) |
 | `audit.record_args` | `hash` | `none`, `hash`, `full` (raw arguments may be personal data) |
 | `audit.on_backpressure` | `fail_closed` | Calls are refused if their intent record cannot be queued |
-| `server.namespace_tools` | `true` | `false` exposes upstream tool names unchanged; only allowed with exactly one upstream, for deployments that front a single server for auth and audit |
+| `server.namespace_tools` | `true` | `false` exposes upstream tool names unchanged; only allowed with exactly one upstream, for deployments that front a single server for auth and audit. Policy and rate-limit globs then match bare names, so `config validate` warns about globs that still contain the separator |
 | `pinning.mode` | `warn` | `off`, `warn` (serve and report unapproved definitions) or `enforce` (hide and refuse them until approved) |
 | `pinning.file` | | Lockfile written by `tollkeeper pin approve`; required for `enforce`, reloaded every `pinning.reload_interval` (5 s); refused if group or world writable |
 | `pinning.report_token` | | Bearer token for `GET /pins`; without it the report is only served on a loopback admin listener |
@@ -274,10 +279,10 @@ Report vulnerabilities as described in [SECURITY.md](SECURITY.md).
 ## Known limitations
 
 - **Tools only.** Resources and prompts are not aggregated yet; go-sdk has no dynamic `resources/list` handler ([go-sdk#998](https://github.com/modelcontextprotocol/go-sdk/issues/998)).
-- **Progress notifications are not forwarded**, and if they were, go-sdk may deliver them after the result ([go-sdk#1337](https://github.com/modelcontextprotocol/go-sdk/issues/1337)).
-- **MRTR `requestState` is passed through, not yet sealed**; tool names still route retries, so a client cannot redirect a retry to another upstream by name.
+- **Progress is relayed only on protocol 2026-07-28.** When a `tools/call` carries `_meta.progressToken`, the gateway gives the upstream its own token and streams the notifications back as server-sent events under the client's token, with the result last. go-sdk can hand a notification to the client after the result ([go-sdk#1337](https://github.com/modelcontextprotocol/go-sdk/issues/1337)), so such calls wait for 10 ms without a new notification (100 ms at most) before answering; anything later is dropped. Older protocol versions get no progress.
+- **Sealed, not encrypted.** The gateway seals an upstream's `requestState` with HMAC-SHA256 and binds it to the upstream, tool, subject and client id. A retry with a tampered, expired or foreign state gets JSON-RPC `-32602`. The upstream's own state stays readable by the client, as it was before the gateway.
 - Rate limits are per replica unless `rate_limits.store: redis` is set. Each replica writes its own audit chain (`chain_id`), also when they share one Postgres table.
-- Upstream results pass through unchanged, including the upstream's `_meta` server info.
+- Upstream results pass through unchanged apart from the sealed `requestState`, including the upstream's `_meta` server info.
 - Records written after the last checkpoint are protected only by the hash chain until the next checkpoint (`checkpoint.every`/`interval`); `audit verify --max-unsigned` bounds how many are accepted. With anchoring, `--max-unanchored` bounds the unanchored tail. Rekor v2 records no time itself and the public instance does not promise witnessed checkpoints yet, so anchors prove time only when `audit.anchor.tsa_url` adds an RFC 3161 timestamp.
 - `subscriptions/listen` is not offered and `tools.listChanged` is not advertised; clients re-list tools.
 - Rate-limit tokens are spent by calls that are later denied by policy, and the idle-key janitor can grant at most one extra request on a key it races with.
@@ -300,8 +305,8 @@ Shipped in v1.1:
 
 Next:
 
-- [ ] v1.2: sealed MRTR state, progress forwarding
-- [ ] v1.3: resources and prompts aggregation, hot config reload, RFC 7662 introspection, OTLP log sink
+- [x] v1.2 (unreleased): direct `tools/call` path, sealed MRTR state, progress forwarding, input-required pass-through
+- [ ] v1.3: resources and prompts aggregation, the tasks extension (SEP-2663), hot config reload, RFC 7662 introspection, OTLP log sink
 - [ ] v2.0: RFC 8693 token exchange to upstreams, DPoP, Helm chart
 
 ## Development

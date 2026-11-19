@@ -1,0 +1,50 @@
+name: go-sdk-next
+on:
+  schedule:
+    - cron: "17 6 * * 1"
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: ${{ github.workflow }}
+  cancel-in-progress: true
+jobs:
+  next:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: step-security/harden-runner@1d88384fd173af6ecb012dfd0264a306b711241a # v2.22.4
+        with: { egress-policy: audit }
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with: { go-version-file: go.mod, check-latest: true }
+      - name: Pick the newest go-sdk release, pre-releases included
+        id: pick
+        shell: bash
+        run: |
+          set -euo pipefail
+          current=$(go list -m -f '{{.Version}}' github.com/modelcontextprotocol/go-sdk)
+          next=$(go list -m -versions github.com/modelcontextprotocol/go-sdk | tr ' ' '\n' | tail -1)
+          echo "current=$current" >> "$GITHUB_OUTPUT"
+          echo "next=$next" >> "$GITHUB_OUTPUT"
+          echo "### go-sdk $current → $next" >> "$GITHUB_STEP_SUMMARY"
+      - name: Upgrade
+        if: steps.pick.outputs.next != steps.pick.outputs.current
+        run: go get "github.com/modelcontextprotocol/go-sdk@${{ steps.pick.outputs.next }}" && go mod tidy
+      - name: Build, vet and test with the race detector
+        if: steps.pick.outputs.next != steps.pick.outputs.current
+        shell: bash
+        run: |
+          set -o pipefail
+          go build ./...
+          go vet ./...
+          go test -race -count=1 ./... 2>&1 | tee test-output.txt
+      - if: failure()
+        name: Summarize failures
+        shell: bash
+        run: |
+          {
+            echo "Breaks are tracked in docs/go-sdk-upgrades.md."
+            echo '```'
+            grep -E -- '^(--- FAIL|FAIL|panic:)' test-output.txt | head -60 || true
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"

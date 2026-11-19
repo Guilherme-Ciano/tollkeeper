@@ -1,6 +1,7 @@
 package app
 
 import (
+	"bytes"
 	"context"
 	"crypto/subtle"
 	"crypto/tls"
@@ -11,6 +12,7 @@ import (
 	"net"
 	"net/http"
 	"net/http/pprof"
+	"os"
 	"slices"
 	"strings"
 	"sync"
@@ -105,6 +107,9 @@ func Build(ctx context.Context, cfg config.Config, log *slog.Logger, version str
 	} else {
 		log.WarnContext(ctx, "authentication disabled: every caller is anonymous")
 	}
+	for _, w := range cfg.Warnings() {
+		log.WarnContext(ctx, "config warning", slog.String("detail", w))
+	}
 	var auditor gateway.Auditor
 	if cfg.Audit.Enabled {
 		if err := a.openAudit(ctx); err != nil {
@@ -119,7 +124,7 @@ func Build(ctx context.Context, cfg config.Config, log *slog.Logger, version str
 	if a.pins != nil {
 		pins = a.pins
 	}
-	naming := catalog.Naming{Separator: cfg.Server.NamespaceSeparator, Bare: !cfg.Server.NamespaceTools}
+	naming := cfg.Naming()
 	callers := map[string]gateway.Caller{}
 	hooks := upstream.Hooks{
 		Up: func(id string, up bool) {
@@ -142,6 +147,14 @@ func Build(ctx context.Context, cfg config.Config, log *slog.Logger, version str
 		a.upstreams = append(a.upstreams, u)
 		callers[uc.ID] = u
 	}
+	stateKey, err := readStateKey(cfg.Server.RequestStateKey)
+	if err != nil {
+		return nil, err
+	}
+	if stateKey == nil {
+		log.InfoContext(ctx, "request state key is ephemeral",
+			slog.String("hint", "set server.request_state_key_file when running several replicas"))
+	}
 	a.gateway = gateway.New(gateway.Deps{
 		Config:     cfg,
 		Verifier:   verifier,
@@ -156,6 +169,7 @@ func Build(ctx context.Context, cfg config.Config, log *slog.Logger, version str
 		Log:        log,
 		Version:    version,
 		Pins:       pins,
+		StateKey:   stateKey,
 	})
 	return a, nil
 }
@@ -663,4 +677,19 @@ func serve(s *http.Server, ln net.Listener) error {
 		return fmt.Errorf("serve: %w", err)
 	}
 	return nil
+}
+
+func readStateKey(path string) ([]byte, error) {
+	if path == "" {
+		return nil, nil
+	}
+	key, err := os.ReadFile(path)
+	if err != nil {
+		return nil, fmt.Errorf("read request state key: %w", err)
+	}
+	key = bytes.TrimSpace(key)
+	if len(key) < gateway.MinStateKeyLen {
+		return nil, fmt.Errorf("request state key %s: need at least %d bytes", path, gateway.MinStateKeyLen)
+	}
+	return key, nil
 }

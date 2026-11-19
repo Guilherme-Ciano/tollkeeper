@@ -18,10 +18,13 @@ flowchart LR
 
 | Scenarios | Reason |
 |---|---|
-| `resources-*`, `sep-2164-resource-not-found`, `prompts-*`, `completion-complete` | Only tools are aggregated in v0.1; go-sdk has no dynamic `resources/list` handler ([go-sdk#998](https://github.com/modelcontextprotocol/go-sdk/issues/998)) |
-| `tools-call-with-progress` | Progress notifications are not forwarded yet ([go-sdk#1337](https://github.com/modelcontextprotocol/go-sdk/issues/1337)) |
+| `resources-read-*`, `resources-templates-read`, `sep-2164-resource-not-found`, `prompts-get-*`, `completion-complete`, `input-required-result-non-tool-request` | Only tools are aggregated; go-sdk has no dynamic `resources/list` handler ([go-sdk#998](https://github.com/modelcontextprotocol/go-sdk/issues/998)) |
+| `server-stateless` | One check out of 25: `server/discover` does not declare prompts, because prompts are not aggregated |
+| `tasks-*` | The tasks extension (SEP-2663) is not proxied: task-only tools are not offered and `tasks/*` methods are not routed |
 
 Each entry is removed in the change that makes its scenario pass, so the file only shrinks as features land.
+
+The run step uses `set -o pipefail`. Without it, the `tee` that saves the output hid the suite's exit code, and the job passed even when scenarios outside the baseline failed.
 
 ## Running locally
 

@@ -136,6 +136,9 @@ func configCmd() *cobra.Command {
 			if _, err := ratelimit.New(cfg.RateLimits, ratelimit.NewStore(nil)); err != nil {
 				return err
 			}
+			if err := printWarnings(cmd.ErrOrStderr(), cfg.Warnings()); err != nil {
+				return err
+			}
 			return printf(cmd.OutOrStdout(), "%s: OK (%d upstreams, %d policy rules, %d rate limit rules)\n",
 				path, len(cfg.Upstreams), len(cfg.Policy.Rules), len(cfg.RateLimits.Rules))
 		},
@@ -160,6 +163,9 @@ func policyCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
+			if err := printWarnings(cmd.ErrOrStderr(), cfg.Warnings()); err != nil {
+				return err
+			}
 			f, err := os.Open(fixtures)
 			if err != nil {
 				return fmt.Errorf("open fixtures: %w", err)
@@ -169,7 +175,7 @@ func policyCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			results, err := eng.RunFixtures(cmd.Context(), ff, cfg.Server.NamespaceSeparator)
+			results, err := eng.RunFixtures(cmd.Context(), ff, cfg.Naming())
 			if err != nil {
 				return err
 			}
@@ -626,4 +632,13 @@ func openVerifySource(o verifyOpts) (io.ReadCloser, error) {
 		w.Close()
 	}()
 	return &exportReader{PipeReader: r, cancel: cancel, done: done}, nil
+}
+
+func printWarnings(w io.Writer, warnings []string) error {
+	for _, msg := range warnings {
+		if err := printf(w, "warning: %s\n", msg); err != nil {
+			return err
+		}
+	}
+	return nil
 }

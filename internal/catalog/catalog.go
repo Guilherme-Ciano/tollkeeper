@@ -44,6 +44,7 @@ type Tool struct {
 type Naming struct {
 	Separator string
 	Bare      bool
+	Upstream  string
 }
 
 func validChar(r rune) bool {
@@ -71,6 +72,12 @@ func (n Naming) Qualify(upstream, name string) (string, error) {
 }
 
 func (n Naming) Split(qualified string) (upstream, name string, ok bool) {
+	if n.Bare {
+		if qualified == "" || n.Upstream == "" {
+			return "", "", false
+		}
+		return n.Upstream, qualified, true
+	}
 	upstream, name, ok = strings.Cut(qualified, n.Separator)
 	if !ok || upstream == "" || name == "" {
 		return "", "", false

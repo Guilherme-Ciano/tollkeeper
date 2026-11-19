@@ -214,6 +214,32 @@ func TestEnvOverlayStillRejectsUnknownNestedKeys(t *testing.T) {
 	}
 }
 
+func TestBareNamingPolicyGlobWithSeparatorWarns(t *testing.T) {
+	t.Parallel()
+	cfg := Defaults()
+	cfg.Upstreams = []Upstream{
+		defaultUpstream(Upstream{ID: "notes", Transport: TransportStdio, Command: []string{"/bin/notes"}}),
+	}
+	cfg.Policy.Rules = []Rule{{Name: "r", Tools: []string{"search", "notes__delete*"}, Effect: EffectDeny}}
+	cfg.RateLimits.Rules = []RateRule{{Name: "x", Tools: []string{"notes__*"}, Per: PerSubject, Rate: "1/s", Burst: 1}}
+	if w := cfg.Warnings(); len(w) != 0 {
+		t.Fatalf("namespaced mode warned: %v", w)
+	}
+	cfg.Server.NamespaceTools = false
+	w := strings.Join(cfg.Warnings(), "\n")
+	for _, want := range []string{"policy.rules[0].tools[1]", "rate_limits.rules[0].tools[0]"} {
+		if !strings.Contains(w, want) {
+			t.Errorf("missing warning for %s in:\n%s", want, w)
+		}
+	}
+	if strings.Contains(w, "tools[0]: \"search\"") {
+		t.Fatalf("glob without the separator warned:\n%s", w)
+	}
+	if n := cfg.Naming(); !n.Bare || n.Upstream != "notes" {
+		t.Fatalf("bare naming = %+v", n)
+	}
+}
+
 func TestValidateAuditAnchor(t *testing.T) {
 	t.Parallel()
 	if Defaults().Audit.Anchor.Enabled {
