@@ -40,6 +40,9 @@ type Server struct {
 	ShutdownDrainDelay time.Duration `koanf:"shutdown_drain_delay"`
 	ShutdownTimeout    time.Duration `koanf:"shutdown_timeout"`
 	AllowLocalhostHost bool          `koanf:"allow_localhost_host"`
+	DisableFastPath    bool          `koanf:"disable_fast_path"`
+	RequestStateKey    string        `koanf:"request_state_key_file"`
+	RequestStateTTL    time.Duration `koanf:"request_state_ttl"`
 	Pprof              bool          `koanf:"pprof"`
 }
 
@@ -212,6 +215,7 @@ func Defaults() Config {
 			ResyncDebounce:     250 * time.Millisecond,
 			ShutdownDrainDelay: 0,
 			ShutdownTimeout:    20 * time.Second,
+			RequestStateTTL:    10 * time.Minute,
 		},
 		Auth: Auth{
 			Mode: AuthModeJWT,

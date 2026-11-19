@@ -85,6 +85,7 @@ jobs:
         target:
           - { pkg: ./internal/gateway, fn: FuzzParseEnvelope }
           - { pkg: ./internal/gateway, fn: FuzzRejectDuplicateKeys }
+          - { pkg: ./internal/gateway, fn: FuzzOpenRequestState }
           - { pkg: ./internal/audit, fn: FuzzVerify }
           - { pkg: ./internal/policy, fn: FuzzPolicyArgs }
           - { pkg: ./internal/catalog, fn: FuzzQualify }
