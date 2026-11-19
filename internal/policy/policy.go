@@ -47,16 +47,25 @@ func (e Effect) String() string {
 	return "deny"
 }
 
+const reasonMatched = "matched rule"
+
 type Decision struct {
 	Effect       Effect
 	Rule         string
 	Reason       string
 	StepUpScopes []string
+	Shadow       *ShadowHit
+}
+
+type ShadowHit struct {
+	Rule   string
+	Effect Effect
 }
 
 type Input struct {
 	Principal  identity.Principal
 	Method     string
+	Kind       catalog.Kind
 	Tool       catalog.Tool
 	Args       json.RawMessage
 	ClientName string
@@ -68,6 +77,7 @@ type rule struct {
 	effect   Effect
 	program  cel.Program
 	usesArgs bool
+	shadow   bool
 }
 
 type Engine struct {
@@ -112,7 +122,7 @@ func New(cfg config.Policy) (*Engine, error) {
 	var errs []error
 	for i := range cfg.Rules {
 		rc := cfg.Rules[i]
-		r := rule{cfg: rc, effect: Deny}
+		r := rule{cfg: rc, effect: Deny, shadow: rc.Mode == config.RuleModeShadow}
 		if rc.Effect == config.EffectAllow {
 			r.effect = Allow
 		}
@@ -153,6 +163,9 @@ func New(cfg config.Policy) (*Engine, error) {
 
 func globMatch(globs []string, s string) bool {
 	for _, g := range globs {
+		if g == "*" {
+			return true
+		}
 		if ok, err := path.Match(g, s); err == nil && ok {
 			return true
 		}
@@ -206,6 +219,7 @@ func activation(in Input, withArgs bool) (map[string]any, error) {
 			},
 		},
 		"request": map[string]any{
+			"kind":        kindName(in.Kind),
 			"method":      in.Method,
 			"client_name": in.ClientName,
 		},
@@ -243,8 +257,8 @@ func (ev *evaluation) activation(needArgs bool) (map[string]any, error) {
 	return act, nil
 }
 
-func (r *rule) applies(tool string, p identity.Principal) bool {
-	return globMatch(r.cfg.Tools, tool) && subjectsMatch(r.cfg.Subjects, p)
+func (r *rule) applies(kind catalog.Kind, name string, p identity.Principal) bool {
+	return globMatch(r.globs(kind), name) && subjectsMatch(r.cfg.Subjects, p)
 }
 
 func (e *Engine) Decide(ctx context.Context, in Input) Decision {
@@ -252,21 +266,30 @@ func (e *Engine) Decide(ctx context.Context, in Input) Decision {
 		in.Now = time.Now()
 	}
 	ev := &evaluation{in: in}
+	var shadow *ShadowHit
 	for i := range e.rules {
 		r := &e.rules[i]
-		if !r.applies(in.Tool.Name, in.Principal) {
+		if !r.applies(in.Kind, in.Tool.Name, in.Principal) {
 			continue
 		}
-		if d, done := e.decideRule(ctx, r, ev); done {
+		d, done := e.decideRule(ctx, r, ev)
+		switch {
+		case !done:
+		case r.shadow:
+			if shadow == nil {
+				shadow = &ShadowHit{Rule: r.cfg.Name, Effect: d.Effect}
+			}
+		default:
+			d.Shadow = shadow
 			return d
 		}
 	}
-	return Decision{Effect: e.defaultEffect, Rule: "default", Reason: "no rule matched"}
+	return Decision{Effect: e.defaultEffect, Rule: "default", Reason: "no rule matched", Shadow: shadow}
 }
 
 func (e *Engine) decideRule(ctx context.Context, r *rule, ev *evaluation) (Decision, bool) {
 	if r.program == nil {
-		return Decision{Effect: r.effect, Rule: r.cfg.Name, Reason: "matched rule"}, true
+		return Decision{Effect: r.effect, Rule: r.cfg.Name, Reason: reasonMatched}, true
 	}
 	act, err := ev.activation(r.usesArgs)
 	if err != nil {
@@ -277,7 +300,7 @@ func (e *Engine) decideRule(ctx context.Context, r *rule, ev *evaluation) (Decis
 		return Decision{Effect: Deny, Rule: r.cfg.Name, Reason: "policy evaluation failed: " + err.Error()}, true
 	}
 	if ok {
-		return Decision{Effect: r.effect, Rule: r.cfg.Name, Reason: "matched rule"}, true
+		return Decision{Effect: r.effect, Rule: r.cfg.Name, Reason: reasonMatched}, true
 	}
 	if len(r.cfg.OnDeny.StepUpScopes) > 0 && !ev.in.Principal.HasAllScopes(r.cfg.OnDeny.StepUpScopes) {
 		return Decision{
@@ -305,9 +328,13 @@ func (e *Engine) eval(ctx context.Context, r *rule, act map[string]any) (bool, e
 }
 
 func (e *Engine) Visible(p identity.Principal, t catalog.Tool) bool {
+	return e.VisibleAs(p, "", t.Name)
+}
+
+func (e *Engine) VisibleAs(p identity.Principal, kind catalog.Kind, name string) bool {
 	for i := range e.rules {
 		r := &e.rules[i]
-		if !r.applies(t.Name, p) {
+		if r.shadow || !r.applies(kind, name, p) {
 			continue
 		}
 		if r.effect == Allow {
@@ -318,4 +345,11 @@ func (e *Engine) Visible(p identity.Principal, t catalog.Tool) bool {
 		}
 	}
 	return e.defaultEffect == Allow
+}
+
+func kindName(k catalog.Kind) string {
+	if k == "" {
+		return "tool"
+	}
+	return string(k)
 }

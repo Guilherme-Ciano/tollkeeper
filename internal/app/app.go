@@ -26,6 +26,7 @@ import (
 
 	"github.com/Guilherme-Ciano/tollkeeper/internal/audit"
 	"github.com/Guilherme-Ciano/tollkeeper/internal/audit/anchor"
+	"github.com/Guilherme-Ciano/tollkeeper/internal/audit/otlpsink"
 	"github.com/Guilherme-Ciano/tollkeeper/internal/audit/pgsink"
 	"github.com/Guilherme-Ciano/tollkeeper/internal/authn"
 	"github.com/Guilherme-Ciano/tollkeeper/internal/catalog"
@@ -39,8 +40,9 @@ import (
 )
 
 const (
-	maxCatalogTools = 5000
-	pollInterval    = 60 * time.Second
+	maxCatalogTools     = 5000
+	maxDirectoryEntries = 20000
+	pollInterval        = 60 * time.Second
 )
 
 type App struct {
@@ -54,19 +56,26 @@ type App struct {
 	auditLog  *audit.Log
 	auditPG   *pgsink.Sink
 	anchorer  *anchor.Anchorer
+	otlp      *otlpsink.Sink
+	version   string
 	catalog   *catalog.Catalog
+	directory *catalog.Directory
 	upstreams []*upstream.Upstream
 	gateway   *gateway.Gateway
 	pins      *pin.Guard
 	ready     atomic.Bool
 	synced    map[string]*atomic.Uint64
 	listeners sync.Map
+
+	configPath string
+	backend    ratelimit.Backend
+	reloadMu   sync.Mutex
 }
 
 func Build(ctx context.Context, cfg config.Config, log *slog.Logger, version string) (built *App, err error) {
 	a := &App{
-		cfg: cfg, log: log, metrics: telemetry.NewMetrics(), catalog: catalog.New(maxCatalogTools),
-		synced: map[string]*atomic.Uint64{},
+		cfg: cfg, log: log, version: version, metrics: telemetry.NewMetrics(), catalog: catalog.New(maxCatalogTools),
+		directory: catalog.NewDirectory(maxDirectoryEntries), synced: map[string]*atomic.Uint64{},
 	}
 	defer func() {
 		if err != nil {
@@ -89,24 +98,12 @@ func Build(ctx context.Context, cfg config.Config, log *slog.Logger, version str
 		return nil, fmt.Errorf("compile policy: %w", err)
 	}
 	a.store = ratelimit.NewStore(nil)
-	lim, err := ratelimit.New(cfg.RateLimits, a.rateBackend(ctx))
+	a.backend = a.rateBackend(ctx)
+	lim, err := ratelimit.New(cfg.RateLimits, a.backend)
 	if err != nil {
 		return nil, err
 	}
-	var verifier gateway.TokenVerifier
-	if cfg.Auth.Mode == config.AuthModeJWT {
-		a.keys = authn.NewKeySet(
-			cfg.Auth.JWT.JWKSURL,
-			&http.Client{Timeout: 10 * time.Second, CheckRedirect: upstream.NoRedirects},
-			cfg.Auth.JWT.JWKSMinRetry,
-		)
-		verifier = authn.NewVerifier(authn.FromKeySet(a.keys), authn.VerifierOptions{
-			Issuer: cfg.Auth.JWT.Issuer, Audiences: cfg.Auth.JWT.Audiences,
-			Algorithms: cfg.Auth.JWT.Algorithms, Leeway: cfg.Auth.JWT.ClockSkew, Types: cfg.Auth.JWT.Types,
-		})
-	} else {
-		log.WarnContext(ctx, "authentication disabled: every caller is anonymous")
-	}
+	verifier := a.verifier(ctx, cfg)
 	for _, w := range cfg.Warnings() {
 		log.WarnContext(ctx, "config warning", slog.String("detail", w))
 	}
@@ -162,6 +159,7 @@ func Build(ctx context.Context, cfg config.Config, log *slog.Logger, version str
 		Limiter:    lim,
 		Audit:      auditor,
 		Catalog:    a.catalog,
+		Directory:  a.directory,
 		Upstreams:  callers,
 		Metrics:    a.metrics,
 		Tracer:     tr.Tracer(),
@@ -255,6 +253,21 @@ func (a *App) openAudit(ctx context.Context) error {
 		if err := a.openMirror(ctx, &opts); err != nil {
 			return err
 		}
+	}
+	if o := a.cfg.Audit.OTLP; o.Endpoint != "" {
+		a.otlp = otlpsink.New(otlpsink.Options{
+			Endpoint: o.Endpoint, Headers: o.Headers, Service: "tollkeeper", Version: a.version,
+			Batch: o.Batch, Queue: o.Queue, Interval: o.Interval,
+			Client: &http.Client{Timeout: o.Timeout, CheckRedirect: upstream.NoRedirects},
+			Hooks: otlpsink.Hooks{
+				Exported: func(n int) { a.metrics.AuditExport.WithLabelValues("exported").Add(float64(n)) },
+				Dropped:  func(n int) { a.metrics.AuditExport.WithLabelValues("dropped").Add(float64(n)) },
+				Failed: func(err error) {
+					a.log.WarnContext(ctx, "otlp audit export failed", slog.String("error", err.Error()))
+				},
+			},
+		})
+		opts.Committed = a.otlp.Committed
 	}
 	if a.cfg.Audit.Checkpoint.SigningKeyFile != "" {
 		k, err := audit.LoadPrivateKey(a.cfg.Audit.Checkpoint.SigningKeyFile)
@@ -542,6 +555,7 @@ func (a *App) serving(u *upstream.Upstream) bool {
 }
 
 func (a *App) resync(ctx context.Context, u *upstream.Upstream) {
+	signalled := u.TakeSignalled()
 	var tools []catalog.Tool
 	gen := u.Generation()
 	up := u.Up()
@@ -556,6 +570,7 @@ func (a *App) resync(ctx context.Context, u *upstream.Upstream) {
 				slog.String("error", err.Error()),
 			)
 			if u.Up() {
+				u.Restore(signalled)
 				return
 			}
 			tools, up = nil, false
@@ -571,12 +586,16 @@ func (a *App) resync(ctx context.Context, u *upstream.Upstream) {
 		)
 		return
 	}
+	if signalled&upstream.ChangedTools != 0 && delta.Empty() {
+		a.gateway.NotifyListChanged(true, false, false)
+	}
 	if !delta.Empty() {
 		a.gateway.Apply(delta)
 		a.log.InfoContext(ctx, "catalog updated", slog.String("upstream", u.ID()),
 			slog.Int("upserted", len(delta.Upserted)), slog.Int("removed", len(delta.Removed)),
 			slog.Uint64("version", a.catalog.Snapshot().Version))
 	}
+	a.resyncDirectory(ctx, u, up, signalled)
 	if up {
 		a.synced[u.ID()].Store(gen)
 	} else {
@@ -616,12 +635,21 @@ func (a *App) Run(ctx context.Context) error {
 	if a.pins != nil && a.cfg.Pinning.File != "" {
 		bg.Go(func() { a.pinLoop(bgCtx) })
 	}
+	if a.otlp != nil {
+		bg.Go(func() { a.otlp.Run(bgCtx) })
+	}
 	if a.anchorer != nil {
 		bg.Go(func() { a.anchorer.Run(bgCtx) })
 	}
 	for _, u := range a.upstreams {
 		bg.Go(func() { u.Run(bgCtx) })
 		bg.Go(func() { a.syncLoop(bgCtx, u) })
+	}
+	if path := a.configPath; path != "" {
+		bg.Go(func() { a.reloadLoop(bgCtx, path) })
+	}
+	if err := a.gateway.RecordConfig(ctx, gateway.ConfigLoaded, a.cfg.Digest, ""); err != nil {
+		a.log.WarnContext(ctx, "config load not audited", slog.String("error", err.Error()))
 	}
 	dataSrv := newServer(bgCtx, a.gateway.Handler())
 	adminSrv := newServer(bgCtx, a.adminHandler())
@@ -692,4 +720,63 @@ func readStateKey(path string) ([]byte, error) {
 		return nil, fmt.Errorf("request state key %s: need at least %d bytes", path, gateway.MinStateKeyLen)
 	}
 	return key, nil
+}
+
+func (a *App) resyncDirectory(ctx context.Context, u *upstream.Upstream, up bool, signalled upstream.Changed) {
+	var entries []catalog.Entry
+	if up {
+		var err error
+		entries, err = u.Directory(ctx)
+		if err != nil {
+			a.log.WarnContext(ctx, "prompt and resource sync failed",
+				slog.String("upstream", u.ID()), slog.String("error", err.Error()))
+			return
+		}
+	}
+	changed, rejected, err := a.directory.Replace(u.ID(), entries)
+	for _, rerr := range rejected {
+		a.log.WarnContext(ctx, "prompt or resource rejected",
+			slog.String("upstream", u.ID()), slog.String("error", rerr.Error()))
+	}
+	if err != nil {
+		a.log.ErrorContext(ctx, "directory update rejected",
+			slog.String("upstream", u.ID()), slog.String("error", err.Error()))
+		return
+	}
+	switch {
+	case changed:
+		a.gateway.NotifyListChanged(false, true, true)
+	case signalled&(upstream.ChangedPrompts|upstream.ChangedResources) != 0:
+		a.gateway.NotifyListChanged(false, signalled&upstream.ChangedPrompts != 0,
+			signalled&upstream.ChangedResources != 0)
+	}
+	if changed {
+		a.log.InfoContext(ctx, "directory updated", slog.String("upstream", u.ID()),
+			slog.Int("entries", a.directory.Snapshot().Len()))
+	}
+}
+
+func (a *App) verifier(ctx context.Context, cfg config.Config) gateway.TokenVerifier {
+	switch cfg.Auth.Mode {
+	case config.AuthModeJWT:
+		a.keys = authn.NewKeySet(
+			cfg.Auth.JWT.JWKSURL,
+			&http.Client{Timeout: 10 * time.Second, CheckRedirect: upstream.NoRedirects},
+			cfg.Auth.JWT.JWKSMinRetry,
+		)
+		return authn.NewVerifier(authn.FromKeySet(a.keys), authn.VerifierOptions{
+			Issuer: cfg.Auth.JWT.Issuer, Audiences: cfg.Auth.JWT.Audiences,
+			Algorithms: cfg.Auth.JWT.Algorithms, Leeway: cfg.Auth.JWT.ClockSkew, Types: cfg.Auth.JWT.Types,
+		})
+	case config.AuthModeIntrospection:
+		in := cfg.Auth.Introspection
+		return authn.NewIntrospector(authn.IntrospectorOptions{
+			URL: in.URL, ClientID: in.ClientID, ClientSecret: in.ClientSecret, Issuer: in.Issuer,
+			Audiences: in.Audiences, CacheTTL: in.CacheTTL, Leeway: cfg.Auth.JWT.ClockSkew,
+			Client: &http.Client{Timeout: in.Timeout, CheckRedirect: upstream.NoRedirects},
+		})
+	default:
+		a.log.WarnContext(ctx, "authentication disabled: every caller is anonymous")
+		return nil
+	}
 }

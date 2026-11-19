@@ -248,7 +248,7 @@ func (g *Gateway) serveFast(w http.ResponseWriter, r *http.Request, a *Admission
 			out.err = &jsonrpc.Error{Code: jsonrpc.CodeInternalError, Message: "internal error"}
 			break
 		}
-		out.result, out.encoded, out.isError = res, encoded, res.IsError
+		out.hasResult, out.encoded, out.isError = true, encoded, res.IsError
 		out.inputRequired = res.InputRequests != nil
 	}
 	status := http.StatusOK

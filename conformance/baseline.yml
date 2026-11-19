@@ -1,15 +1,4 @@
 server:
-  - server-stateless
-  - completion-complete
-  - resources-read-text
-  - resources-read-binary
-  - resources-templates-read
-  - sep-2164-resource-not-found
-  - prompts-get-simple
-  - prompts-get-with-args
-  - prompts-get-embedded-resource
-  - prompts-get-with-image
-  - input-required-result-non-tool-request
   - tasks-lifecycle
   - tasks-capability-negotiation
   - tasks-wire-fields

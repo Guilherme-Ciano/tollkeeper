@@ -139,8 +139,8 @@ func (c *Config) validateServer(v *validator) {
 }
 
 func (c *Config) validateAuth(v *validator) {
-	v.oneOf("auth.mode", c.Auth.Mode, AuthModeJWT, AuthModeNone)
-	if c.Auth.Mode != AuthModeJWT {
+	v.oneOf("auth.mode", c.Auth.Mode, AuthModeJWT, AuthModeIntrospection, AuthModeNone)
+	if c.Auth.Mode == AuthModeNone {
 		return
 	}
 	v.url("auth.resource", c.Auth.Resource, "http", "https")
@@ -149,6 +149,10 @@ func (c *Config) validateAuth(v *validator) {
 	}
 	for i, as := range c.Auth.AuthorizationServers {
 		v.url(fmt.Sprintf("auth.authorization_servers[%d]", i), as, "http", "https")
+	}
+	if c.Auth.Mode == AuthModeIntrospection {
+		c.validateIntrospection(v)
+		return
 	}
 	v.url("auth.jwt.issuer", c.Auth.JWT.Issuer, "http", "https")
 	v.url("auth.jwt.jwks_url", c.Auth.JWT.JWKSURL, "http", "https")
@@ -270,13 +274,18 @@ func (c *Config) validatePolicy(v *validator) {
 			v.add(f+".name", "duplicate rule name %q", r.Name)
 		}
 		names[r.Name] = true
-		if len(r.Tools) == 0 {
-			v.add(f+".tools", "at least one tool glob is required")
+		if len(r.Tools) == 0 && len(r.Prompts) == 0 && len(r.Resources) == 0 {
+			v.add(f+".tools", "at least one tool, prompt or resource glob is required")
 		}
 		v.globs(f+".tools", r.Tools)
+		v.globs(f+".prompts", r.Prompts)
+		v.globs(f+".resources", r.Resources)
 		v.globs(f+".subjects.subs", r.Subjects.Subs)
 		v.globs(f+".subjects.client_ids", r.Subjects.ClientIDs)
 		v.oneOf(f+".effect", r.Effect, EffectAllow, EffectDeny)
+		if r.Mode != "" {
+			v.oneOf(f+".mode", r.Mode, RuleModeEnforce, RuleModeShadow)
+		}
 		if len(r.OnDeny.StepUpScopes) > 0 && r.Effect != EffectAllow {
 			v.add(f+".on_deny", "step_up_scopes only make sense on allow rules")
 		}
@@ -322,6 +331,7 @@ func (c *Config) validateAudit(v *validator) {
 	if !c.Audit.Enabled {
 		return
 	}
+	c.validateAuditOTLP(v)
 	if c.Audit.Postgres.DSN != "" && (c.Audit.Postgres.Timeout <= 0 || c.Audit.Postgres.Timeout > time.Minute) {
 		v.add("audit.postgres.timeout", "must be within (0, 1m]")
 	}
@@ -439,4 +449,57 @@ func safeLogURL(u *url.URL) bool {
 	default:
 		return false
 	}
+}
+
+func (c *Config) validateIntrospection(v *validator) {
+	in := c.Auth.Introspection
+	v.url("auth.introspection.url", in.URL, "http", "https")
+	if strings.HasPrefix(in.URL, "http://") && !in.AllowInsecure {
+		v.add("auth.introspection.url", "plain http requires auth.introspection.allow_insecure: true")
+	}
+	v.require("auth.introspection.client_id", in.ClientID)
+	v.require("auth.introspection.client_secret", in.ClientSecret)
+	if in.Issuer != "" {
+		v.url("auth.introspection.issuer", in.Issuer, "http", "https")
+	}
+	if !slices.Contains(in.Audiences, c.Auth.Resource) {
+		v.add("auth.introspection.audiences", "must include auth.resource %q (RFC 8707)", c.Auth.Resource)
+	}
+	if in.CacheTTL <= 0 || in.CacheTTL > time.Hour {
+		v.add("auth.introspection.cache_ttl", "must be within (0, 1h]")
+	}
+	if in.Timeout <= 0 || in.Timeout > 30*time.Second {
+		v.add("auth.introspection.timeout", "must be within (0, 30s]")
+	}
+}
+
+func (c *Config) validateAuditOTLP(v *validator) {
+	o := c.Audit.OTLP
+	if o.Endpoint == "" {
+		return
+	}
+	v.url("audit.otlp.endpoint", o.Endpoint, "http", "https")
+	if strings.HasPrefix(o.Endpoint, "http://") && !o.AllowInsecure && !Loopback(hostPort(o.Endpoint)) {
+		v.add("audit.otlp.endpoint", "plain http to a non-loopback collector requires audit.otlp.allow_insecure: true")
+	}
+	if o.Batch < 1 || o.Batch > 10000 {
+		v.add("audit.otlp.batch", "must be within [1, 10000]")
+	}
+	if o.Queue < o.Batch || o.Queue > 1_000_000 {
+		v.add("audit.otlp.queue", "must be within [batch, 1000000]")
+	}
+	if o.Interval <= 0 || o.Interval > time.Minute {
+		v.add("audit.otlp.interval", "must be within (0, 1m]")
+	}
+	if o.Timeout <= 0 || o.Timeout > time.Minute {
+		v.add("audit.otlp.timeout", "must be within (0, 1m]")
+	}
+}
+
+func hostPort(raw string) string {
+	u, err := url.Parse(raw)
+	if err != nil {
+		return ""
+	}
+	return u.Host
 }

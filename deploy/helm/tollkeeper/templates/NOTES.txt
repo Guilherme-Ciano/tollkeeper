@@ -1,0 +1,16 @@
+tollkeeper {{ .Chart.AppVersion }} is running as {{ .Values.replicaCount }} pods, each with its own audit chain (chain_id = pod name).
+
+MCP endpoint inside the cluster:
+  http://{{ include "tollkeeper.fullname" . }}.{{ .Release.Namespace }}.svc:{{ .Values.service.port }}{{ (urlParse .Values.publicURL).path }}
+
+Clients reach it at {{ .Values.publicURL }}; expose that through your ingress or gateway with TLS.
+
+Verify a pod's audit chain:
+  kubectl exec -n {{ .Release.Namespace }} {{ include "tollkeeper.fullname" . }}-0 -- /usr/local/bin/tollkeeper audit verify -f /var/lib/tollkeeper/audit/audit.jsonl --chain-id {{ include "tollkeeper.fullname" . }}-0{{ if .Values.auditSigningKey.secretName }} --pubkey <the public key>{{ else }} --no-signatures{{ end }}
+{{- if not .Values.auditSigningKey.secretName }}
+
+Warning: no auditSigningKey.secretName set, so audit checkpoints are not signed.
+{{- end }}
+{{- if not .Values.requestStateKey.secretName }}
+Note: no requestStateKey.secretName set; each pod seals multi-round-trip state with its own key, so a retry must reach the same pod.
+{{- end }}

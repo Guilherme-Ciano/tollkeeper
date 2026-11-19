@@ -268,3 +268,91 @@ func TestPolicyFixturesUseConfiguredUpstreamInBareMode(t *testing.T) {
 		t.Fatalf("fixture saw a different upstream than runtime would: %+v", res[0])
 	}
 }
+
+func TestPromptsAndResourcesNeedTheirOwnGlobs(t *testing.T) {
+	t.Parallel()
+	e := engine(t, config.Policy{Default: config.EffectDeny, Rules: []config.Rule{
+		{Name: "all-tools", Tools: []string{"*"}, Effect: config.EffectAllow},
+		{Name: "docs", Resources: []string{"file:///docs/*"}, Effect: config.EffectAllow},
+		{
+			Name: "prompts-for-writers", Prompts: []string{"notes__*"}, Effect: config.EffectAllow,
+			When: `request.kind == "prompt" && "notes:write" in principal.scopes`,
+		},
+	}})
+	p := identity.Principal{Subject: "alice", Scopes: []string{"notes:write"}}
+	cases := []struct {
+		kind catalog.Kind
+		name string
+		want Effect
+	}{
+		{"", "notes__search", Allow},
+		{catalog.KindPrompt, "notes__summary", Allow},
+		{catalog.KindPrompt, "weather__brief", Deny},
+		{catalog.KindResource, "file:///docs/a.md", Allow},
+		{catalog.KindResource, "file:///etc/passwd", Deny},
+	}
+	for _, tc := range cases {
+		d := e.Decide(t.Context(), Input{Principal: p, Kind: tc.kind, Tool: catalog.Tool{Name: tc.name}})
+		if d.Effect != tc.want {
+			t.Errorf("%s %s: %v (%s)", tc.kind, tc.name, d.Effect, d.Rule)
+		}
+	}
+	if e.VisibleAs(p, catalog.KindResource, "file:///etc/passwd") {
+		t.Fatal("tools: [*] made a resource visible")
+	}
+	if !e.VisibleAs(identity.Principal{}, catalog.KindResource, "file:///docs/a.md") {
+		t.Fatal("allowed resource hidden")
+	}
+}
+
+func TestBareStarMatchesURIs(t *testing.T) {
+	t.Parallel()
+	if !globMatch([]string{"*"}, "test://a/b/c") || globMatch([]string{"test:*"}, "test://a/b") {
+		t.Fatal("glob semantics changed")
+	}
+}
+
+func TestShadowRulesObserveWithoutDeciding(t *testing.T) {
+	t.Parallel()
+	e := engine(t, config.Policy{Default: config.EffectDeny, Rules: []config.Rule{
+		{
+			Name:   "block-writes",
+			Tools:  []string{"notes__create"},
+			Effect: config.EffectDeny,
+			Mode:   config.RuleModeShadow,
+		},
+		{Name: "second-shadow", Tools: []string{"*"}, Effect: config.EffectDeny, Mode: config.RuleModeShadow},
+		{Name: "allow-notes", Tools: []string{"notes__*"}, Effect: config.EffectAllow},
+	}})
+	p := identity.Principal{Subject: "alice"}
+	d := e.Decide(t.Context(), Input{Principal: p, Tool: catalog.Tool{Name: "notes__create"}})
+	if d.Effect != Allow || d.Rule != "allow-notes" || d.Shadow == nil ||
+		d.Shadow.Rule != "block-writes" || d.Shadow.Effect != Deny {
+		t.Fatalf("decision %+v shadow %+v", d, d.Shadow)
+	}
+	d = e.Decide(t.Context(), Input{Principal: p, Tool: catalog.Tool{Name: "weather__now"}})
+	if d.Effect != Deny || d.Rule != "default" || d.Shadow == nil || d.Shadow.Rule != "second-shadow" {
+		t.Fatalf("default decision %+v shadow %+v", d, d.Shadow)
+	}
+	shadowOnly := engine(t, config.Policy{Default: config.EffectDeny, Rules: []config.Rule{
+		{Name: "would-allow", Tools: []string{"*"}, Effect: config.EffectAllow, Mode: config.RuleModeShadow},
+	}})
+	if shadowOnly.Visible(p, catalog.Tool{Name: "x__y"}) {
+		t.Fatal("a shadow allow rule made a tool visible")
+	}
+}
+
+func TestExplainTracesEveryRule(t *testing.T) {
+	t.Parallel()
+	e := engine(t, demoPolicy())
+	steps, d := e.Explain(t.Context(), Input{
+		Principal: identity.Principal{Subject: "bob", Scopes: []string{"mcp:tools"}},
+		Tool:      catalog.Tool{Name: "weather__forecast"},
+	})
+	if d.Effect != Allow || d.Rule != "readers" || len(steps) != len(demoPolicy().Rules) {
+		t.Fatalf("decision %+v, %d steps", d, len(steps))
+	}
+	if steps[0].Outcome != "matches: allow" || !strings.HasPrefix(steps[1].Outcome, "skipped: subjects") {
+		t.Fatalf("steps: %+v", steps)
+	}
+}

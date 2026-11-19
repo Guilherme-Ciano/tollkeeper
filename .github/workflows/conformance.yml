@@ -20,8 +20,10 @@ jobs:
       matrix:
         include:
           - requirements: "2026-07-28"
+            baseline: conformance/baseline.yml
             advisory: false
           - requirements: "2025-11-25"
+            baseline: conformance/baseline-2025-11-25.yml
             advisory: true
     steps:
       - uses: step-security/harden-runner@1d88384fd173af6ecb012dfd0264a306b711241a # v2.22.4
@@ -48,7 +50,7 @@ jobs:
           npx -y "@modelcontextprotocol/conformance@${CONFORMANCE_VERSION}" server \
             --url http://localhost:8080/mcp \
             --requirements "${{ matrix.requirements }}" \
-            --expected-failures conformance/baseline.yml 2>&1 | tee conformance-output.txt
+            --expected-failures "${{ matrix.baseline }}" 2>&1 | tee conformance-output.txt
       - if: always()
         name: Summarize
         run: |

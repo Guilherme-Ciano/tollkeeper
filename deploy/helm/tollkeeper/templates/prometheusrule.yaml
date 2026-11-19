@@ -1,0 +1,14 @@
+{{- if .Values.prometheusRule.enabled }}
+{{- $job := printf "job=\"%s-admin\"" (include "tollkeeper.fullname" .) }}
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: {{ include "tollkeeper.fullname" . }}
+  labels:
+    {{- include "tollkeeper.labels" . | nindent 4 }}
+    {{- with .Values.prometheusRule.labels }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+spec:
+  {{- .Files.Get "files/alerts.yml" | replace "job=\"tollkeeper\"" $job | fromYaml | toYaml | nindent 2 }}
+{{- end }}

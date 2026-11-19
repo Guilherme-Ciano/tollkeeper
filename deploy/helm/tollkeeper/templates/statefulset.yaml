@@ -1,0 +1,130 @@
+{{- if and .Values.redis.enabled (not .Values.redis.addrs) }}
+{{- fail "redis.enabled requires redis.addrs" }}
+{{- end }}
+{{- if and .Values.postgres.enabled (not .Values.postgres.dsnSecret.name) }}
+{{- fail "postgres.enabled requires postgres.dsnSecret.name" }}
+{{- end }}
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: {{ include "tollkeeper.fullname" . }}
+  labels:
+    {{- include "tollkeeper.labels" . | nindent 4 }}
+spec:
+  serviceName: {{ include "tollkeeper.fullname" . }}-admin
+  replicas: {{ .Values.replicaCount }}
+  podManagementPolicy: Parallel
+  selector:
+    matchLabels:
+      {{- include "tollkeeper.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "tollkeeper.selectorLabels" . | nindent 8 }}
+        {{- with .Values.podLabels }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+      annotations:
+        checksum/config: {{ include "tollkeeper.config" . | sha256sum }}
+        {{- with .Values.podAnnotations }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+    spec:
+      automountServiceAccountToken: false
+      securityContext:
+        {{- toYaml .Values.podSecurityContext | nindent 8 }}
+      terminationGracePeriodSeconds: {{ .Values.terminationGracePeriodSeconds }}
+      containers:
+        - name: tollkeeper
+          image: {{ include "tollkeeper.image" . | quote }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          args: ["serve", "--config", "/etc/tollkeeper/config.yaml"]
+          ports:
+            - { name: mcp, containerPort: 8080, protocol: TCP }
+            - { name: admin, containerPort: 9090, protocol: TCP }
+          env:
+            - name: POD_NAME
+              valueFrom: { fieldRef: { fieldPath: metadata.name } }
+            {{- if .Values.postgres.enabled }}
+            - name: TOLLKEEPER_AUDIT__POSTGRES__DSN
+              valueFrom:
+                secretKeyRef: { name: {{ .Values.postgres.dsnSecret.name }}, key: {{ .Values.postgres.dsnSecret.key }} }
+            {{- end }}
+            {{- with .Values.env }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
+          {{- if .Values.envFromSecret }}
+          envFrom:
+            - secretRef: { name: {{ .Values.envFromSecret }} }
+          {{- end }}
+          livenessProbe:
+            httpGet: { path: /livez, port: admin }
+            periodSeconds: 10
+            failureThreshold: 3
+          readinessProbe:
+            httpGet: { path: /readyz, port: admin }
+            periodSeconds: 5
+            failureThreshold: 2
+          startupProbe:
+            httpGet: { path: /livez, port: admin }
+            periodSeconds: 2
+            failureThreshold: 30
+          resources:
+            {{- toYaml .Values.resources | nindent 12 }}
+          securityContext:
+            {{- toYaml .Values.securityContext | nindent 12 }}
+          volumeMounts:
+            - { name: config, mountPath: /etc/tollkeeper, readOnly: true }
+            - { name: audit, mountPath: /var/lib/tollkeeper/audit }
+            - { name: tmp, mountPath: /tmp }
+            {{- if .Values.auditSigningKey.secretName }}
+            - { name: signing-key, mountPath: /var/lib/tollkeeper/keys, readOnly: true }
+            {{- end }}
+            {{- if .Values.requestStateKey.secretName }}
+            - { name: state-key, mountPath: /var/lib/tollkeeper/state, readOnly: true }
+            {{- end }}
+      volumes:
+        - name: config
+          configMap: { name: {{ include "tollkeeper.fullname" . }} }
+        - name: tmp
+          emptyDir: { sizeLimit: 64Mi }
+        {{- if .Values.auditSigningKey.secretName }}
+        - name: signing-key
+          secret: { secretName: {{ .Values.auditSigningKey.secretName }}, defaultMode: 0400 }
+        {{- end }}
+        {{- if .Values.requestStateKey.secretName }}
+        - name: state-key
+          secret: { secretName: {{ .Values.requestStateKey.secretName }}, defaultMode: 0400 }
+        {{- end }}
+        {{- if not .Values.persistence.enabled }}
+        - name: audit
+          emptyDir: {}
+        {{- end }}
+      {{- with .Values.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.topologySpreadConstraints }}
+      topologySpreadConstraints:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+  {{- if .Values.persistence.enabled }}
+  volumeClaimTemplates:
+    - metadata:
+        name: audit
+      spec:
+        accessModes: {{ toJson .Values.persistence.accessModes }}
+        {{- if .Values.persistence.storageClassName }}
+        storageClassName: {{ .Values.persistence.storageClassName }}
+        {{- end }}
+        resources:
+          requests: { storage: {{ .Values.persistence.size }} }
+  {{- end }}

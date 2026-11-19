@@ -1,0 +1,46 @@
+server:
+  listen: "0.0.0.0:8080"
+  admin_listen: "127.0.0.1:9090"
+  public_url: "https://mcp.example.com/mcp"
+
+auth:
+  mode: introspection
+  resource: "https://mcp.example.com/mcp"
+  authorization_servers: ["https://sso.example.com/realms/agents"]
+  scopes_supported: ["mcp:tools", "docs:read"]
+  required_scopes: ["mcp:tools"]
+  introspection:
+    url: "https://sso.example.com/realms/agents/protocol/openid-connect/token/introspect"
+    client_id: "tollkeeper"
+    client_secret: "${TOLLKEEPER_INTROSPECTION_SECRET}"
+    issuer: "https://sso.example.com/realms/agents"
+    audiences: ["https://mcp.example.com/mcp"]
+    cache_ttl: 1m
+    timeout: 3s
+
+upstreams:
+  - id: notes
+    transport: streamable_http
+    url: "http://notes.internal:8000/mcp"
+    timeout: 10s
+
+policy:
+  default: deny
+  rules:
+    - name: notes-readers
+      tools: ["notes__search", "notes__get"]
+      effect: allow
+    - name: watch-new-write-rule
+      tools: ["notes__create"]
+      when: '"notes:write" in principal.scopes'
+      effect: allow
+      mode: shadow
+    - name: docs
+      subjects: { scopes_any: ["docs:read"] }
+      prompts: ["notes__*"]
+      resources: ["notes://*"]
+      effect: allow
+
+audit:
+  path: "/var/lib/tollkeeper/audit.jsonl"
+  chain_id: "mcp-gw-1"

@@ -21,3 +21,11 @@ make build
 - **Isolation.** The gateway is pinned to CPUs 0-3 with `GOMAXPROCS=4` and the upstream to CPUs 4-5 with `taskset`. The load generator runs on the remaining CPUs.
 - **Repetitions.** A warm-up that is discarded, then N runs per rate. The run with the median p99 is reported, and every run is kept in `summary.json`.
 - **Environment.** CPU, RAM, kernel, governor, boost state, Go version and git commit are written to `env.json`. Numbers are same-host loopback figures, not internet latency.
+
+## CPU profile under load
+
+```bash
+./bin/mcpbench overhead -rates 3000 -duration 30s -warmup 10s -runs 1 -cpuprofile cpu
+```
+
+`-cpuprofile` fetches a CPU profile (up to 30 s) from the gateway's admin listener during the first measured run of each rate and writes `cpu-<rate>.pprof`. The benchmark gateway runs with `server.pprof: true` on a loopback admin address.

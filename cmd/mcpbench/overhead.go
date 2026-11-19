@@ -35,6 +35,7 @@ type overheadOpts struct {
 	upstreamCPU string
 	gatewayProc int
 	conns       int
+	cpuProfile  string
 }
 
 type point struct {
@@ -292,6 +293,47 @@ func (h *harness) measure(ctx context.Context, t target, rate int, client *http.
 	return out, nil
 }
 
+func (h *harness) profile(ctx context.Context, rate int) <-chan error {
+	done := make(chan error, 1)
+	if h.opts.cpuProfile == "" {
+		done <- nil
+		return done
+	}
+	go func() {
+		select {
+		case <-ctx.Done():
+			done <- ctx.Err()
+			return
+		case <-time.After(h.opts.warmup):
+		}
+		secs := int(min(h.opts.duration, 30*time.Second).Seconds())
+		url := fmt.Sprintf("%s/debug/pprof/profile?seconds=%d", h.adminURL, secs)
+		req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, http.NoBody)
+		if err != nil {
+			done <- fmt.Errorf("profile request: %w", err)
+			return
+		}
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			done <- fmt.Errorf("fetch profile: %w", err)
+			return
+		}
+		defer resp.Body.Close()
+		body, err := io.ReadAll(resp.Body)
+		if err != nil || resp.StatusCode != http.StatusOK {
+			done <- fmt.Errorf("fetch profile: status %d: %w", resp.StatusCode, err)
+			return
+		}
+		path := fmt.Sprintf("%s-%d.pprof", h.opts.cpuProfile, rate)
+		if err := os.WriteFile(path, body, 0o600); err != nil {
+			done <- fmt.Errorf("write profile: %w", err)
+			return
+		}
+		done <- nil
+	}()
+	return done
+}
+
 func (h *harness) point(ctx context.Context, rate int) (point, error) {
 	client := newClient(h.opts.conns)
 	base, err := h.measure(ctx, target{URL: h.baseURL, Tool: "noop"}, rate, client)
@@ -299,9 +341,13 @@ func (h *harness) point(ctx context.Context, rate int) (point, error) {
 		return point{}, err
 	}
 	before := readProc(h.gateway.Process.Pid)
+	profiled := h.profile(ctx, rate)
 	gw, err := h.measure(ctx, target{URL: h.gwURL, Tool: "noop__noop", Token: h.token}, rate, client)
 	if err != nil {
 		return point{}, err
+	}
+	if perr := <-profiled; perr != nil {
+		return point{}, perr
 	}
 	after := readProc(h.gateway.Process.Pid)
 	b, g := median(base), median(gw)

@@ -293,3 +293,25 @@ func TestProgressReachesTheCallThatAskedForIt(t *testing.T) {
 		t.Fatalf("%d progress routes leaked", n)
 	}
 }
+
+func TestSignalledKindsAccumulateUntilTaken(t *testing.T) {
+	t.Parallel()
+	u := New(config.Upstream{ID: "u", MaxConcurrency: 1}, nameOnly(), nil, slog.New(slog.DiscardHandler), Hooks{}, "t")
+	u.signal(ChangedTools)
+	u.signal(ChangedPrompts)
+	if got := u.TakeSignalled(); got != ChangedTools|ChangedPrompts {
+		t.Fatalf("got %b", got)
+	}
+	if got := u.TakeSignalled(); got != 0 {
+		t.Fatalf("not cleared: %b", got)
+	}
+	u.Restore(ChangedResources)
+	if got := u.TakeSignalled(); got != ChangedResources {
+		t.Fatalf("restore: %b", got)
+	}
+	select {
+	case <-u.Changes():
+	default:
+		t.Fatal("signal did not wake the sync loop")
+	}
+}

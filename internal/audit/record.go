@@ -21,6 +21,7 @@ const (
 	PhaseIntent   = "intent"
 	PhaseOutcome  = "outcome"
 	PhaseDecision = "decision"
+	PhaseConfig   = "config"
 
 	checkpointDomain = "tollkeeper-ckpt-v1"
 	anchorDomain     = "tollkeeper-anchor-v1"
@@ -54,6 +55,8 @@ type Event struct {
 	LatencyMicros   int64           `json:"latency_us,omitempty"`
 	UpstreamMicros  int64           `json:"upstream_us,omitempty"`
 	PinHash         string          `json:"pin_hash,omitempty"`
+	ShadowRule      string          `json:"shadow_rule,omitempty"`
+	ShadowDecision  string          `json:"shadow_decision,omitempty"`
 	Dropped         uint64          `json:"dropped,omitempty"`
 }
 

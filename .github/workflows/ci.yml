@@ -102,6 +102,38 @@ jobs:
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with: { go-version-file: go.mod }
       - run: make build
+  ops:
+    runs-on: ubuntu-24.04
+    env:
+      PROMETHEUS_IMAGE: docker.io/prom/prometheus:v3.16.0@sha256:e04987641b57704f408e31f6373ba4138ecf27cb4a165d24aabb6c38fddd0f06
+      HELM_IMAGE: docker.io/alpine/helm:4.3.2@sha256:848e0fe16e2dfbc19af48a87c6e046f414b0fe5b61c7552f9070f80de896316b
+      KUBECONFORM_IMAGE: ghcr.io/yannh/kubeconform:v0.8.0@sha256:5103f6f5e89061728aad4ad5a250627dd0fc9b2a92eb876f3762677a4222f9e0
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Check and unit-test the alert rules
+        run: |
+          docker run --rm --entrypoint /bin/promtool -v "$PWD/deploy/prometheus:/rules:ro" "$PROMETHEUS_IMAGE" check rules /rules/alerts.yml
+          docker run --rm --entrypoint /bin/promtool -w /rules -v "$PWD/deploy/prometheus:/rules:ro" "$PROMETHEUS_IMAGE" test rules alerts_test.yml
+      - name: Dashboard is valid JSON
+        run: python3 -m json.tool deploy/grafana/dashboards/tollkeeper.json > /dev/null
+      - name: Chart alerts match deploy/prometheus/alerts.yml
+        run: diff -u deploy/prometheus/alerts.yml deploy/helm/tollkeeper/files/alerts.yml
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with: { go-version-file: go.mod }
+      - name: Lint, render and validate the Helm chart
+        run: |
+          set -euo pipefail
+          helm() { docker run --rm -v "$PWD/deploy/helm:/charts:ro" -w /charts --entrypoint helm "$HELM_IMAGE" "$@"; }
+          helm lint tollkeeper --strict
+          helm lint tollkeeper --strict -f tollkeeper/ci/full-values.yaml
+          helm template t tollkeeper > default.yaml
+          helm template t tollkeeper -f tollkeeper/ci/full-values.yaml > full.yaml
+          docker run --rm -v "$PWD:/w:ro" "$KUBECONFORM_IMAGE" -summary -strict -kubernetes-version 1.33.0 \
+            -schema-location default \
+            -schema-location 'https://raw.githubusercontent.com/datreeio/CRDs-catalog/main/{{.Group}}/{{.ResourceKind}}_{{.ResourceAPIVersion}}.json' \
+            /w/default.yaml /w/full.yaml
+          python3 -c 'import sys,yaml; d=[x for x in yaml.safe_load_all(open("full.yaml")) if x and x["kind"]=="ConfigMap"][0]; open("chart-config.yaml","w").write(d["data"]["config.yaml"])'
+          POD_NAME=t-tollkeeper-0 TOLLKEEPER_AUDIT__POSTGRES__DSN=postgres://u:p@pg/tk go run ./cmd/tollkeeper config validate -c chart-config.yaml
   compose:
     runs-on: ubuntu-24.04
     steps:

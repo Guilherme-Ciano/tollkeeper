@@ -25,7 +25,7 @@
 | Concern | How |
 |---|---|
 | Transport | Stateless Streamable HTTP for MCP `2026-07-28`, with fallback for `2025-11-25` clients (go-sdk v1.8.0) |
-| Aggregation | N upstreams (stdio subprocesses and Streamable HTTP) under `upstream__tool` names, sorted and deterministic, re-synced on upstream `list_changed` and a 60 s poll, with health probes and crash-loop backoff |
+| Aggregation | N upstreams (stdio subprocesses and Streamable HTTP) under `upstream__tool` names, sorted and deterministic, re-synced on upstream `list_changed` and a 60 s poll, with health probes and crash-loop backoff. Prompts are namespaced the same way; resources and resource templates keep their URIs and are routed to the upstream that listed them; `completion/complete` follows its reference |
 | Authentication | RFC 9728 protected-resource metadata, JWT via JWKS (`iss`, `aud` = canonical URI per RFC 8707, `exp`, algorithm allowlist), RFC 6750 challenges with `error=` and all required scopes |
 | No passthrough | Upstream HTTP clients are built from config only and never see the inbound request; covered by tests |
 | Authorization | First-match rules: static RBAC fast path plus optional CEL `when` over principal, tool annotations, arguments and time; default deny; `tools/list` filtered per caller; step-up challenges (`403 insufficient_scope`) |
@@ -151,6 +151,18 @@ FAIL line 7 (seq 7): hash mismatch: record content was modified after 6 valid re
 FAIL line 9 (seq 10): sequence gap: expected seq 9 after 8 valid records
 ```
 
+### Kubernetes
+
+[`deploy/helm/tollkeeper`](deploy/helm/tollkeeper/README.md) runs the gateway as a StatefulSet with one audit chain and volume per pod, hardened pods, optional Redis and Postgres, a ServiceMonitor, the alert rules as a PrometheusRule and a NetworkPolicy.
+
+### Dashboards and alerts
+
+```bash
+docker compose --profile obs up -d
+```
+
+Grafana on `http://127.0.0.1:3000` opens on the provisioned tollkeeper dashboard (traffic by outcome, added latency, policy and shadow decisions, auth failures and 429s, upstream health and breakers, audit throughput, queue and anchoring, dispatch path, config reloads). Prometheus on `:9091` loads [`deploy/prometheus/alerts.yml`](deploy/prometheus/alerts.yml): gateway down, audit write errors or drops, audit queue filling, upstream down, circuit open, p99 overhead above 50 ms, JWKS or introspection unreachable, Redis backend errors, unapproved tools, rejected reloads, shadow rules that disagree with the policy, stale anchoring and OTLP drops. `promtool test rules deploy/prometheus/alerts_test.yml` covers the alerts in CI.
+
 ## Using it with popular MCP servers
 
 [examples/configs](examples/configs/README.md) has validated configurations for the [GitHub MCP server](examples/configs/github.yaml) (read-only tools for every agent, scoped writes with step-up, write-specific rate limits, enforced pinning) and the [reference filesystem server](examples/configs/filesystem.yaml) (reads anywhere in a share, writes only under one directory). A test keeps every example valid.
@@ -162,6 +174,7 @@ FAIL line 9 (seq 10): sequence gap: expected seq 9 after 8 valid records
 | `tollkeeper serve -c config.yaml` | Run the gateway |
 | `tollkeeper config validate -c config.yaml` | Validate config, compile CEL rules and rate limits, report every bad field with its path |
 | `tollkeeper policy test -c config.yaml -f policies_test.yaml` | Table-driven policy fixtures for CI ([example](deploy/compose/policies_test.yaml)) |
+| `tollkeeper policy explain -c config.yaml --sub alice --scope notes:write --tool notes__create --args '{"body":"x"}'` | Rule-by-rule trace of one decision (`--prompt` and `--resource` for the other kinds), including shadow rules and visibility |
 | `tollkeeper audit verify -f audit.jsonl --pubkey audit.pub` | Recompute the chain, check signatures, report the first broken record. `--postgres DSN --chain-id ID` verifies a chain stored in Postgres instead. Fails when a log has no signed checkpoint or more than `--max-unsigned` (default 1000) records after the last one; `--chain-id` pins the chain; `--no-signatures` checks only the hash chain. `--rekor-trust trusted_root.json --chain-id ID` verifies anchor receipts; `--witness`, `--min-witnesses`, `--require-anchors`, `--max-unanchored`, `--max-anchor-delay` and `--max-anchor-age` bound time and the unanchored tail ([anchoring](docs/operations/anchoring.md)) |
 | `tollkeeper audit keygen -o dir` | Ed25519 checkpoint key pair |
 | `tollkeeper pin status [--check]` | List catalog tools as `approved`, `new` or `changed` against the lockfile; `--check` fails when anything is pending |
@@ -191,7 +204,18 @@ policy:
       when: '"files:write" in principal.scopes'
       effect: allow
       on_deny: { step_up_scopes: ["files:write"] }
+    - name: docs-and-prompts
+      subjects: { scopes_any: ["mcp:tools"] }
+      prompts: ["notes__*"]
+      resources: ["file:///docs/*"]
+      effect: allow
 ```
+
+`kill -HUP` reloads the config file: policy rules and rate-limit rules are swapped atomically, an invalid file is rejected and the running config stays in force, and every load and reload writes a `config/load` or `config/reload` audit record carrying the file's SHA-256 (`mcpgw_config_reloads_total{result}` counts them). Changes to listeners, auth, upstreams, audit, telemetry, pinning or the rate-limit store are logged as needing a restart and are not applied. SIGHUP is not available on Windows.
+
+A rule with `mode: shadow` is evaluated but never decides: the first shadow rule that would have decided is written to the call's audit records (`shadow_rule`, `shadow_decision`) and counted in `mcpgw_policy_shadow_decisions_total{rule, shadow_effect, effect}`, so a new deny can be watched against real traffic before it is enforced. Shadow rules never make anything visible.
+
+A rule applies to tools, prompts or resources only through its own `tools`, `prompts` or `resources` globs, so `tools: ["*"]` never exposes a resource. Globs use `path.Match`, where `*` stops at `/`; a bare `*` matches everything. A resource the caller may not see answers exactly like a missing one (`-32602` with `data.uri`), and lists only show what the caller may read.
 
 | Key | Default | Notes |
 |---|---|---|
@@ -201,7 +225,7 @@ policy:
 | `server.request_state_key_file` | per-process key | HMAC key (at least 32 bytes) that seals upstream `requestState` for multi-round-trip calls; share one file across replicas so a retry can land on any of them |
 | `server.request_state_ttl` | `10m` | How long a sealed `requestState` stays valid |
 | `server.disable_fast_path` | `false` | Serve every `tools/call` through the go-sdk transport instead of the direct path for protocol 2026-07-28 |
-| `auth.mode` | `jwt` | `none` exists for local experiments and logs a warning |
+| `auth.mode` | `jwt` | `introspection` checks opaque tokens at an RFC 7662 endpoint (`auth.introspection.url`, `client_id`, `client_secret`, `audiences`, optional `issuer`); results are cached by token hash for `cache_ttl` (1m), never past `exp` ([example](examples/configs/keycloak-introspection.yaml)). `none` exists for local experiments and logs a warning |
 | `auth.jwt.algorithms` | RS256, ES256, EdDSA | HS* and `none` are never accepted |
 | `auth.jwt.types` | any | e.g. `["at+jwt"]` to accept only RFC 9068 access tokens |
 | `upstreams[].transport` | | `stdio` (explicit env allowlist, process-group kill) or `streamable_http` |
@@ -210,6 +234,7 @@ policy:
 | `rate_limits.store` | `memory` | `redis` shares limits across replicas; set `rate_limits.redis.addrs`, `key_prefix`, `timeout` (50 ms) and `on_error` (`local` fallback or `deny`) |
 | `audit.postgres.dsn` | | Mirror the audit chain to Postgres ([roles and grants](docs/operations/postgres.md)); `audit.postgres.migrate: true` only in development; requires `audit.chain_id` and `audit.fsync` |
 | `audit.anchor.enabled` | `false` | Anchor checkpoints in a Rekor v2 log (`rekor_url`, `trust_files`, `tsa_url`, `interval` 15m, `min_spacing` 1m); entries are public and permanent ([anchoring](docs/operations/anchoring.md)) |
+| `audit.otlp.endpoint` | | Also send every committed audit record to an OpenTelemetry collector as an OTLP/HTTP JSON log (`/v1/logs`), with chain, sequence, hash, decision, tool and subject as attributes and the exact record as the body. Best effort and never authoritative: a bounded queue (`queue` 10000, `batch` 512, `interval` 2s) drops records instead of slowing the gateway, counted in `mcpgw_audit_otlp_records_total{result}`; the file stays the source of truth. `headers` for collector credentials |
 | `audit.record_args` | `hash` | `none`, `hash`, `full` (raw arguments may be personal data) |
 | `audit.on_backpressure` | `fail_closed` | Calls are refused if their intent record cannot be queued |
 | `server.namespace_tools` | `true` | `false` exposes upstream tool names unchanged; only allowed with exactly one upstream, for deployments that front a single server for auth and audit. Policy and rate-limit globs then match bare names, so `config validate` warns about globs that still contain the separator |
@@ -217,23 +242,25 @@ policy:
 | `pinning.file` | | Lockfile written by `tollkeeper pin approve`; required for `enforce`, reloaded every `pinning.reload_interval` (5 s); refused if group or world writable |
 | `pinning.report_token` | | Bearer token for `GET /pins`; without it the report is only served on a loopback admin listener |
 
-CEL variables: `principal{sub, client_id, scopes, claims}`, `tool{name, upstream, original, pin_hash, annotations}`, `args`, `request{method, client_name}`, `now`. Programs are compiled at load time with a cost limit and a 50 ms evaluation timeout, and arguments are only decoded when a rule references `args`.
+CEL variables: `principal{sub, client_id, scopes, claims}`, `tool{name, upstream, original, pin_hash, annotations}` (for prompts and resources: the prompt name or URI, its upstream and the upstream's own name), `args` (prompt arguments for `prompts/get`), `request{kind, method, client_name}` with `kind` one of `tool`, `prompt`, `resource`, `template`, and `now`. Programs are compiled at load time with a cost limit and a 50 ms evaluation timeout, and arguments are only decoded when a rule references `args`.
 
 ## Benchmarks
 
 <!-- bench:start -->
-Added latency per `tools/call` against a no-op upstream, with every feature on: EdDSA JWT verification, a CEL rule, two GCRA rules, fsync'd audit intent and outcome records with Ed25519 checkpoints, and Prometheus metrics.
+Added latency per `tools/call` against a no-op upstream, with every feature on: EdDSA JWT verification, a CEL rule, two GCRA rules, fsync'd audit intent and outcome records with Ed25519 checkpoints, and Prometheus metrics. Both builds were measured back to back in one session on the same machine.
 
-| offered calls/s | added p50 | added p90 | added p99 | errors | gateway RSS |
+| offered calls/s | added p50 | added p99 | CPU per 1k calls | v1.1.0 added p50 / p99 | v1.1.0 CPU per 1k calls |
 |---:|---:|---:|---:|---:|---:|
-| 500 | 0.62 ms | 0.69 ms | 1.03 ms | 0 | 60 MB |
-| 1,000 | 0.60 ms | 0.82 ms | 1.30 ms | 0 | 66 MB |
-| 2,000 | 0.85 ms | 1.20 ms | 4.43 ms | 0 | 101 MB |
-| 3,000 | 1.91 ms | 4.34 ms | 35.6 ms | 0 | 156 MB |
-| 4,000+ | saturated at ~3,100 completed calls/s | | | | |
+| 500 | 0.35 ms | 0.40 ms | 484 ms | 0.47 / 0.93 ms | 703 ms |
+| 1,000 | 0.36 ms | 0.55 ms | 426 ms | 0.54 / 1.17 ms | 700 ms |
+| 2,000 | 0.17 ms | 0.47 ms | 428 ms | 0.59 / 1.69 ms | 734 ms |
+| 3,000 | 0.25 ms | 0.90 ms | 447 ms | 0.98 / 3.49 ms | 749 ms |
+| 4,000 | 0.57 ms | 1.91 ms | 467 ms | 5.84 / 28.7 ms | 807 ms |
+| 5,000 | 3.36 ms | 159 ms (queueing, 0 errors) | 504 ms | collapsed, 45,039 errors | 774 ms |
 
-- **Sustainable throughput:** about 2,000 calls/s with p99 overhead under 5 ms, on 4 pinned cores (`GOMAXPROCS=4`). The ceiling is about 3,100 calls/s.
-- **Where the time goes:** a CPU profile shows tollkeeper's own work is small (admission 3.5%, envelope parse 3.2%, audit about 2% of CPU). Most of it is the second MCP hop through go-sdk, whose stateless request path decodes each body about six times, plus the GC that causes.
+- **Sustainable throughput:** 4,000 calls/s with p99 added latency under 2 ms on 4 pinned cores (`GOMAXPROCS=4`); every call still completes at 5,000 calls/s. v1.1.0 started queueing at 4,000 and collapsed at 5,000.
+- **CPU per call:** about 0.45 ms, 40% less than v1.1.0, because `tools/call` on protocol 2026-07-28 no longer goes through the go-sdk server transport.
+- **Where the time goes now** (CPU profile at 3,000 calls/s): the go-sdk client hop to the upstream about 33%, Ed25519 JWT verification 13.5%, GC 12%, and tollkeeper's own admission, envelope, policy and audit about 16%.
 - **Hot-path micro-benchmarks:**
   - Ed25519 JWT verify: 58 µs
   - Envelope parse: 17 µs
@@ -242,16 +269,12 @@ Added latency per `tools/call` against a no-op upstream, with every feature on: 
   - RBAC rule: 102 ns
   - GCRA take: 97 ns (43 ns in parallel), 0 allocs
 - **Test conditions:**
-  - Hardware: AMD Ryzen 5 4600G (6C/12T), 16 GB, Linux 7.3.3-cachyos, governor `powersave` with boost on, Go 1.27.4.
+  - Hardware: AMD Ryzen 5 4600G (6C/12T), 16 GB, Linux 7.3.4-cachyos, governor `powersave` with boost on, Go 1.27.4.
   - Network: same-host loopback, not internet latency.
-  - Pinning: gateway on CPUs 0-3, upstream on 4-5, load generator on 6-11.
-  - Memory: run in a 6 GiB, no-swap cgroup; peak use 1.49 GiB.
-- **Method:**
-  - Open-loop constant arrival rate, corrected for coordinated omission.
-  - Each rate gets a 10 s warm-up, then 3 × 30 s runs; the median run by p99 is reported.
-  - This is shorter than the planned 5 × 120 s.
+  - Pinning: gateway on CPUs 0-3, upstream on 4-5, load generator on 6-11; 6 GiB no-swap cgroup.
+  - Method: open-loop constant arrival rate corrected for coordinated omission; 10 s warm-up and 3 × 30 s runs per rate, median run by p99.
 
-Full results and analysis: [bench/results/2026-11-13-ryzen-5-0773037](bench/results/2026-11-13-ryzen-5-0773037/ANALYSIS.md).
+Full results, the v1.1.0 baseline and the CPU profile: [bench/results/2026-11-18-ryzen-5-3314721](bench/results/2026-11-18-ryzen-5-3314721/ANALYSIS.md).
 <!-- bench:end -->
 
 Reproduce with `make bench` (micro-benchmarks, `-count=10`) and `make bench-e2e` (gateway vs. direct at constant arrival rates; methodology in [bench/README.md](bench/README.md)).
@@ -278,13 +301,13 @@ Report vulnerabilities as described in [SECURITY.md](SECURITY.md).
 
 ## Known limitations
 
-- **Tools only.** Resources and prompts are not aggregated yet; go-sdk has no dynamic `resources/list` handler ([go-sdk#998](https://github.com/modelcontextprotocol/go-sdk/issues/998)).
+- **Prompts and resources go through the go-sdk path**, not the direct `tools/call` path, and are re-listed on the same schedule as tools. A resource URI listed by two upstreams belongs to the first one; templates are tried in sorted order. `resources/subscribe` and the tasks extension (SEP-2663) are not proxied.
 - **Progress is relayed only on protocol 2026-07-28.** When a `tools/call` carries `_meta.progressToken`, the gateway gives the upstream its own token and streams the notifications back as server-sent events under the client's token, with the result last. go-sdk can hand a notification to the client after the result ([go-sdk#1337](https://github.com/modelcontextprotocol/go-sdk/issues/1337)), so such calls wait for 10 ms without a new notification (100 ms at most) before answering; anything later is dropped. Older protocol versions get no progress.
 - **Sealed, not encrypted.** The gateway seals an upstream's `requestState` with HMAC-SHA256 and binds it to the upstream, tool, subject and client id. A retry with a tampered, expired or foreign state gets JSON-RPC `-32602`. The upstream's own state stays readable by the client, as it was before the gateway.
 - Rate limits are per replica unless `rate_limits.store: redis` is set. Each replica writes its own audit chain (`chain_id`), also when they share one Postgres table.
 - Upstream results pass through unchanged apart from the sealed `requestState`, including the upstream's `_meta` server info.
 - Records written after the last checkpoint are protected only by the hash chain until the next checkpoint (`checkpoint.every`/`interval`); `audit verify --max-unsigned` bounds how many are accepted. With anchoring, `--max-unanchored` bounds the unanchored tail. Rekor v2 records no time itself and the public instance does not promise witnessed checkpoints yet, so anchors prove time only when `audit.anchor.tsa_url` adds an RFC 3161 timestamp.
-- `subscriptions/listen` is not offered and `tools.listChanged` is not advertised; clients re-list tools.
+- `subscriptions/listen` delivers `tools`, `prompts` and `resources` list-changed notifications, relayed whenever an upstream signals a change (the gateway keeps its own listen stream to each upstream that supports one, and polls every 60 s otherwise) and after a policy reload. `resources/subscribe` for single resources is not offered.
 - Rate-limit tokens are spent by calls that are later denied by policy, and the idle-key janitor can grant at most one extra request on a key it races with.
 - Intent and decision records share one audit queue, so a flood of rejected calls can delay intents (bounded by rate limits and the 100 ms intent deadline).
 - A torn last line (only possible with `fsync: false`) makes startup refuse to continue the chain until the file is repaired.
@@ -306,8 +329,8 @@ Shipped in v1.1:
 Next:
 
 - [x] v1.2 (unreleased): direct `tools/call` path, sealed MRTR state, progress forwarding, input-required pass-through
-- [ ] v1.3: resources and prompts aggregation, the tasks extension (SEP-2663), hot config reload, RFC 7662 introspection, OTLP log sink
-- [ ] v2.0: RFC 8693 token exchange to upstreams, DPoP, Helm chart
+- [ ] v1.3: ~~resources and prompts aggregation~~, ~~shadow policy rules and `policy explain`~~, ~~hot config reload~~, ~~RFC 7662 introspection~~, ~~OTLP log sink~~, ~~Grafana dashboard, alerts and Helm chart~~ (done, unreleased), the tasks extension (SEP-2663)
+- [ ] v2.0: RFC 8693 token exchange to upstreams, DPoP, stdio upstream sandboxing
 
 ## Development
 

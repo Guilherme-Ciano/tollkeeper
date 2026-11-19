@@ -47,12 +47,24 @@ type Server struct {
 }
 
 type Auth struct {
-	Mode                 string   `koanf:"mode"`
-	Resource             string   `koanf:"resource"`
-	AuthorizationServers []string `koanf:"authorization_servers"`
-	ScopesSupported      []string `koanf:"scopes_supported"`
-	RequiredScopes       []string `koanf:"required_scopes"`
-	JWT                  JWT      `koanf:"jwt"`
+	Mode                 string        `koanf:"mode"`
+	Resource             string        `koanf:"resource"`
+	AuthorizationServers []string      `koanf:"authorization_servers"`
+	ScopesSupported      []string      `koanf:"scopes_supported"`
+	RequiredScopes       []string      `koanf:"required_scopes"`
+	JWT                  JWT           `koanf:"jwt"`
+	Introspection        Introspection `koanf:"introspection"`
+}
+
+type Introspection struct {
+	URL           string        `koanf:"url"`
+	ClientID      string        `koanf:"client_id"`
+	ClientSecret  string        `koanf:"client_secret"`
+	Issuer        string        `koanf:"issuer"`
+	Audiences     []string      `koanf:"audiences"`
+	CacheTTL      time.Duration `koanf:"cache_ttl"`
+	Timeout       time.Duration `koanf:"timeout"`
+	AllowInsecure bool          `koanf:"allow_insecure"`
 }
 
 type JWT struct {
@@ -103,12 +115,15 @@ type Policy struct {
 }
 
 type Rule struct {
-	Name     string   `koanf:"name"`
-	Subjects Subjects `koanf:"subjects"`
-	Tools    []string `koanf:"tools"`
-	When     string   `koanf:"when"`
-	Effect   string   `koanf:"effect"`
-	OnDeny   OnDeny   `koanf:"on_deny"`
+	Name      string   `koanf:"name"`
+	Subjects  Subjects `koanf:"subjects"`
+	Tools     []string `koanf:"tools"`
+	Prompts   []string `koanf:"prompts"`
+	Resources []string `koanf:"resources"`
+	When      string   `koanf:"when"`
+	Mode      string   `koanf:"mode"`
+	Effect    string   `koanf:"effect"`
+	OnDeny    OnDeny   `koanf:"on_deny"`
 }
 
 type Subjects struct {
@@ -121,6 +136,11 @@ type Subjects struct {
 type OnDeny struct {
 	StepUpScopes []string `koanf:"step_up_scopes"`
 }
+
+const (
+	RuleModeEnforce = "enforce"
+	RuleModeShadow  = "shadow"
+)
 
 const (
 	RateStoreMemory = "memory"
@@ -168,6 +188,17 @@ type Audit struct {
 	Checkpoint     Checkpoint    `koanf:"checkpoint"`
 	Postgres       AuditPostgres `koanf:"postgres"`
 	Anchor         AuditAnchor   `koanf:"anchor"`
+	OTLP           AuditOTLP     `koanf:"otlp"`
+}
+
+type AuditOTLP struct {
+	Endpoint      string            `koanf:"endpoint"`
+	Headers       map[string]string `koanf:"headers"`
+	Batch         int               `koanf:"batch"`
+	Queue         int               `koanf:"queue"`
+	Interval      time.Duration     `koanf:"interval"`
+	Timeout       time.Duration     `koanf:"timeout"`
+	AllowInsecure bool              `koanf:"allow_insecure"`
 }
 
 type AuditAnchor struct {
@@ -225,6 +256,7 @@ func Defaults() Config {
 				JWKSRefresh:  10 * time.Minute,
 				JWKSMinRetry: 5 * time.Second,
 			},
+			Introspection: Introspection{CacheTTL: time.Minute, Timeout: 5 * time.Second},
 		},
 		Policy: Policy{Default: EffectDeny},
 		RateLimits: RateLimits{
@@ -242,6 +274,7 @@ func Defaults() Config {
 			RecordArgs:     RecordArgsHash,
 			Checkpoint:     Checkpoint{Every: 1000, Interval: 30 * time.Second},
 			Postgres:       AuditPostgres{Timeout: 5 * time.Second},
+			OTLP:           AuditOTLP{Batch: 512, Queue: 10000, Interval: 2 * time.Second, Timeout: 5 * time.Second},
 			Anchor: AuditAnchor{
 				Interval: 15 * time.Minute, Timeout: time.Minute, MaxBackoff: 10 * time.Minute, MinSpacing: time.Minute,
 			},
@@ -282,8 +315,9 @@ func defaultUpstream(u Upstream) Upstream {
 }
 
 const (
-	AuthModeJWT  = "jwt"
-	AuthModeNone = "none"
+	AuthModeJWT           = "jwt"
+	AuthModeIntrospection = "introspection"
+	AuthModeNone          = "none"
 
 	TransportStdio      = "stdio"
 	TransportStreamable = "streamable_http"

@@ -1,0 +1,11 @@
+server:
+  - logging-set-level
+  - tools-call-with-logging
+  - tools-call-with-progress
+  - tools-call-sampling
+  - tools-call-elicitation
+  - elicitation-sep1034-defaults
+  - elicitation-sep1330-enums
+  - server-sse-multiple-streams
+  - resources-subscribe
+  - resources-unsubscribe

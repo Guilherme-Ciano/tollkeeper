@@ -1,0 +1,108 @@
+groups:
+  - name: tollkeeper
+    rules:
+      - alert: TollkeeperDown
+        expr: up{job="tollkeeper"} == 0
+        for: 1m
+        labels: { severity: critical }
+        annotations:
+          summary: "tollkeeper {{ $labels.instance }} is not being scraped"
+          description: "Agents behind this gateway cannot reach any tool."
+
+      - alert: TollkeeperAuditWriteErrors
+        expr: increase(mcpgw_audit_sink_errors_total[5m]) > 0
+        labels: { severity: critical }
+        annotations:
+          summary: "audit log writes are failing on {{ $labels.instance }}"
+          description: "With on_backpressure: fail_closed every tools/call is refused until the disk or mirror recovers."
+
+      - alert: TollkeeperAuditDropped
+        expr: increase(mcpgw_audit_dropped_total[5m]) > 0
+        labels: { severity: critical }
+        annotations:
+          summary: "audit events were dropped on {{ $labels.instance }}"
+          description: "Only possible with on_backpressure: fail_open; the chain records a signed gap."
+
+      - alert: TollkeeperAuditQueueFilling
+        expr: mcpgw_audit_queue_depth > 50000
+        for: 2m
+        labels: { severity: warning }
+        annotations:
+          summary: "audit queue above 50k events on {{ $labels.instance }}"
+          description: "The writer is not keeping up; check disk latency and fsync settings."
+
+      - alert: TollkeeperUpstreamDown
+        expr: mcpgw_upstream_up == 0
+        for: 2m
+        labels: { severity: warning }
+        annotations:
+          summary: "upstream {{ $labels.upstream }} is down"
+          description: "Its tools are removed from the catalog until it recovers."
+
+      - alert: TollkeeperCircuitOpen
+        expr: mcpgw_breaker_state == 2
+        for: 1m
+        labels: { severity: warning }
+        annotations:
+          summary: "circuit breaker open for upstream {{ $labels.upstream }}"
+
+      - alert: TollkeeperHighOverhead
+        expr: histogram_quantile(0.99, sum by (le, instance) (rate(mcpgw_gateway_overhead_seconds_bucket[5m]))) > 0.05
+        for: 10m
+        labels: { severity: warning }
+        annotations:
+          summary: "p99 gateway overhead above 50 ms on {{ $labels.instance }}"
+          description: "Added latency per tools/call, upstream time excluded. Usually CPU saturation or a slow audit disk."
+
+      - alert: TollkeeperTokenKeysUnavailable
+        expr: increase(mcpgw_auth_failures_total{reason="keys_unavailable"}[5m]) > 0
+        labels: { severity: critical }
+        annotations:
+          summary: "JWKS or introspection endpoint unreachable from {{ $labels.instance }}"
+          description: "Callers get 503 until the authorization server answers again."
+
+      - alert: TollkeeperRateLimitBackendErrors
+        expr: increase(mcpgw_ratelimit_backend_errors_total[5m]) > 0
+        labels: { severity: warning }
+        annotations:
+          summary: "Redis rate-limit backend errors on {{ $labels.instance }}"
+          description: "Limits fall back to local state or deny, depending on rate_limits.redis.on_error."
+
+      - alert: TollkeeperUnapprovedTools
+        expr: sum by (instance) (mcpgw_pin_unapproved_tools) > 0
+        for: 30m
+        labels: { severity: info }
+        annotations:
+          summary: "{{ $value }} tool definitions wait for review on {{ $labels.instance }}"
+          description: "Run tollkeeper pin status and pin approve."
+
+      - alert: TollkeeperConfigReloadRejected
+        expr: increase(mcpgw_config_reloads_total{result!="ok"}[10m]) > 0
+        labels: { severity: warning }
+        annotations:
+          summary: "a config reload was rejected on {{ $labels.instance }}"
+          description: "The previous config is still in force; see the gateway log."
+
+      - alert: TollkeeperShadowRuleWouldChangeDecisions
+        expr: |
+          sum by (rule, shadow_effect, effect) (
+              increase(mcpgw_policy_shadow_decisions_total{shadow_effect="deny", effect!="deny"}[1h])
+            or increase(mcpgw_policy_shadow_decisions_total{shadow_effect="allow", effect!="allow"}[1h])
+            or increase(mcpgw_policy_shadow_decisions_total{shadow_effect="step_up", effect!="step_up"}[1h])
+          ) > 0
+        labels: { severity: info }
+        annotations:
+          summary: "shadow rule {{ $labels.rule }} would decide {{ $labels.shadow_effect }} where the policy decides {{ $labels.effect }}"
+
+      - alert: TollkeeperAnchorStale
+        expr: mcpgw_audit_anchor_last_success_timestamp_seconds > 0 and time() - mcpgw_audit_anchor_last_success_timestamp_seconds > 3600
+        labels: { severity: warning }
+        annotations:
+          summary: "no checkpoint anchored in Rekor for over an hour on {{ $labels.instance }}"
+
+      - alert: TollkeeperOTLPExportDropping
+        expr: increase(mcpgw_audit_otlp_records_total{result="dropped"}[10m]) > 0
+        labels: { severity: info }
+        annotations:
+          summary: "audit records not reaching the OTLP collector from {{ $labels.instance }}"
+          description: "The audit file is unaffected; only the SIEM copy is incomplete."

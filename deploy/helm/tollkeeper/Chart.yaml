@@ -1,0 +1,9 @@
+apiVersion: v2
+name: tollkeeper
+description: MCP gateway with an OAuth 2.1 resource server, CEL policies, GCRA rate limits and a verifiable audit log
+type: application
+version: 0.1.0
+appVersion: "1.1.0"
+home: https://github.com/Guilherme-Ciano/tollkeeper
+sources: ["https://github.com/Guilherme-Ciano/tollkeeper"]
+keywords: [mcp, gateway, oauth, audit, policy]
