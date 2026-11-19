@@ -247,18 +247,20 @@ CEL variables: `principal{sub, client_id, scopes, claims}`, `tool{name, upstream
 ## Benchmarks
 
 <!-- bench:start -->
-Added latency per `tools/call` against a no-op upstream, with every feature on: EdDSA JWT verification, a CEL rule, two GCRA rules, fsync'd audit intent and outcome records with Ed25519 checkpoints, and Prometheus metrics.
+Added latency per `tools/call` against a no-op upstream, with every feature on: EdDSA JWT verification, a CEL rule, two GCRA rules, fsync'd audit intent and outcome records with Ed25519 checkpoints, and Prometheus metrics. Both builds were measured back to back in one session on the same machine.
 
-| offered calls/s | added p50 | added p90 | added p99 | errors | gateway RSS |
+| offered calls/s | added p50 | added p99 | CPU per 1k calls | v1.1.0 added p50 / p99 | v1.1.0 CPU per 1k calls |
 |---:|---:|---:|---:|---:|---:|
-| 500 | 0.62 ms | 0.69 ms | 1.03 ms | 0 | 60 MB |
-| 1,000 | 0.60 ms | 0.82 ms | 1.30 ms | 0 | 66 MB |
-| 2,000 | 0.85 ms | 1.20 ms | 4.43 ms | 0 | 101 MB |
-| 3,000 | 1.91 ms | 4.34 ms | 35.6 ms | 0 | 156 MB |
-| 4,000+ | saturated at ~3,100 completed calls/s | | | | |
+| 500 | 0.35 ms | 0.40 ms | 484 ms | 0.47 / 0.93 ms | 703 ms |
+| 1,000 | 0.36 ms | 0.55 ms | 426 ms | 0.54 / 1.17 ms | 700 ms |
+| 2,000 | 0.17 ms | 0.47 ms | 428 ms | 0.59 / 1.69 ms | 734 ms |
+| 3,000 | 0.25 ms | 0.90 ms | 447 ms | 0.98 / 3.49 ms | 749 ms |
+| 4,000 | 0.57 ms | 1.91 ms | 467 ms | 5.84 / 28.7 ms | 807 ms |
+| 5,000 | 3.36 ms | 159 ms (queueing, 0 errors) | 504 ms | collapsed, 45,039 errors | 774 ms |
 
-- **Sustainable throughput:** about 2,000 calls/s with p99 overhead under 5 ms, on 4 pinned cores (`GOMAXPROCS=4`). The ceiling is about 3,100 calls/s.
-- **Where the time goes:** a CPU profile shows tollkeeper's own work is small (admission 3.5%, envelope parse 3.2%, audit about 2% of CPU). Most of it is the second MCP hop through go-sdk, whose stateless request path decodes each body about six times, plus the GC that causes.
+- **Sustainable throughput:** 4,000 calls/s with p99 added latency under 2 ms on 4 pinned cores (`GOMAXPROCS=4`); every call still completes at 5,000 calls/s. v1.1.0 started queueing at 4,000 and collapsed at 5,000.
+- **CPU per call:** about 0.45 ms, 40% less than v1.1.0, because `tools/call` on protocol 2026-07-28 no longer goes through the go-sdk server transport.
+- **Where the time goes now** (CPU profile at 3,000 calls/s): the go-sdk client hop to the upstream about 33%, Ed25519 JWT verification 13.5%, GC 12%, and tollkeeper's own admission, envelope, policy and audit about 16%.
 - **Hot-path micro-benchmarks:**
   - Ed25519 JWT verify: 58 µs
   - Envelope parse: 17 µs
@@ -267,16 +269,12 @@ Added latency per `tools/call` against a no-op upstream, with every feature on: 
   - RBAC rule: 102 ns
   - GCRA take: 97 ns (43 ns in parallel), 0 allocs
 - **Test conditions:**
-  - Hardware: AMD Ryzen 5 4600G (6C/12T), 16 GB, Linux 7.3.3-cachyos, governor `powersave` with boost on, Go 1.27.4.
+  - Hardware: AMD Ryzen 5 4600G (6C/12T), 16 GB, Linux 7.3.4-cachyos, governor `powersave` with boost on, Go 1.27.4.
   - Network: same-host loopback, not internet latency.
-  - Pinning: gateway on CPUs 0-3, upstream on 4-5, load generator on 6-11.
-  - Memory: run in a 6 GiB, no-swap cgroup; peak use 1.49 GiB.
-- **Method:**
-  - Open-loop constant arrival rate, corrected for coordinated omission.
-  - Each rate gets a 10 s warm-up, then 3 × 30 s runs; the median run by p99 is reported.
-  - This is shorter than the planned 5 × 120 s.
+  - Pinning: gateway on CPUs 0-3, upstream on 4-5, load generator on 6-11; 6 GiB no-swap cgroup.
+  - Method: open-loop constant arrival rate corrected for coordinated omission; 10 s warm-up and 3 × 30 s runs per rate, median run by p99.
 
-Full results and analysis: [bench/results/2026-11-13-ryzen-5-0773037](bench/results/2026-11-13-ryzen-5-0773037/ANALYSIS.md).
+Full results, the v1.1.0 baseline and the CPU profile: [bench/results/2026-11-18-ryzen-5-3314721](bench/results/2026-11-18-ryzen-5-3314721/ANALYSIS.md).
 <!-- bench:end -->
 
 Reproduce with `make bench` (micro-benchmarks, `-count=10`) and `make bench-e2e` (gateway vs. direct at constant arrival rates; methodology in [bench/README.md](bench/README.md)).

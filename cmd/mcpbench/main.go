@@ -64,6 +64,12 @@ func cmdOverhead(ctx context.Context, args []string) error {
 	fs.StringVar(&o.upstreamCPU, "upstream-cpus", "4-5", "taskset CPU list for the upstream")
 	fs.IntVar(&o.gatewayProc, "gateway-procs", 4, "GOMAXPROCS for the gateway")
 	fs.IntVar(&o.conns, "conns", 1024, "max client connections")
+	fs.StringVar(
+		&o.cpuProfile,
+		"cpuprofile",
+		"",
+		"write a gateway CPU profile of the first measured run per rate to <prefix>-<rate>.pprof",
+	)
 	if err := fs.Parse(args); err != nil {
 		return fmt.Errorf("flags: %w", err)
 	}
