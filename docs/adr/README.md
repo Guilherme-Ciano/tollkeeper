@@ -20,6 +20,7 @@ Each record states the context, the decision, the alternatives that lost and wha
 | [0014](0014-dpop-and-enterprise-idp.md) | Sender-constrained tokens with DPoP (RFC 9449) and enterprise IdP integration | Accepted |
 | [0015](0015-tenant-policies-and-step-up.md) | Tenant-scoped policies, per-tenant rate limits, and RFC 9470 step-up authentication | Accepted |
 | [0016](0016-distributed-audit-verification-and-retention.md) | Distributed audit model, continuous chain verification, and retention | Accepted |
+| [0017](0017-upstream-diagnostics-and-resilience.md) | Upstream diagnostics, chaos testing, and dependency recovery | Accepted |
 
 
 The threat model that ties these together is in [../threat-model.md](../threat-model.md).

@@ -236,7 +236,7 @@ A rule applies to tools, prompts or resources only through its own `tools`, `pro
 
 | Key | Default | Notes |
 |---|---|---|
-| `server.listen` / `admin_listen` | `:8080` / `127.0.0.1:9090` | Admin serves `/metrics`, `/livez`, `/readyz`, `/pins`; `server.pprof: true` adds `/debug/pprof` and requires a loopback admin address |
+| `server.listen` / `admin_listen` | `:8080` / `127.0.0.1:9090` | Admin serves `/metrics`, `/livez`, `/readyz`, `/pins`, `/upstreams` ([ADR 0017](docs/adr/0017-upstream-diagnostics-and-resilience.md)); `server.pprof: true` adds `/debug/pprof` and requires a loopback admin address |
 | `server.public_url` | required | Canonical MCP URL; also the RFC 9728 metadata path |
 | `server.max_body_bytes` | 1 MiB | Enforced before parsing |
 | `server.request_state_key_file` | per-process key | HMAC key (at least 32 bytes) that seals upstream `requestState` for multi-round-trip calls; share one file across replicas so a retry can land on any of them |
