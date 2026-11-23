@@ -186,9 +186,13 @@ jobs:
       - uses: actions/setup-go@d8cbb8045d7f43706b9177cceb36c1f91a6644d5 # v7.1.0
         with: { go-version-file: go.mod }
       - uses: goreleaser/goreleaser-action@a4f02ab5355a589de60d917a659ce617ed19b3de # v7.3.0
-        with: { version: "~> v2", args: check }
+        with:
+          version: "~> v2"
+          args: "check"
       - uses: goreleaser/goreleaser-action@a4f02ab5355a589de60d917a659ce617ed19b3de # v7.3.0
-        with: { version: "~> v2", args: release --snapshot --clean --skip=sign,publish,docker,sbom,before }
+        with:
+          version: "~> v2"
+          args: "release --snapshot --clean --skip=sign,publish,docker,sbom,before"
       - name: Verify Dockerfile.release builds with snapshot binary
         run: |
           mkdir -p /tmp/release-ctx/linux/amd64

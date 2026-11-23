@@ -109,7 +109,6 @@ func writeAnchoredLog(t *testing.T, witnessDelay time.Duration, extra ...rekorte
 	case <-time.After(10 * time.Second):
 		t.Fatal("no anchor")
 	}
-	time.Sleep(20 * time.Millisecond)
 	cancel()
 	<-done
 	for range 3 {
@@ -148,7 +147,7 @@ func TestVerifyAnchorsCLI(t *testing.T) {
 			"unverified warns",
 			verifyOpts{file: al.path, pubkey: al.pub, maxUnsigned: 1000},
 			true,
-			"WARN 1 anchors not verified",
+			"anchors not verified: pass --rekor-trust",
 		},
 		{
 			"require anchors",
