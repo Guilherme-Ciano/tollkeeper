@@ -64,7 +64,17 @@ type Checkpoint struct {
 	CoversSeq  uint64 `json:"covers_seq"`
 	CoversHash string `json:"covers_hash"`
 	KeyID      string `json:"key_id"`
+	Algorithm  string `json:"alg,omitempty"`
 	Signature  string `json:"sig"`
+}
+
+type KeyRotation struct {
+	PrevKeyID       string `json:"prev_key_id"`
+	PrevAlgorithm   string `json:"prev_alg,omitempty"`
+	NewKeyID        string `json:"new_key_id"`
+	NewAlgorithm    string `json:"new_alg"`
+	NewPublicKeyDER []byte `json:"new_pub_der"`
+	Signature       string `json:"sig"`
 }
 
 type Anchor struct {
@@ -88,18 +98,19 @@ type CheckpointRef struct {
 }
 
 type Body struct {
-	Seq        uint64      `json:"seq"`
-	TS         int64       `json:"ts"`
-	ChainID    string      `json:"chain_id"`
-	Prev       string      `json:"prev"`
-	Event      *Event      `json:"event,omitempty"`
-	Checkpoint *Checkpoint `json:"checkpoint,omitempty"`
-	Anchor     *Anchor     `json:"anchor,omitempty"`
+	Seq         uint64       `json:"seq"`
+	TS          int64        `json:"ts"`
+	ChainID     string       `json:"chain_id"`
+	Prev        string       `json:"prev"`
+	Event       *Event       `json:"event,omitempty"`
+	Checkpoint  *Checkpoint  `json:"checkpoint,omitempty"`
+	Anchor      *Anchor      `json:"anchor,omitempty"`
+	KeyRotation *KeyRotation `json:"key_rotation,omitempty"`
 }
 
 func (b *Body) kinds() int {
 	n := 0
-	for _, set := range []bool{b.Event != nil, b.Checkpoint != nil, b.Anchor != nil} {
+	for _, set := range []bool{b.Event != nil, b.Checkpoint != nil, b.Anchor != nil, b.KeyRotation != nil} {
 		if set {
 			n++
 		}

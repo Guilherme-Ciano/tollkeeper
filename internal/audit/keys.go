@@ -1,6 +1,7 @@
 package audit
 
 import (
+	"crypto"
 	"crypto/ed25519"
 	"crypto/rand"
 	"crypto/x509"
@@ -9,20 +10,25 @@ import (
 	"fmt"
 	"io/fs"
 	"os"
+	"path/filepath"
 	"runtime"
+	"strings"
 )
 
 var (
-	ErrMalformed     = errors.New("malformed audit data")
-	ErrKeyType       = errors.New("key is not ed25519")
-	ErrBackpressure  = errors.New("audit buffer full")
-	ErrClosed        = errors.New("audit log closed")
-	ErrSinkFailed    = errors.New("audit sink failing")
-	ErrCorrupt       = errors.New("audit log tail may be inconsistent; writes stopped")
-	ErrKeyExposed    = errors.New("signing key is readable by group or others")
-	ErrAnchorQueue   = errors.New("audit anchor queue full")
-	ErrAnchorStale   = errors.New("anchor covers a checkpoint too far behind the head")
-	ErrAnchorForeign = errors.New("anchor covers a checkpoint of another chain")
+	ErrMalformed      = errors.New("malformed audit data")
+	ErrKeyType        = errors.New("key is not ed25519")
+	ErrUnsupportedKey = errors.New("unsupported audit key type (expected ed25519 or ecdsa p-256)")
+	ErrNoSigner       = errors.New("audit checkpoint signer is not configured")
+	ErrSameKey        = errors.New("next signing key matches the active key")
+	ErrBackpressure   = errors.New("audit buffer full")
+	ErrClosed         = errors.New("audit log closed")
+	ErrSinkFailed     = errors.New("audit sink failing")
+	ErrCorrupt        = errors.New("audit log tail may be inconsistent; writes stopped")
+	ErrKeyExposed     = errors.New("signing key is readable by group or others")
+	ErrAnchorQueue    = errors.New("audit anchor queue full")
+	ErrAnchorStale    = errors.New("anchor covers a checkpoint too far behind the head")
+	ErrAnchorForeign  = errors.New("anchor covers a checkpoint of another chain")
 )
 
 func GenerateKeyPair() (privPEM, pubPEM []byte, err error) {
@@ -103,4 +109,43 @@ func LoadPublicKey(path string) (ed25519.PublicKey, error) {
 		return nil, fmt.Errorf("read public key: %w", err)
 	}
 	return ParsePublicKey(data)
+}
+
+func LoadAnyPublicKey(path string) (crypto.PublicKey, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return nil, fmt.Errorf("read public key: %w", err)
+	}
+	return ParseAnyPublicKey(data)
+}
+
+func LoadKeySetDir(dir string) (*KeySet, error) {
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return nil, fmt.Errorf("read key directory: %w", err)
+	}
+	ks, err := NewKeySet()
+	if err != nil {
+		return nil, err
+	}
+	for _, entry := range entries {
+		if entry.IsDir() {
+			continue
+		}
+		ext := strings.ToLower(filepath.Ext(entry.Name()))
+		if ext != ".pub" && ext != ".pem" {
+			continue
+		}
+		pub, err := LoadAnyPublicKey(filepath.Join(dir, entry.Name()))
+		if err != nil {
+			return nil, fmt.Errorf("%s: %w", entry.Name(), err)
+		}
+		if err := ks.Add(pub); err != nil {
+			return nil, fmt.Errorf("%s: %w", entry.Name(), err)
+		}
+	}
+	if ks.Len() == 0 {
+		return nil, fmt.Errorf("no .pub or .pem public keys found in %s: %w", dir, ErrMalformed)
+	}
+	return ks, nil
 }

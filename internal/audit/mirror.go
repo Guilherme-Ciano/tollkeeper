@@ -11,9 +11,10 @@ import (
 )
 
 const (
-	KindEvent      = "event"
-	KindCheckpoint = "checkpoint"
-	KindAnchor     = "anchor"
+	KindEvent       = "event"
+	KindCheckpoint  = "checkpoint"
+	KindAnchor      = "anchor"
+	KindKeyRotation = "key_rotation"
 
 	reconcileBatch = 1000
 	maxLineBytes   = 16 << 20
@@ -51,6 +52,8 @@ func rowFor(b *Body, rec Record) Row {
 		kind = KindCheckpoint
 	case b.Anchor != nil:
 		kind = KindAnchor
+	case b.KeyRotation != nil:
+		kind = KindKeyRotation
 	}
 	return Row{
 		ChainID: b.ChainID,
