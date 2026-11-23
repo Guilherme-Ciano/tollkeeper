@@ -405,6 +405,16 @@ func validateTokenExchange(v *validator, f string, a UpstreamAuth) {
 	}
 }
 
+func ValidatePolicy(p Policy) error {
+	if p.Default == "" {
+		p.Default = EffectDeny
+	}
+	v := &validator{}
+	c := Config{Policy: p}
+	c.validatePolicy(v)
+	return errors.Join(v.errs...)
+}
+
 func (c *Config) validatePolicy(v *validator) {
 	v.oneOf("policy.default", c.Policy.Default, EffectAllow, EffectDeny)
 	validatePolicyRules(v, "policy.rules", c.Policy.Rules)

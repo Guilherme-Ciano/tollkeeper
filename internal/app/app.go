@@ -626,6 +626,7 @@ func (a *App) adminHandler() http.Handler {
 	}
 	mux.HandleFunc("GET /pins", a.pinReport)
 	mux.HandleFunc("GET /upstreams", a.upstreamDiagnostics)
+	a.registerAdminUI(mux)
 	mux.HandleFunc("GET /livez", func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusOK)
 	})
