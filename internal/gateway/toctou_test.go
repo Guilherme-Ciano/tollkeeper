@@ -224,7 +224,10 @@ func TestTOCTOUConcurrentPinMutationAndReload(t *testing.T) {
 			if err == nil {
 				g.Apply(delta)
 			}
-			_, _ = guard.Reload()
+			if _, err := guard.Reload(); err != nil {
+				t.Errorf("reload pin lockfile: %v", err)
+				return
+			}
 			g.Reevaluate()
 		}
 	})
