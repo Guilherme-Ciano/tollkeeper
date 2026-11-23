@@ -248,7 +248,7 @@ A rule applies to tools, prompts or resources only through its own `tools`, `pro
 | `upstreams[].transport` | | `stdio` (explicit env allowlist, process-group kill, Linux `Pdeathsig`) or `streamable_http` |
 | `upstreams[].block_private_ips` | `false` | Block loopback, RFC 1918, link-local/IMDS (`169.254.169.254`) and reserved IPs at `Dialer.Control` before `connect()` (DNS-rebinding proof) |
 | `upstreams[].sandbox` | `mode: off` | Optional stdio subprocess isolation (`off`, `warn`, `enforce`) with `workdir`, Linux `rlimits` (`prlimit`) and namespace/filesystem isolation (`bwrap`: `network: none`, `read_only_paths`, `read_write_paths`); `enforce` fails closed ([ADR 0011](docs/adr/0011-stdio-sandboxing.md)) |
-| `upstreams[].auth.type` | `none` | `bearer` or `client_credentials` with RFC 8707 `resource` |
+| `upstreams[].auth.type` | `none` | `bearer`, `client_credentials` with RFC 8707 `resource`, or `token_exchange` (RFC 8693 per-caller downscoped exchange with `intersect_caller_scopes`, `max_delegation_depth`, `actor_token`, and `allowed_issuers`; [ADR 0013](docs/adr/0013-oauth-token-exchange-and-delegation.md)) |
 | `rate_limits.rules[].per` | | `subject`, `subject_tool`, `client_id`, `upstream`, `tool`, `global` |
 | `rate_limits.store` | `memory` | `redis` shares limits across replicas; set `rate_limits.redis.addrs`, `key_prefix`, `timeout` (50 ms) and `on_error` (`local` fallback or `deny`) |
 | `audit.checkpoint.kms` | | Pure-Go KMS checkpoint signing (`provider: vault` for Vault/OpenBao Transit Ed25519/P-256, or `provider: aws` for AWS KMS SigV4 P-256); mutually exclusive with `audit.checkpoint.signing_key_file` ([ADR 0012](docs/adr/0012-audit-key-rotation-and-kms.md)) |

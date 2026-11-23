@@ -16,6 +16,7 @@ Each record states the context, the decision, the alternatives that lost and wha
 | [0010](0010-rekor-checkpoint-anchoring.md) | Anchor audit checkpoints in a Rekor v2 transparency log | Accepted |
 | [0011](0011-stdio-sandboxing.md) | Stdio upstream sandboxing with fail-closed enforcement | Accepted |
 | [0012](0012-audit-key-rotation-and-kms.md) | Pure-Go KMS checkpoint signing and zero-downtime audit key rotation | Accepted |
+| [0013](0013-oauth-token-exchange-and-delegation.md) | OAuth 2.0 Token Exchange (RFC 8693) and controlled delegation | Accepted |
 
 
 The threat model that ties these together is in [../threat-model.md](../threat-model.md).

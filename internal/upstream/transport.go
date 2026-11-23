@@ -204,6 +204,21 @@ func HTTPClient(ctx context.Context, cfg config.Upstream) (*http.Client, error) 
 		}
 		tctx := context.WithValue(context.WithoutCancel(ctx), oauth2.HTTPClient, tokenClient)
 		rt = &oauth2.Transport{Source: oauth2.ReuseTokenSource(nil, cc.TokenSource(tctx)), Base: rt}
+	case config.UpstreamAuthTokenExchange:
+		u, err := url.Parse(cfg.URL)
+		if err != nil {
+			return nil, fmt.Errorf("%s: upstream url: %w", cfg.ID, err)
+		}
+		timeout := defaultExchangeTimeout
+		if cfg.Auth.TokenExchange != nil && cfg.Auth.TokenExchange.Timeout > 0 {
+			timeout = cfg.Auth.TokenExchange.Timeout
+		}
+		tokenClient := &http.Client{
+			Transport:     otelhttp.NewTransport(baseTransport(cfg.BlockPrivateIPs)),
+			Timeout:       timeout,
+			CheckRedirect: NoRedirects,
+		}
+		rt = newTokenExchangeTransport(ctx, cfg, u.Host, tokenClient, rt)
 	case config.UpstreamAuthNone, "":
 	default:
 		return nil, fmt.Errorf("%s: unknown upstream auth %q: %w", cfg.ID, cfg.Auth.Type, ErrUnknownTransport)

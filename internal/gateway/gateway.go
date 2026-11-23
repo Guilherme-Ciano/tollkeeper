@@ -571,6 +571,8 @@ func upstreamMessage(err error) string {
 		return "upstream timed out"
 	case errors.Is(err, upstream.ErrUnavailable):
 		return "upstream unavailable"
+	case errors.Is(err, upstream.ErrDelegationDenied):
+		return "delegation not permitted for upstream"
 	default:
 		return "upstream call failed"
 	}

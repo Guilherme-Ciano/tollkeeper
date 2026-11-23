@@ -36,6 +36,8 @@ type Event struct {
 	RequestID       string          `json:"request_id"`
 	TraceID         string          `json:"trace_id,omitempty"`
 	Subject         string          `json:"sub,omitempty"`
+	Tenant          string          `json:"tenant,omitempty"`
+	Actor           string          `json:"act,omitempty"`
 	ClientID        string          `json:"client_id,omitempty"`
 	ClientName      string          `json:"client_name,omitempty"`
 	ClientVersion   string          `json:"client_version,omitempty"`

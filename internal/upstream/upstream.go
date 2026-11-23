@@ -97,7 +97,7 @@ func New(
 }
 
 func clientFault(err error) bool {
-	if errors.Is(err, context.Canceled) {
+	if errors.Is(err, context.Canceled) || errors.Is(err, ErrDelegationDenied) {
 		return true
 	}
 	if we, ok := errors.AsType[*jsonrpc.Error](err); ok {

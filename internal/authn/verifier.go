@@ -104,10 +104,55 @@ func (v *Verifier) Verify(ctx context.Context, raw string) (identity.Principal, 
 		Subject:     sub,
 		ClientID:    clientID,
 		Issuer:      iss,
+		Tenant:      extractTenant(claims),
+		Actor:       parseActor(claims["act"], 0),
 		Scopes:      scopes(claims),
 		Claims:      claims,
 		Fingerprint: Fingerprint(raw),
 	}, nil
+}
+
+const maxActorDepth = 8
+
+func mapString(m map[string]any, k string) string {
+	s, ok := m[k].(string)
+	if !ok {
+		return ""
+	}
+	return s
+}
+
+func parseActor(raw any, depth int) *identity.Actor {
+	if raw == nil || depth >= maxActorDepth {
+		return nil
+	}
+	m, ok := raw.(map[string]any)
+	if !ok {
+		return nil
+	}
+	sub := mapString(m, "sub")
+	if sub == "" {
+		return nil
+	}
+	clientID := mapString(m, "client_id")
+	if clientID == "" {
+		clientID = mapString(m, "azp")
+	}
+	return &identity.Actor{
+		Subject:  sub,
+		ClientID: clientID,
+		Issuer:   mapString(m, "iss"),
+		Actor:    parseActor(m["act"], depth+1),
+	}
+}
+
+func extractTenant(claims map[string]any) string {
+	for _, key := range []string{"tenant_id", "tid", "org_id"} {
+		if s, ok := claims[key].(string); ok && s != "" {
+			return s
+		}
+	}
+	return ""
 }
 
 func (v *Verifier) typeAllowed(t *jwt.Token) bool {
