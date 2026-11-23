@@ -65,7 +65,7 @@ homebrew_casks:
     description: "Security gateway for MCP: OAuth 2.1, CEL policies, GCRA rate limits, tool pinning and verifiable audit logs"
     license: "Apache-2.0"
     directory: Casks
-    skip_upload: '{{ if or .IsPrerelease (not (isEnvSet "HOMEBREW_TAP_GITHUB_TOKEN")) }}true{{ else }}false{{ end }}'
+    skip_upload: '{{ if or .Prerelease (not (isEnvSet "HOMEBREW_TAP_GITHUB_TOKEN")) }}true{{ else }}false{{ end }}'
     repository:
       owner: Guilherme-Ciano
       name: homebrew-tap
