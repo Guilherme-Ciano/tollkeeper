@@ -34,7 +34,19 @@ func Factory(
 ) (TransportFactory, error) {
 	switch cfg.Transport {
 	case config.TransportStdio:
-		return stdioFactory(cfg, log, environ), nil
+		plan, err := PlanHostSandbox(cfg.Command, cfg.Sandbox)
+		if err != nil {
+			return nil, fmt.Errorf("%s: %w", cfg.ID, err)
+		}
+		for _, w := range plan.Warnings {
+			log.WarnContext(
+				ctx,
+				"stdio sandbox degraded",
+				slog.String("upstream", cfg.ID),
+				slog.String("reason", w),
+			)
+		}
+		return stdioFactory(cfg, plan, log, environ), nil
 	case config.TransportStreamable:
 		hc, err := HTTPClient(ctx, cfg)
 		if err != nil {
@@ -76,10 +88,18 @@ func StdioEnv(cfg config.Upstream, environ func(string) (string, bool)) []string
 	return env
 }
 
-func stdioFactory(cfg config.Upstream, log *slog.Logger, environ func(string) (string, bool)) TransportFactory {
+func stdioFactory(
+	cfg config.Upstream,
+	plan SandboxPlan,
+	log *slog.Logger,
+	environ func(string) (string, bool),
+) TransportFactory {
 	return func(ctx context.Context) (mcp.Transport, func(), error) {
-		cmd := exec.CommandContext(context.WithoutCancel(ctx), cfg.Command[0], cfg.Command[1:]...)
+		cmd := exec.CommandContext(context.WithoutCancel(ctx), plan.Command[0], plan.Command[1:]...)
 		cmd.Env = StdioEnv(cfg, environ)
+		if plan.Dir != "" && !plan.UsesBwrap {
+			cmd.Dir = plan.Dir
+		}
 		cmd.SysProcAttr = processGroup()
 		stderr, err := cmd.StderrPipe()
 		if err != nil {
