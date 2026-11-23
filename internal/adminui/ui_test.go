@@ -16,8 +16,8 @@ func TestHandlerServesEmbeddedAssetsWithSecurityHeaders(t *testing.T) {
 		wantCT  string
 		wantSub string
 	}{
-		{path: "/ui/", wantCT: "text/html", wantSub: "tollkeeper"},
-		{path: "/ui/styles.css", wantCT: "text/css", wantSub: "--accent"},
+		{path: "/ui/", wantCT: "text/html", wantSub: `id="brand-tollgate-logo"`},
+		{path: "/ui/styles.css", wantCT: "text/css", wantSub: "--primary"},
 		{path: "/ui/app.js", wantCT: "javascript", wantSub: "/api/simulate"},
 	}
 
