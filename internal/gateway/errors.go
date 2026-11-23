@@ -7,6 +7,9 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"time"
+
+	"github.com/Guilherme-Ciano/tollkeeper/internal/policy"
 )
 
 const (
@@ -102,4 +105,30 @@ func (c challenge) dpopHeader(errCode, desc string, algs []string) string {
 		return "DPoP"
 	}
 	return "DPoP " + strings.Join(parts, ", ")
+}
+
+func (c challenge) stepUpAuthHeader(sc *policy.StepUpChallenge) string {
+	parts := []string{
+		`error="insufficient_user_authentication"`,
+		`error_description="stronger authentication required"`,
+	}
+	if len(sc.ACRValues) > 0 {
+		parts = append(parts, `acr_values="`+strings.Join(sc.ACRValues, " ")+`"`)
+	}
+	if sc.MaxAge > 0 {
+		parts = append(parts, "max_age="+strconv.FormatInt(int64(sc.MaxAge/time.Second), 10))
+	}
+	if c.resourceMetadata != "" {
+		parts = append(parts, `resource_metadata="`+c.resourceMetadata+`"`)
+	}
+	if len(sc.Scopes) > 0 {
+		scopes := slices.Clone(c.scopes)
+		for _, s := range sc.Scopes {
+			if !slices.Contains(scopes, s) {
+				scopes = append(scopes, s)
+			}
+		}
+		parts = append(parts, `scope="`+strings.Join(scopes, " ")+`"`)
+	}
+	return "Bearer " + strings.Join(parts, ", ")
 }
