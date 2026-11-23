@@ -1,0 +1,29 @@
+cases:
+  - name: readonly_without_mfa_allowed
+    principal: { sub: alice }
+    tool: billing__get_invoice
+    annotations: { readOnlyHint: true }
+    expect: allow
+    rule: allow-readonly
+  - name: destructive_with_stale_auth_triggers_step_up
+    principal:
+      sub: alice
+      scopes: ["billing:approve"]
+      acr: phr
+      auth_time: "2026-11-23T14:00:00Z"
+    tool: billing__refund
+    annotations: { destructiveHint: true }
+    now: "2026-11-23T15:00:00Z"
+    expect: step_up
+    rule: destructive-requires-fresh-phr-mfa
+  - name: destructive_with_fresh_phr_allowed
+    principal:
+      sub: alice
+      scopes: ["billing:approve"]
+      acr: phr
+      auth_time: "2026-11-23T14:58:00Z"
+    tool: billing__refund
+    annotations: { destructiveHint: true }
+    now: "2026-11-23T15:00:00Z"
+    expect: allow
+    rule: destructive-requires-fresh-phr-mfa

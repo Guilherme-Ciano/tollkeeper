@@ -282,8 +282,29 @@ type Audit struct {
 	Postgres       AuditPostgres  `koanf:"postgres"`
 	Anchor         AuditAnchor    `koanf:"anchor"`
 	OTLP           AuditOTLP      `koanf:"otlp"`
+	SIEM           AuditSIEM      `koanf:"siem"`
 	Verify         AuditVerify    `koanf:"verify"`
 	Retention      AuditRetention `koanf:"retention"`
+}
+
+const (
+	SIEMFormatJSON      = "json"
+	SIEMFormatSplunkHEC = "splunk_hec"
+	SIEMFormatCEF       = "cef"
+)
+
+type AuditSIEM struct {
+	Endpoint        string            `koanf:"endpoint"`
+	Format          string            `koanf:"format"`
+	Headers         map[string]string `koanf:"headers"`
+	Index           string            `koanf:"index"`
+	Sourcetype      string            `koanf:"sourcetype"`
+	Batch           int               `koanf:"batch"`
+	Queue           int               `koanf:"queue"`
+	Interval        time.Duration     `koanf:"interval"`
+	Timeout         time.Duration     `koanf:"timeout"`
+	BlockPrivateIPs bool              `koanf:"block_private_ips"`
+	AllowInsecure   bool              `koanf:"allow_insecure"`
 }
 
 type AuditVerify struct {
@@ -420,6 +441,9 @@ func Defaults() Config {
 			Checkpoint:     Checkpoint{Every: 1000, Interval: 30 * time.Second},
 			Postgres:       AuditPostgres{Timeout: 5 * time.Second},
 			OTLP:           AuditOTLP{Batch: 512, Queue: 10000, Interval: 2 * time.Second, Timeout: 5 * time.Second},
+			SIEM: AuditSIEM{
+				Format: SIEMFormatJSON, Batch: 256, Queue: 10000, Interval: 2 * time.Second, Timeout: 5 * time.Second,
+			},
 			Anchor: AuditAnchor{
 				Interval: 15 * time.Minute, Timeout: time.Minute, MaxBackoff: 10 * time.Minute, MinSpacing: time.Minute,
 			},

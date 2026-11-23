@@ -179,9 +179,11 @@ docker compose --profile obs up -d
 
 Grafana on `http://127.0.0.1:3000` opens on the provisioned tollkeeper dashboard (traffic by outcome, added latency, policy and shadow decisions, auth failures and 429s, upstream health and breakers, audit throughput, queue and anchoring, dispatch path, config reloads). Prometheus on `:9091` loads [`deploy/prometheus/alerts.yml`](deploy/prometheus/alerts.yml): gateway down, audit write errors or drops, audit queue filling, upstream down, circuit open, p99 overhead above 50 ms, JWKS or introspection unreachable, Redis backend errors, unapproved tools, rejected reloads, shadow rules that disagree with the policy, stale anchoring and OTLP drops. `promtool test rules deploy/prometheus/alerts_test.yml` covers the alerts in CI.
 
-## Using it with popular MCP servers
+## Using it with popular MCP servers & agents
 
-[examples/configs](examples/configs/README.md) has validated configurations for the [GitHub MCP server](examples/configs/github.yaml) (read-only tools for every agent, scoped writes with step-up, write-specific rate limits, enforced pinning) and the [reference filesystem server](examples/configs/filesystem.yaml) (reads anywhere in a share, writes only under one directory). A test keeps every example valid.
+- [examples/configs](examples/configs/README.md) has validated configurations for the [GitHub MCP server](examples/configs/github.yaml), the [reference filesystem server](examples/configs/filesystem.yaml), and enterprise IdPs (Entra ID, Okta, Auth0, Keycloak). A test keeps every example valid.
+- [policies/library](policies/library/README.md) ships CI-verified reusable policy packs (read-only defaults, RFC 9470 destructive step-up, coding-agent guardrails, multi-tenant isolation, PII & secrets guard).
+- [examples/agents](examples/agents/README.md) has copy-paste integrations for Claude Code, Cursor, LangGraph, OpenAI Agents SDK, CrewAI, and AG-UI / CopilotKit ([ADR 0018](docs/adr/0018-siem-sink-and-developer-experience.md)).
 
 ## CLI
 
@@ -257,6 +259,7 @@ A rule applies to tools, prompts or resources only through its own `tools`, `pro
 | `audit.postgres.dsn` | | Mirror the audit chain to Postgres ([roles and grants](docs/operations/postgres.md)); `audit.postgres.migrate: true` only in development; requires `audit.chain_id` and `audit.fsync` |
 | `audit.anchor.enabled` | `false` | Anchor checkpoints in a Rekor v2 log (`rekor_url`, `trust_files`, `tsa_url`, `interval` 15m, `min_spacing` 1m); entries are public and permanent ([anchoring](docs/operations/anchoring.md)) |
 | `audit.otlp.endpoint` | | Also send every committed audit record to an OpenTelemetry collector as an OTLP/HTTP JSON log (`/v1/logs`), with chain, sequence, hash, decision, tool and subject as attributes and the exact record as the body. Best effort and never authoritative: a bounded queue (`queue` 10000, `batch` 512, `interval` 2s) drops records instead of slowing the gateway, counted in `mcpgw_audit_otlp_records_total{result}`; the file stays the source of truth. `headers` for collector credentials |
+| `audit.siem.endpoint` | | Best-effort SIEM HTTP sink supporting `json`, `splunk_hec` (Splunk HEC batches with optional `index`/`sourcetype`), and `cef` (Common Event Format), with SSRF `block_private_ips`, no-redirect transport, bounded queue and `mcpgw_audit_siem_records_total{result}` ([ADR 0018](docs/adr/0018-siem-sink-and-developer-experience.md)) |
 | `audit.verify` / `audit.retention` | `enabled: false` | Background continuous chain watchdog (`interval` 5m, `max_unsigned`, `pubkey_dir`, exporting `mcpgw_audit_verify_healthy`) and verified gzip+manifest archiving/pruning via `tollkeeper audit archive` / `tollkeeper audit watch` / `audit verify --all-chains` ([ADR 0016](docs/adr/0016-distributed-audit-verification-and-retention.md)) |
 | `audit.record_args` | `hash` | `none`, `hash`, `full` (raw arguments may be personal data) |
 | `audit.on_backpressure` | `fail_closed` | Calls are refused if their intent record cannot be queued |
