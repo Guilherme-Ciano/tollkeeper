@@ -133,13 +133,29 @@ type Breaker struct {
 }
 
 type UpstreamAuth struct {
-	Type         string   `koanf:"type"`
-	Token        string   `koanf:"token"`
-	TokenURL     string   `koanf:"token_url"`
-	ClientID     string   `koanf:"client_id"`
-	ClientSecret string   `koanf:"client_secret"`
-	Scopes       []string `koanf:"scopes"`
-	Resource     string   `koanf:"resource"`
+	Type          string         `koanf:"type"`
+	Token         string         `koanf:"token"`
+	TokenURL      string         `koanf:"token_url"`
+	ClientID      string         `koanf:"client_id"`
+	ClientSecret  string         `koanf:"client_secret"`
+	Scopes        []string       `koanf:"scopes"`
+	Resource      string         `koanf:"resource"`
+	TokenExchange *TokenExchange `koanf:"token_exchange"`
+}
+
+type TokenExchange struct {
+	Audience              string        `koanf:"audience"`
+	SubjectTokenType      string        `koanf:"subject_token_type"`
+	RequestedTokenType    string        `koanf:"requested_token_type"`
+	ActorToken            string        `koanf:"actor_token"`
+	ActorTokenType        string        `koanf:"actor_token_type"`
+	IntersectCallerScopes bool          `koanf:"intersect_caller_scopes"`
+	MaxDelegationDepth    int           `koanf:"max_delegation_depth"`
+	AllowedIssuers        []string      `koanf:"allowed_issuers"`
+	DiscoveryScopes       []string      `koanf:"discovery_scopes"`
+	CacheTTL              time.Duration `koanf:"cache_ttl"`
+	Timeout               time.Duration `koanf:"timeout"`
+	AllowInsecure         bool          `koanf:"allow_insecure"`
 }
 
 type Policy struct {
@@ -162,6 +178,7 @@ type Rule struct {
 type Subjects struct {
 	Subs      []string `koanf:"subs"`
 	ClientIDs []string `koanf:"client_ids"`
+	Actors    []string `koanf:"actors"`
 	ScopesAny []string `koanf:"scopes_any"`
 	ScopesAll []string `koanf:"scopes_all"`
 }
@@ -409,6 +426,7 @@ const (
 	UpstreamAuthNone              = "none"
 	UpstreamAuthBearer            = "bearer"
 	UpstreamAuthClientCredentials = "client_credentials"
+	UpstreamAuthTokenExchange     = "token_exchange"
 
 	EffectAllow = "allow"
 	EffectDeny  = "deny"

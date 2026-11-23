@@ -84,7 +84,9 @@ func (g *Gateway) bearer(next http.Handler) http.Handler {
 			)
 			return
 		}
-		next.ServeHTTP(w, r.WithContext(identity.WithPrincipal(r.Context(), p)))
+		ctx := identity.WithPrincipal(r.Context(), p)
+		ctx = identity.WithSubjectToken(ctx, tok)
+		next.ServeHTTP(w, r.WithContext(ctx))
 	})
 }
 

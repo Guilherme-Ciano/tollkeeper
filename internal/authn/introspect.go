@@ -81,6 +81,10 @@ type introspection struct {
 	Exp       int64           `json:"exp"`
 	Nbf       int64           `json:"nbf"`
 	TokenType string          `json:"token_type"`
+	TenantID  string          `json:"tenant_id"`
+	TID       string          `json:"tid"`
+	OrgID     string          `json:"org_id"`
+	Act       json.RawMessage `json:"act"`
 }
 
 func (in *introspection) audiences() []string {
@@ -203,12 +207,37 @@ func (i *Introspector) principal(in *introspection, raw string) (identity.Princi
 	if in.Username != "" {
 		claims["username"] = in.Username
 	}
+	tenant := firstNonEmpty(in.TenantID, in.TID, in.OrgID)
+	if tenant != "" {
+		claims["tenant_id"] = tenant
+	}
+	var actor *identity.Actor
+	if len(in.Act) > 0 {
+		var rawAct any
+		if json.Unmarshal(in.Act, &rawAct) == nil {
+			actor = parseActor(rawAct, 0)
+			if actor != nil {
+				claims["act"] = rawAct
+			}
+		}
+	}
 	return identity.Principal{
 		Subject:     sub,
 		ClientID:    in.ClientID,
 		Issuer:      in.Iss,
+		Tenant:      tenant,
+		Actor:       actor,
 		Scopes:      strings.Fields(in.Scope),
 		Claims:      claims,
 		Fingerprint: Fingerprint(raw),
 	}, nil
+}
+
+func firstNonEmpty(vals ...string) string {
+	for _, v := range vals {
+		if v != "" {
+			return v
+		}
+	}
+	return ""
 }

@@ -47,7 +47,11 @@ func (e Effect) String() string {
 	return "deny"
 }
 
-const reasonMatched = "matched rule"
+const (
+	reasonMatched = "matched rule"
+	fieldSub      = "sub"
+	fieldClientID = "client_id"
+)
 
 type Decision struct {
 	Effect       Effect
@@ -180,6 +184,11 @@ func subjectsMatch(s config.Subjects, p identity.Principal) bool {
 	if len(s.ClientIDs) > 0 && !globMatch(s.ClientIDs, p.ClientID) {
 		return false
 	}
+	if len(s.Actors) > 0 {
+		if p.Actor == nil || !globMatch(s.Actors, p.Actor.Subject) {
+			return false
+		}
+	}
 	if len(s.ScopesAny) > 0 && !p.HasAnyScope(s.ScopesAny) {
 		return false
 	}
@@ -194,6 +203,30 @@ func scopesList(p identity.Principal) []any {
 	return out
 }
 
+func actorMap(a *identity.Actor) map[string]any {
+	if a == nil {
+		return map[string]any{
+			fieldSub:      "",
+			fieldClientID: "",
+			"iss":         "",
+			"depth":       0,
+			"chain":       []any{},
+		}
+	}
+	chain := a.Chain()
+	chainAny := make([]any, len(chain))
+	for i, s := range chain {
+		chainAny[i] = s
+	}
+	return map[string]any{
+		fieldSub:      a.Subject,
+		fieldClientID: a.ClientID,
+		"iss":         a.Issuer,
+		"depth":       a.Depth(),
+		"chain":       chainAny,
+	}
+}
+
 func activation(in Input, withArgs bool) (map[string]any, error) {
 	claims := in.Principal.Claims
 	if claims == nil {
@@ -201,10 +234,13 @@ func activation(in Input, withArgs bool) (map[string]any, error) {
 	}
 	act := map[string]any{
 		"principal": map[string]any{
-			"sub":       in.Principal.Subject,
-			"client_id": in.Principal.ClientID,
-			"scopes":    scopesList(in.Principal),
-			"claims":    claims,
+			fieldSub:      in.Principal.Subject,
+			fieldClientID: in.Principal.ClientID,
+			"tenant":      in.Principal.Tenant,
+			"delegated":   in.Principal.Actor != nil,
+			"actor":       actorMap(in.Principal.Actor),
+			"scopes":      scopesList(in.Principal),
+			"claims":      claims,
 		},
 		"tool": map[string]any{
 			"name":     in.Tool.Name,

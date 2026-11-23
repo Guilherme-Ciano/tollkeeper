@@ -300,7 +300,14 @@ func validateSandboxLimits(v *validator, f string, l SandboxLimits) {
 }
 
 func validateUpstreamAuth(v *validator, f string, a UpstreamAuth) {
-	v.oneOf(f+".type", a.Type, UpstreamAuthNone, UpstreamAuthBearer, UpstreamAuthClientCredentials)
+	v.oneOf(
+		f+".type",
+		a.Type,
+		UpstreamAuthNone,
+		UpstreamAuthBearer,
+		UpstreamAuthClientCredentials,
+		UpstreamAuthTokenExchange,
+	)
 	switch a.Type {
 	case UpstreamAuthBearer:
 		v.require(f+".token", a.Token)
@@ -311,6 +318,44 @@ func validateUpstreamAuth(v *validator, f string, a UpstreamAuth) {
 		if a.Resource != "" {
 			v.url(f+".resource", a.Resource, "http", "https")
 		}
+	case UpstreamAuthTokenExchange:
+		validateTokenExchange(v, f, a)
+	}
+}
+
+func validateTokenExchange(v *validator, f string, a UpstreamAuth) {
+	v.url(f+".token_url", a.TokenURL, "http", "https")
+	v.require(f+".client_id", a.ClientID)
+	v.require(f+".client_secret", a.ClientSecret)
+	if a.Resource != "" {
+		v.url(f+".resource", a.Resource, "http", "https")
+	}
+	te := a.TokenExchange
+	allowInsecure := te != nil && te.AllowInsecure
+	if strings.HasPrefix(a.TokenURL, "http://") && !allowInsecure && !Loopback(hostPort(a.TokenURL)) {
+		v.add(
+			f+".token_url",
+			"plain http to a non-loopback token endpoint requires auth.token_exchange.allow_insecure: true",
+		)
+	}
+	audience := ""
+	if te != nil {
+		audience = strings.TrimSpace(te.Audience)
+		if te.MaxDelegationDepth < 0 {
+			v.add(f+".token_exchange.max_delegation_depth", "must not be negative")
+		}
+		if te.CacheTTL < 0 || te.CacheTTL > time.Hour {
+			v.add(f+".token_exchange.cache_ttl", "must be within [0, 1h]")
+		}
+		if te.Timeout < 0 || te.Timeout > 30*time.Second {
+			v.add(f+".token_exchange.timeout", "must be within [0, 30s]")
+		}
+		for i, iss := range te.AllowedIssuers {
+			v.url(fmt.Sprintf("%s.token_exchange.allowed_issuers[%d]", f, i), iss, "http", "https")
+		}
+	}
+	if a.Resource == "" && audience == "" {
+		v.add(f, "token_exchange requires resource or token_exchange.audience to scope the downstream token")
 	}
 }
 
@@ -333,6 +378,7 @@ func (c *Config) validatePolicy(v *validator) {
 		v.globs(f+".resources", r.Resources)
 		v.globs(f+".subjects.subs", r.Subjects.Subs)
 		v.globs(f+".subjects.client_ids", r.Subjects.ClientIDs)
+		v.globs(f+".subjects.actors", r.Subjects.Actors)
 		v.oneOf(f+".effect", r.Effect, EffectAllow, EffectDeny)
 		if r.Mode != "" {
 			v.oneOf(f+".mode", r.Mode, RuleModeEnforce, RuleModeShadow)

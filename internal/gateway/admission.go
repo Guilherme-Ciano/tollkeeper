@@ -398,6 +398,8 @@ func (g *Gateway) event(a *Admission, phase, decision, rule, reason string) audi
 		RequestID:       a.RequestID,
 		TraceID:         a.TraceID,
 		Subject:         a.Principal.Subject,
+		Tenant:          a.Principal.Tenant,
+		Actor:           strings.Join(a.Principal.Actor.Chain(), " -> "),
 		ClientID:        a.Principal.ClientID,
 		ClientName:      truncate(a.Envelope.ClientName, maxClientField),
 		ClientVersion:   truncate(a.Envelope.ClientVersion, maxClientField),
