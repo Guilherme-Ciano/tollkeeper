@@ -4,6 +4,7 @@ on:
     branches: [main]
     paths:
       - "site/**"
+      - ".release-please-manifest.json"
       - ".github/workflows/pages.yml"
   workflow_dispatch:
 permissions:
@@ -24,6 +25,23 @@ jobs:
         with: { egress-policy: audit }
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with: { persist-credentials: false }
+      - name: Stamp current release version from manifest
+        run: |
+          python3 - <<'PY'
+          import json, pathlib, re, sys
+          version = json.loads(pathlib.Path(".release-please-manifest.json").read_text(encoding="utf-8"))["."]
+          index = pathlib.Path("site/index.html")
+          html = index.read_text(encoding="utf-8")
+          updated, n = re.subn(
+              r'(<span id="release-version">)[^<]*(</span>)',
+              rf"\g<1>v{version}\g<2>",
+              html,
+          )
+          if n != 1:
+              sys.exit(f"expected 1 release-version span in site/index.html, found {n}")
+          index.write_text(updated, encoding="utf-8")
+          print(f"Stamped site version: v{version}")
+          PY
       - uses: actions/configure-pages@45bfe0192ca1faeb007ade9deae92b16b8254a0d # v6.0.0
       - uses: actions/upload-pages-artifact@7b1f4a764d45c48632c6b24a0339c27f5614fb0b # v4.0.0
         with:
