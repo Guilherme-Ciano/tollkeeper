@@ -8,6 +8,7 @@ import (
 const (
 	labelUpstream = "upstream"
 	labelRule     = "rule"
+	labelResult   = "result"
 )
 
 type Metrics struct {
@@ -91,7 +92,7 @@ func NewMetrics() *Metrics {
 		ConfigReloads: prometheus.NewCounterVec(prometheus.CounterOpts{
 			Name: "mcpgw_config_reloads_total",
 			Help: "Config reloads by result: ok, invalid or audit_failed.",
-		}, []string{"result"}),
+		}, []string{labelResult}),
 		PolicyShadow: prometheus.NewCounterVec(prometheus.CounterOpts{
 			Name: "mcpgw_policy_shadow_decisions_total",
 			Help: "Calls a shadow rule would have decided, by rule, its effect and the effect actually applied.",
@@ -117,7 +118,7 @@ func NewMetrics() *Metrics {
 		AuditExport: prometheus.NewCounterVec(prometheus.CounterOpts{
 			Name: "mcpgw_audit_otlp_records_total",
 			Help: "Audit records sent to the OTLP log sink, by result: exported or dropped.",
-		}, []string{"result"}),
+		}, []string{labelResult}),
 		AuditWritten: prometheus.NewCounter(prometheus.CounterOpts{
 			Name: "mcpgw_audit_records_written_total", Help: "Audit events written.",
 		}),
@@ -159,7 +160,7 @@ func NewMetrics() *Metrics {
 		AuditVerifyRuns: prometheus.NewCounterVec(prometheus.CounterOpts{
 			Name: "mcpgw_audit_verify_runs_total",
 			Help: "Continuous audit chain verification runs by result: ok or failed.",
-		}, []string{"result"}),
+		}, []string{labelResult}),
 		AuditVerifyLastSeq: prometheus.NewGauge(prometheus.GaugeOpts{
 			Name: "mcpgw_audit_verify_last_seq",
 			Help: "Last sequence number verified by the continuous audit watchdog.",
