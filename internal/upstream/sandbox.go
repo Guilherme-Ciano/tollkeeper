@@ -89,10 +89,10 @@ func PlanSandbox(
 
 func appendNonLinuxGaps(missing []string, goos string, wantBwrap, wantPrlimit bool) []string {
 	if wantBwrap {
-		missing = append(missing, fmt.Sprintf("namespace/filesystem sandboxing (bwrap) is unsupported on %s", goos))
+		missing = append(missing, "namespace/filesystem sandboxing (bwrap) is unsupported on "+goos)
 	}
 	if wantPrlimit {
-		missing = append(missing, fmt.Sprintf("rlimit sandboxing (prlimit) is unsupported on %s", goos))
+		missing = append(missing, "rlimit sandboxing (prlimit) is unsupported on "+goos)
 	}
 	return missing
 }

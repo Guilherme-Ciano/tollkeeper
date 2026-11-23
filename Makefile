@@ -13,6 +13,10 @@ BINARIES := tollkeeper:./cmd/tollkeeper devissuer:./cmd/devissuer mcpbench:./cmd
 help: ## Show targets
 	@grep -E '^[a-zA-Z_-]+:.*?## ' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  %-14s %s\n", $$1, $$2}'
 
+.PHONY: install-hooks
+install-hooks: ## Configure git to run .githooks/pre-commit before commits
+	git config core.hooksPath .githooks
+
 .PHONY: fmt
 fmt: ## Format code
 	golangci-lint fmt ./...

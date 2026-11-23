@@ -120,7 +120,11 @@ audit: { enabled: false }
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			cfg, err := Parse([]byte(tc.yaml), func(string) (string, bool) { return "", false }, func() []string { return nil })
+			cfg, err := Parse(
+				[]byte(tc.yaml),
+				func(string) (string, bool) { return "", false },
+				func() []string { return nil },
+			)
 			if err != nil {
 				t.Fatalf("Parse failed: %v", err)
 			}
