@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"path"
+	"slices"
 	"strings"
 	"time"
 
@@ -53,11 +54,19 @@ const (
 	fieldClientID = "client_id"
 )
 
+type StepUpChallenge struct {
+	Scopes      []string
+	ACRValues   []string
+	MaxAge      time.Duration
+	RequireDPoP bool
+}
+
 type Decision struct {
 	Effect       Effect
 	Rule         string
 	Reason       string
 	StepUpScopes []string
+	StepUp       *StepUpChallenge
 	Shadow       *ShadowHit
 }
 
@@ -84,9 +93,14 @@ type rule struct {
 	shadow   bool
 }
 
-type Engine struct {
+type policyScope struct {
 	rules         []rule
 	defaultEffect Effect
+}
+
+type Engine struct {
+	global  policyScope
+	tenants map[string]policyScope
 }
 
 func newEnv() (*cel.Env, error) {
@@ -114,34 +128,36 @@ func referencesArgs(a *cel.Ast) bool {
 	return found
 }
 
-func New(cfg config.Policy) (*Engine, error) {
-	env, err := newEnv()
-	if err != nil {
-		return nil, err
+func parseEffect(s string, fallback Effect) Effect {
+	switch s {
+	case config.EffectAllow:
+		return Allow
+	case config.EffectDeny:
+		return Deny
+	default:
+		return fallback
 	}
-	e := &Engine{defaultEffect: Deny}
-	if cfg.Default == config.EffectAllow {
-		e.defaultEffect = Allow
-	}
+}
+
+func compileRules(env *cel.Env, prefix string, cfgRules []config.Rule) ([]rule, []error) {
+	rules := make([]rule, 0, len(cfgRules))
 	var errs []error
-	for i := range cfg.Rules {
-		rc := cfg.Rules[i]
-		r := rule{cfg: rc, effect: Deny, shadow: rc.Mode == config.RuleModeShadow}
-		if rc.Effect == config.EffectAllow {
-			r.effect = Allow
-		}
+	for i := range cfgRules {
+		rc := cfgRules[i]
+		r := rule{cfg: rc, effect: parseEffect(rc.Effect, Deny), shadow: rc.Mode == config.RuleModeShadow}
 		if strings.TrimSpace(rc.When) != "" {
 			a, iss := env.Compile(rc.When)
 			if iss.Err() != nil {
-				errs = append(errs, fmt.Errorf("%w: policy.rules[%d] %s: %w", ErrCompile, i, rc.Name, iss.Err()))
+				errs = append(errs, fmt.Errorf("%w: %s[%d] %s: %w", ErrCompile, prefix, i, rc.Name, iss.Err()))
 				continue
 			}
 			if a.OutputType() != cel.BoolType {
 				errs = append(
 					errs,
 					fmt.Errorf(
-						"%w: policy.rules[%d] %s: when must return bool, got %s",
+						"%w: %s[%d] %s: when must return bool, got %s",
 						ErrCompile,
+						prefix,
 						i,
 						rc.Name,
 						a.OutputType(),
@@ -151,18 +167,49 @@ func New(cfg config.Policy) (*Engine, error) {
 			}
 			prg, err := env.Program(a, cel.CostLimit(costLimit), cel.InterruptCheckFrequency(100))
 			if err != nil {
-				errs = append(errs, fmt.Errorf("%w: policy.rules[%d] %s: %w", ErrCompile, i, rc.Name, err))
+				errs = append(errs, fmt.Errorf("%w: %s[%d] %s: %w", ErrCompile, prefix, i, rc.Name, err))
 				continue
 			}
 			r.program = prg
 			r.usesArgs = referencesArgs(a)
 		}
-		e.rules = append(e.rules, r)
+		rules = append(rules, r)
+	}
+	return rules, errs
+}
+
+func New(cfg config.Policy) (*Engine, error) {
+	env, err := newEnv()
+	if err != nil {
+		return nil, err
+	}
+	globalDefault := parseEffect(cfg.Default, Deny)
+	globalRules, errs := compileRules(env, "policy.rules", cfg.Rules)
+	e := &Engine{
+		global:  policyScope{rules: globalRules, defaultEffect: globalDefault},
+		tenants: make(map[string]policyScope, len(cfg.Tenants)),
+	}
+	for tenantID, tp := range cfg.Tenants {
+		tRules, tErrs := compileRules(env, "policy.tenants."+tenantID+".rules", tp.Rules)
+		errs = append(errs, tErrs...)
+		e.tenants[tenantID] = policyScope{
+			rules:         tRules,
+			defaultEffect: parseEffect(tp.Default, globalDefault),
+		}
 	}
 	if len(errs) > 0 {
 		return nil, errors.Join(errs...)
 	}
 	return e, nil
+}
+
+func (e *Engine) scopeFor(tenant string) *policyScope {
+	if tenant != "" {
+		if tp, ok := e.tenants[tenant]; ok {
+			return &tp
+		}
+	}
+	return &e.global
 }
 
 func globMatch(globs []string, s string) bool {
@@ -177,6 +224,10 @@ func globMatch(globs []string, s string) bool {
 	return false
 }
 
+func hasAny(have, want []string) bool {
+	return slices.ContainsFunc(want, func(s string) bool { return slices.Contains(have, s) })
+}
+
 func subjectsMatch(s config.Subjects, p identity.Principal) bool {
 	if len(s.Subs) > 0 && !globMatch(s.Subs, p.Subject) {
 		return false
@@ -188,6 +239,15 @@ func subjectsMatch(s config.Subjects, p identity.Principal) bool {
 		if p.Actor == nil || !globMatch(s.Actors, p.Actor.Subject) {
 			return false
 		}
+	}
+	if len(s.Tenants) > 0 && !globMatch(s.Tenants, p.Tenant) {
+		return false
+	}
+	if len(s.RolesAny) > 0 && !hasAny(p.Roles, s.RolesAny) {
+		return false
+	}
+	if len(s.GroupsAny) > 0 && !hasAny(p.Groups, s.GroupsAny) {
+		return false
 	}
 	if len(s.ScopesAny) > 0 && !p.HasAnyScope(s.ScopesAny) {
 		return false
@@ -232,21 +292,26 @@ func activation(in Input, withArgs bool) (map[string]any, error) {
 	if claims == nil {
 		claims = map[string]any{}
 	}
+	authAge := int64(-1)
+	if !in.Principal.AuthTime.IsZero() {
+		authAge = max(int64(in.Now.Sub(in.Principal.AuthTime)/time.Second), 0)
+	}
 	act := map[string]any{
 		"principal": map[string]any{
-			fieldSub:      in.Principal.Subject,
-			fieldClientID: in.Principal.ClientID,
-			"tenant":      in.Principal.Tenant,
-			"delegated":   in.Principal.Actor != nil,
-			"actor":       actorMap(in.Principal.Actor),
-			"scopes":      stringSliceAny(in.Principal.Scopes),
-			"roles":       stringSliceAny(in.Principal.Roles),
-			"groups":      stringSliceAny(in.Principal.Groups),
-			"acr":         in.Principal.ACR,
-			"amr":         stringSliceAny(in.Principal.AMR),
-			"dpop":        in.Principal.DPoPVerified,
-			"jkt":         in.Principal.TokenThumbprint,
-			"claims":      claims,
+			fieldSub:           in.Principal.Subject,
+			fieldClientID:      in.Principal.ClientID,
+			"tenant":           in.Principal.Tenant,
+			"delegated":        in.Principal.Actor != nil,
+			"actor":            actorMap(in.Principal.Actor),
+			"scopes":           stringSliceAny(in.Principal.Scopes),
+			"roles":            stringSliceAny(in.Principal.Roles),
+			"groups":           stringSliceAny(in.Principal.Groups),
+			"acr":              in.Principal.ACR,
+			"amr":              stringSliceAny(in.Principal.AMR),
+			"auth_age_seconds": authAge,
+			"dpop":             in.Principal.DPoPVerified,
+			"jkt":              in.Principal.TokenThumbprint,
+			"claims":           claims,
 		},
 		"tool": map[string]any{
 			"name":     in.Tool.Name,
@@ -307,10 +372,11 @@ func (e *Engine) Decide(ctx context.Context, in Input) Decision {
 	if in.Now.IsZero() {
 		in.Now = time.Now()
 	}
+	sc := e.scopeFor(in.Principal.Tenant)
 	ev := &evaluation{in: in}
 	var shadow *ShadowHit
-	for i := range e.rules {
-		r := &e.rules[i]
+	for i := range sc.rules {
+		r := &sc.rules[i]
 		if !r.applies(in.Kind, in.Tool.Name, in.Principal) {
 			continue
 		}
@@ -326,11 +392,49 @@ func (e *Engine) Decide(ctx context.Context, in Input) Decision {
 			return d
 		}
 	}
-	return Decision{Effect: e.defaultEffect, Rule: "default", Reason: "no rule matched", Shadow: shadow}
+	return Decision{Effect: sc.defaultEffect, Rule: "default", Reason: "no rule matched", Shadow: shadow}
+}
+
+func stepUpDecision(r *rule, p identity.Principal, now time.Time) (Decision, bool) {
+	if r.effect != Allow {
+		return Decision{}, false
+	}
+	od := r.cfg.OnDeny
+	needScopes := len(od.StepUpScopes) > 0 && !p.HasAllScopes(od.StepUpScopes)
+	needACR := len(od.ACRValues) > 0 && !slices.Contains(od.ACRValues, p.ACR)
+	needFresh := od.MaxAge > 0 && (p.AuthTime.IsZero() || now.Sub(p.AuthTime) > od.MaxAge)
+	needDPoP := od.RequireDPoP && !p.DPoPVerified
+	if !needScopes && !needACR && !needFresh && !needDPoP {
+		return Decision{}, false
+	}
+	ch := &StepUpChallenge{RequireDPoP: needDPoP}
+	if needScopes {
+		ch.Scopes = slices.Clone(od.StepUpScopes)
+	}
+	if needACR {
+		ch.ACRValues = slices.Clone(od.ACRValues)
+	}
+	if needFresh {
+		ch.MaxAge = od.MaxAge
+	}
+	reason := "additional scope required"
+	if needACR || needFresh || needDPoP {
+		reason = "stronger authentication required"
+	}
+	return Decision{
+		Effect:       StepUp,
+		Rule:         r.cfg.Name,
+		Reason:       reason,
+		StepUpScopes: ch.Scopes,
+		StepUp:       ch,
+	}, true
 }
 
 func (e *Engine) decideRule(ctx context.Context, r *rule, ev *evaluation) (Decision, bool) {
 	if r.program == nil {
+		if sd, need := stepUpDecision(r, ev.in.Principal, ev.in.Now); need {
+			return sd, true
+		}
 		return Decision{Effect: r.effect, Rule: r.cfg.Name, Reason: reasonMatched}, true
 	}
 	act, err := ev.activation(r.usesArgs)
@@ -342,15 +446,13 @@ func (e *Engine) decideRule(ctx context.Context, r *rule, ev *evaluation) (Decis
 		return Decision{Effect: Deny, Rule: r.cfg.Name, Reason: "policy evaluation failed: " + err.Error()}, true
 	}
 	if ok {
+		if sd, need := stepUpDecision(r, ev.in.Principal, ev.in.Now); need {
+			return sd, true
+		}
 		return Decision{Effect: r.effect, Rule: r.cfg.Name, Reason: reasonMatched}, true
 	}
-	if len(r.cfg.OnDeny.StepUpScopes) > 0 && !ev.in.Principal.HasAllScopes(r.cfg.OnDeny.StepUpScopes) {
-		return Decision{
-			Effect:       StepUp,
-			Rule:         r.cfg.Name,
-			Reason:       "additional scope required",
-			StepUpScopes: r.cfg.OnDeny.StepUpScopes,
-		}, true
+	if sd, need := stepUpDecision(r, ev.in.Principal, ev.in.Now); need {
+		return sd, true
 	}
 	return Decision{}, false
 }
@@ -374,8 +476,9 @@ func (e *Engine) Visible(p identity.Principal, t catalog.Tool) bool {
 }
 
 func (e *Engine) VisibleAs(p identity.Principal, kind catalog.Kind, name string) bool {
-	for i := range e.rules {
-		r := &e.rules[i]
+	sc := e.scopeFor(p.Tenant)
+	for i := range sc.rules {
+		r := &sc.rules[i]
 		if r.shadow || !r.applies(kind, name, p) {
 			continue
 		}
@@ -386,7 +489,7 @@ func (e *Engine) VisibleAs(p identity.Principal, kind catalog.Kind, name string)
 			return false
 		}
 	}
-	return e.defaultEffect == Allow
+	return sc.defaultEffect == Allow
 }
 
 func kindName(k catalog.Kind) string {

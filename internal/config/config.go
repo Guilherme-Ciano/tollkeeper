@@ -190,6 +190,12 @@ type TokenExchange struct {
 }
 
 type Policy struct {
+	Default string                  `koanf:"default"`
+	Rules   []Rule                  `koanf:"rules"`
+	Tenants map[string]TenantPolicy `koanf:"tenants"`
+}
+
+type TenantPolicy struct {
 	Default string `koanf:"default"`
 	Rules   []Rule `koanf:"rules"`
 }
@@ -210,12 +216,18 @@ type Subjects struct {
 	Subs      []string `koanf:"subs"`
 	ClientIDs []string `koanf:"client_ids"`
 	Actors    []string `koanf:"actors"`
+	Tenants   []string `koanf:"tenants"`
+	RolesAny  []string `koanf:"roles_any"`
+	GroupsAny []string `koanf:"groups_any"`
 	ScopesAny []string `koanf:"scopes_any"`
 	ScopesAll []string `koanf:"scopes_all"`
 }
 
 type OnDeny struct {
-	StepUpScopes []string `koanf:"step_up_scopes"`
+	StepUpScopes []string      `koanf:"step_up_scopes"`
+	ACRValues    []string      `koanf:"acr_values"`
+	MaxAge       time.Duration `koanf:"max_age"`
+	RequireDPoP  bool          `koanf:"require_dpop"`
 }
 
 const (
@@ -472,6 +484,8 @@ const (
 	PerSubject     = "subject"
 	PerSubjectTool = "subject_tool"
 	PerClientID    = "client_id"
+	PerTenant      = "tenant"
+	PerTenantTool  = "tenant_tool"
 	PerUpstream    = "upstream"
 	PerTool        = "tool"
 

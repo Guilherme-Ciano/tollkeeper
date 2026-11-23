@@ -20,7 +20,14 @@ type FixtureFile struct {
 type FixturePrincipal struct {
 	Sub      string         `yaml:"sub"`
 	ClientID string         `yaml:"client_id"`
+	Tenant   string         `yaml:"tenant"`
 	Scopes   []string       `yaml:"scopes"`
+	Roles    []string       `yaml:"roles"`
+	Groups   []string       `yaml:"groups"`
+	ACR      string         `yaml:"acr"`
+	AMR      []string       `yaml:"amr"`
+	AuthTime string         `yaml:"auth_time"`
+	DPoP     bool           `yaml:"dpop"`
 	Claims   map[string]any `yaml:"claims"`
 }
 
@@ -64,10 +71,16 @@ func (fx *Fixture) input(naming catalog.Naming) (Input, error) {
 	upstream, original, _ := naming.Split(fx.Tool)
 	in := Input{
 		Principal: identity.Principal{
-			Subject:  fx.Principal.Sub,
-			ClientID: fx.Principal.ClientID,
-			Scopes:   fx.Principal.Scopes,
-			Claims:   fx.Principal.Claims,
+			Subject:      fx.Principal.Sub,
+			ClientID:     fx.Principal.ClientID,
+			Tenant:       fx.Principal.Tenant,
+			Scopes:       fx.Principal.Scopes,
+			Roles:        fx.Principal.Roles,
+			Groups:       fx.Principal.Groups,
+			ACR:          fx.Principal.ACR,
+			AMR:          fx.Principal.AMR,
+			DPoPVerified: fx.Principal.DPoP,
+			Claims:       fx.Principal.Claims,
 		},
 		Method: "tools/call",
 		Tool: catalog.Tool{Name: fx.Tool, Upstream: upstream, Original: original, Annotations: catalog.Annotations{
@@ -75,6 +88,13 @@ func (fx *Fixture) input(naming catalog.Naming) (Input, error) {
 			Idempotent: fx.Annotations.Idempotent, OpenWorld: fx.Annotations.OpenWorld,
 		}},
 		Now: time.Now(),
+	}
+	if fx.Principal.AuthTime != "" {
+		at, err := time.Parse(time.RFC3339, fx.Principal.AuthTime)
+		if err != nil {
+			return in, fmt.Errorf("case %q: auth_time: %w", fx.Name, err)
+		}
+		in.Principal.AuthTime = at
 	}
 	if fx.Now != "" {
 		t, err := time.Parse(time.RFC3339, fx.Now)

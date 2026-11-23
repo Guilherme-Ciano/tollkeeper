@@ -28,10 +28,11 @@ func (e *Engine) Explain(ctx context.Context, in Input) ([]Step, Decision) {
 	if in.Now.IsZero() {
 		in.Now = time.Now()
 	}
+	sc := e.scopeFor(in.Principal.Tenant)
 	ev := &evaluation{in: in}
-	steps := make([]Step, 0, len(e.rules))
-	for i := range e.rules {
-		r := &e.rules[i]
+	steps := make([]Step, 0, len(sc.rules))
+	for i := range sc.rules {
+		r := &sc.rules[i]
 		st := Step{Rule: r.cfg.Name, Shadow: r.shadow}
 		switch {
 		case !globMatch(r.globs(in.Kind), in.Tool.Name):
