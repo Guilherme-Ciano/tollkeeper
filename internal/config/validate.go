@@ -511,6 +511,7 @@ func (c *Config) validateAudit(v *validator) {
 		return
 	}
 	c.validateAuditOTLP(v)
+	c.validateAuditSIEM(v)
 	if c.Audit.Postgres.DSN != "" && (c.Audit.Postgres.Timeout <= 0 || c.Audit.Postgres.Timeout > time.Minute) {
 		v.add("audit.postgres.timeout", "must be within (0, 1m]")
 	}
@@ -735,6 +736,30 @@ func (c *Config) validateAuditOTLP(v *validator) {
 	}
 	if o.Timeout <= 0 || o.Timeout > time.Minute {
 		v.add("audit.otlp.timeout", "must be within (0, 1m]")
+	}
+}
+
+func (c *Config) validateAuditSIEM(v *validator) {
+	s := c.Audit.SIEM
+	if s.Endpoint == "" {
+		return
+	}
+	v.url("audit.siem.endpoint", s.Endpoint, "http", "https")
+	if strings.HasPrefix(s.Endpoint, "http://") && !s.AllowInsecure && !Loopback(hostPort(s.Endpoint)) {
+		v.add("audit.siem.endpoint", "plain http to a non-loopback SIEM requires audit.siem.allow_insecure: true")
+	}
+	v.oneOf("audit.siem.format", s.Format, SIEMFormatJSON, SIEMFormatSplunkHEC, SIEMFormatCEF)
+	if s.Batch < 1 || s.Batch > 10000 {
+		v.add("audit.siem.batch", "must be within [1, 10000]")
+	}
+	if s.Queue < s.Batch || s.Queue > 1_000_000 {
+		v.add("audit.siem.queue", "must be within [batch, 1000000]")
+	}
+	if s.Interval <= 0 || s.Interval > time.Minute {
+		v.add("audit.siem.interval", "must be within (0, 1m]")
+	}
+	if s.Timeout <= 0 || s.Timeout > time.Minute {
+		v.add("audit.siem.timeout", "must be within (0, 1m]")
 	}
 }
 

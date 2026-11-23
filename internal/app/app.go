@@ -30,6 +30,7 @@ import (
 	"github.com/Guilherme-Ciano/tollkeeper/internal/audit/kms"
 	"github.com/Guilherme-Ciano/tollkeeper/internal/audit/otlpsink"
 	"github.com/Guilherme-Ciano/tollkeeper/internal/audit/pgsink"
+	"github.com/Guilherme-Ciano/tollkeeper/internal/audit/siemsink"
 	"github.com/Guilherme-Ciano/tollkeeper/internal/authn"
 	"github.com/Guilherme-Ciano/tollkeeper/internal/catalog"
 	"github.com/Guilherme-Ciano/tollkeeper/internal/config"
@@ -60,6 +61,7 @@ type App struct {
 	anchorer  *anchor.Anchorer
 	watchdog  *audit.Watchdog
 	otlp      *otlpsink.Sink
+	siem      *siemsink.Sink
 	version   string
 	catalog   *catalog.Catalog
 	directory *catalog.Directory
@@ -294,21 +296,7 @@ func (a *App) openAudit(ctx context.Context) error {
 			return err
 		}
 	}
-	if o := a.cfg.Audit.OTLP; o.Endpoint != "" {
-		a.otlp = otlpsink.New(otlpsink.Options{
-			Endpoint: o.Endpoint, Headers: o.Headers, Service: "tollkeeper", Version: a.version,
-			Batch: o.Batch, Queue: o.Queue, Interval: o.Interval,
-			Client: &http.Client{Timeout: o.Timeout, CheckRedirect: upstream.NoRedirects},
-			Hooks: otlpsink.Hooks{
-				Exported: func(n int) { a.metrics.AuditExport.WithLabelValues("exported").Add(float64(n)) },
-				Dropped:  func(n int) { a.metrics.AuditExport.WithLabelValues("dropped").Add(float64(n)) },
-				Failed: func(err error) {
-					a.log.WarnContext(ctx, "otlp audit export failed", slog.String("error", err.Error()))
-				},
-			},
-		})
-		opts.Committed = a.otlp.Committed
-	}
+	a.attachAuditExporters(ctx, &opts)
 	if hasAuditSigner(a.cfg.Audit.Checkpoint) {
 		signer, rawEd, err := buildAuditSigner(ctx, a.cfg.Audit.Checkpoint)
 		if err != nil {
@@ -344,6 +332,48 @@ func (a *App) openAudit(ctx context.Context) error {
 		}
 	}
 	return nil
+}
+
+func (a *App) attachAuditExporters(ctx context.Context, opts *audit.Options) {
+	var commitHooks []func([]audit.Row)
+	if o := a.cfg.Audit.OTLP; o.Endpoint != "" {
+		a.otlp = otlpsink.New(otlpsink.Options{
+			Endpoint: o.Endpoint, Headers: o.Headers, Service: "tollkeeper", Version: a.version,
+			Batch: o.Batch, Queue: o.Queue, Interval: o.Interval,
+			Client: &http.Client{Timeout: o.Timeout, CheckRedirect: upstream.NoRedirects},
+			Hooks: otlpsink.Hooks{
+				Exported: func(n int) { a.metrics.AuditExport.WithLabelValues("exported").Add(float64(n)) },
+				Dropped:  func(n int) { a.metrics.AuditExport.WithLabelValues("dropped").Add(float64(n)) },
+				Failed: func(err error) {
+					a.log.WarnContext(ctx, "otlp audit export failed", slog.String("error", err.Error()))
+				},
+			},
+		})
+		commitHooks = append(commitHooks, a.otlp.Committed)
+	}
+	if s := a.cfg.Audit.SIEM; s.Endpoint != "" {
+		a.siem = siemsink.New(siemsink.Options{
+			Endpoint: s.Endpoint, Format: s.Format, Headers: s.Headers, Index: s.Index, Sourcetype: s.Sourcetype,
+			Service: a.cfg.Telemetry.ServiceName, Version: a.version,
+			Batch: s.Batch, Queue: s.Queue, Interval: s.Interval, Timeout: s.Timeout,
+			BlockPrivateIPs: s.BlockPrivateIPs,
+			Hooks: siemsink.Hooks{
+				Exported: func(n int) { a.metrics.AuditSIEMExport.WithLabelValues("exported").Add(float64(n)) },
+				Dropped:  func(n int) { a.metrics.AuditSIEMExport.WithLabelValues("dropped").Add(float64(n)) },
+				Failed: func(err error) {
+					a.log.WarnContext(ctx, "siem audit export failed", slog.String("error", err.Error()))
+				},
+			},
+		})
+		commitHooks = append(commitHooks, a.siem.Committed)
+	}
+	if len(commitHooks) > 0 {
+		opts.Committed = func(rows []audit.Row) {
+			for _, fn := range commitHooks {
+				fn(rows)
+			}
+		}
+	}
 }
 
 func (a *App) openWatchdog(ctx context.Context, signer audit.CheckpointSigner) error {
@@ -820,6 +850,9 @@ func (a *App) Run(ctx context.Context) error {
 	}
 	if a.otlp != nil {
 		bg.Go(func() { a.otlp.Run(bgCtx) })
+	}
+	if a.siem != nil {
+		bg.Go(func() { a.siem.Run(bgCtx) })
 	}
 	if a.anchorer != nil {
 		bg.Go(func() { a.anchorer.Run(bgCtx) })
