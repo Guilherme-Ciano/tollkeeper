@@ -1,5 +1,19 @@
 # Changelog
 
+## [1.4.0](https://github.com/Guilherme-Ciano/tollkeeper/compare/v1.3.0...v1.4.0) (2026-11-23)
+
+
+### Features
+
+* **cli:** add tollkeeper init command for local and team starter configs ([234a802](https://github.com/Guilherme-Ciano/tollkeeper/commit/234a80205404b726526f47a85e7934fa3eaaedc0))
+
+
+### Documentation
+
+* add 2-minute coding agent quickstart guide for Claude Code, Cursor and Copilot ([4171211](https://github.com/Guilherme-Ciano/tollkeeper/commit/417121118733865246de5e015dccf2ee620cb8d6))
+* remove broken badges, update v1.3 benchmark summary, roadmap, and SECURITY.md ([28a781d](https://github.com/Guilherme-Ciano/tollkeeper/commit/28a781dda717011a50083bc9fa32cc14b03412c8))
+* **site:** add Swiss-industrial interactive landing page and GitHub Pages workflow ([c622052](https://github.com/Guilherme-Ciano/tollkeeper/commit/c622052334d8b5b2d2315ca9c965abbc081b9bce))
+
 ## [1.3.0](https://github.com/Guilherme-Ciano/tollkeeper/compare/v1.2.0...v1.3.0) (2026-11-19)
 
 
