@@ -1,0 +1,25 @@
+server:
+  public_url: "https://mcp.example.com/mcp"
+auth:
+  mode: none
+upstreams:
+  - id: billing
+    transport: streamable_http
+    url: "https://billing.internal/mcp"
+policy:
+  default: deny
+  rules:
+    - name: allow-readonly
+      tools: ["billing__*"]
+      when: "tool.annotations.readOnlyHint == true"
+      effect: allow
+    - name: destructive-requires-fresh-phr-mfa
+      tools: ["billing__*"]
+      when: "tool.annotations.destructiveHint == true"
+      effect: allow
+      on_deny:
+        step_up_scopes: ["billing:approve"]
+        acr_values: ["phr", "urn:mace:incommon:iap:silver"]
+        max_age: 5m
+audit:
+  enabled: false

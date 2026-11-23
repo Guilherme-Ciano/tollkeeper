@@ -1,0 +1,17 @@
+server:
+  public_url: "https://mcp.example.com/mcp"
+auth:
+  mode: none
+upstreams:
+  - id: app
+    transport: streamable_http
+    url: "https://app.internal/mcp"
+policy:
+  default: deny
+  rules:
+    - name: allow-annotated-readonly
+      tools: ["*"]
+      when: "tool.annotations.readOnlyHint && !tool.annotations.destructiveHint"
+      effect: allow
+audit:
+  enabled: false

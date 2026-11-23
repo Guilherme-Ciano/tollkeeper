@@ -1,0 +1,13 @@
+cases:
+  - name: readonly_tool_allowed
+    principal: { sub: alice }
+    tool: app__list_items
+    annotations: { readOnlyHint: true, destructiveHint: false }
+    expect: allow
+    rule: allow-annotated-readonly
+  - name: destructive_tool_denied
+    principal: { sub: alice }
+    tool: app__delete_item
+    annotations: { readOnlyHint: false, destructiveHint: true }
+    expect: deny
+    rule: default

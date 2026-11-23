@@ -1,0 +1,38 @@
+server:
+  public_url: "https://mcp.example.com/mcp"
+auth:
+  mode: none
+upstreams:
+  - id: crm
+    transport: streamable_http
+    url: "https://crm.internal/mcp"
+policy:
+  default: deny
+  tenants:
+    acme:
+      default: deny
+      rules:
+        - name: acme-readers
+          tools: ["crm__get_*", "crm__list_*"]
+          subjects:
+            roles_any: ["crm.reader", "crm.admin"]
+          effect: allow
+    globex:
+      default: deny
+      rules:
+        - name: globex-admins-dpop
+          tools: ["crm__*"]
+          subjects:
+            roles_any: ["crm.admin"]
+          effect: allow
+          on_deny:
+            require_dpop: true
+rate_limits:
+  rules:
+    - name: tenant-quota
+      tools: ["*"]
+      per: tenant
+      rate: 600/m
+      burst: 60
+audit:
+  enabled: false

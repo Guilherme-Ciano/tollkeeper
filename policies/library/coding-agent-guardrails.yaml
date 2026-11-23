@@ -1,0 +1,35 @@
+server:
+  public_url: "https://mcp.example.com/mcp"
+auth:
+  mode: none
+upstreams:
+  - id: fs
+    transport: streamable_http
+    url: "https://fs.internal/mcp"
+policy:
+  default: deny
+  rules:
+    - name: block-sensitive-paths
+      tools: ["fs__*"]
+      when: >-
+        has(args.path) && (
+          string(args.path).contains(".env") ||
+          string(args.path).contains(".git/") ||
+          string(args.path).startsWith("/etc/") ||
+          string(args.path).contains("..")
+        )
+      effect: deny
+    - name: block-deep-agent-chains
+      tools: ["fs__*"]
+      when: "principal.delegated && principal.actor.depth > 1"
+      effect: deny
+    - name: allow-workspace-reads
+      tools: ["fs__read_*", "fs__list_*"]
+      effect: allow
+    - name: allow-workspace-writes-with-scope
+      tools: ["fs__write_*"]
+      subjects:
+        scopes_all: ["repo:write"]
+      effect: allow
+audit:
+  enabled: false

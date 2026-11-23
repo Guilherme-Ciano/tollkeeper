@@ -1,0 +1,26 @@
+cases:
+  - name: acme_reader_allowed
+    principal: { sub: alice, tenant: acme, roles: ["crm.reader"] }
+    tool: crm__get_account
+    expect: allow
+    rule: acme-readers
+  - name: acme_reader_cannot_delete
+    principal: { sub: alice, tenant: acme, roles: ["crm.reader"] }
+    tool: crm__delete_account
+    expect: deny
+    rule: default
+  - name: globex_admin_without_dpop_requires_stepup
+    principal: { sub: bob, tenant: globex, roles: ["crm.admin"], dpop: false }
+    tool: crm__delete_account
+    expect: step_up
+    rule: globex-admins-dpop
+  - name: globex_admin_with_dpop_allowed
+    principal: { sub: bob, tenant: globex, roles: ["crm.admin"], dpop: true }
+    tool: crm__delete_account
+    expect: allow
+    rule: globex-admins-dpop
+  - name: unknown_tenant_denied
+    principal: { sub: eve, tenant: unknown, roles: ["crm.admin"] }
+    tool: crm__get_account
+    expect: deny
+    rule: default
