@@ -1,0 +1,411 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>tollkeeper — Admin Console</title>
+  <link rel="stylesheet" href="/ui/styles.css">
+</head>
+<body>
+  <div class="shell">
+    <aside class="sidebar">
+      <div class="brand">
+        <div class="brand-mark">TK</div>
+        <div>
+          <div class="brand-name">tollkeeper</div>
+          <div class="brand-sub" id="sidebar-version">admin console</div>
+        </div>
+      </div>
+
+      <nav class="nav" aria-label="Primary">
+        <button class="nav-item active" data-view="overview" type="button">
+          <span class="nav-code">01</span>
+          <span>Overview &amp; Upstreams</span>
+        </button>
+        <button class="nav-item" data-view="policy" type="button">
+          <span class="nav-code">02</span>
+          <span>Policy Editor</span>
+        </button>
+        <button class="nav-item" data-view="pins" type="button">
+          <span class="nav-code">03</span>
+          <span>Tool Pinning Diffs</span>
+          <span class="nav-pill hidden" id="nav-pin-badge">0</span>
+        </button>
+        <button class="nav-item" data-view="simulator" type="button">
+          <span class="nav-code">04</span>
+          <span>Call Simulator</span>
+        </button>
+        <button class="nav-item" data-view="audit" type="button">
+          <span class="nav-code">05</span>
+          <span>Audit Explorer</span>
+        </button>
+      </nav>
+
+      <div class="sidebar-footer">
+        <div class="meta-row">
+          <span>Chain ID</span>
+          <code id="meta-chain">—</code>
+        </div>
+        <div class="meta-row">
+          <span>Config SHA</span>
+          <code id="meta-digest">—</code>
+        </div>
+        <div class="sidebar-actions">
+          <button class="btn btn-ghost btn-sm" id="btn-theme" type="button">Theme</button>
+          <button class="btn btn-ghost btn-sm" id="btn-auth" type="button">Token</button>
+        </div>
+      </div>
+    </aside>
+
+    <div class="main-col">
+      <header class="topbar">
+        <div class="topbar-left">
+          <h1 id="view-title">Overview &amp; Upstreams</h1>
+          <span class="status-pill" id="global-status">Connecting…</span>
+        </div>
+        <div class="topbar-right">
+          <label class="toggle-inline">
+            <input type="checkbox" id="auto-refresh" checked>
+            <span>Auto-refresh (10s)</span>
+          </label>
+          <button class="btn btn-secondary btn-sm" id="btn-refresh" type="button">Refresh</button>
+        </div>
+      </header>
+
+      <div class="banner banner-error hidden" id="global-error"></div>
+
+      <main class="content">
+        <section class="view active" id="view-overview">
+          <div class="kpi-grid" id="overview-kpis"></div>
+
+          <div class="panel">
+            <div class="panel-header">
+              <div>
+                <h2>Upstream Diagnostics</h2>
+                <p class="muted">Live readiness, circuit breaker state, in-flight calls, and rolling p50/p95 latency.</p>
+              </div>
+              <span class="badge" id="upstreams-count">0 upstreams</span>
+            </div>
+            <div class="table-wrap">
+              <table class="data-table">
+                <thead>
+                  <tr>
+                    <th>Upstream</th>
+                    <th>Transport</th>
+                    <th>Status</th>
+                    <th>Breaker</th>
+                    <th>Synced</th>
+                    <th class="num">Tools</th>
+                    <th class="num">In-flight</th>
+                    <th class="num">p50 / p95</th>
+                    <th class="num">Errors</th>
+                    <th>Last Error</th>
+                  </tr>
+                </thead>
+                <tbody id="upstreams-tbody">
+                  <tr><td colspan="10" class="empty">Loading upstream diagnostics…</td></tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </section>
+
+        <section class="view" id="view-policy">
+          <div class="toolbar">
+            <div class="toolbar-group">
+              <label class="field-inline">
+                <span>Scope</span>
+                <select id="policy-scope"></select>
+              </label>
+              <label class="field-inline">
+                <span>Default</span>
+                <select id="policy-default">
+                  <option value="deny">deny</option>
+                  <option value="allow">allow</option>
+                </select>
+              </label>
+              <button class="btn btn-secondary btn-sm" id="btn-add-tenant" type="button">+ Tenant Scope</button>
+              <button class="btn btn-secondary btn-sm" id="btn-add-rule" type="button">+ Add Rule</button>
+            </div>
+            <div class="toolbar-group">
+              <button class="btn btn-primary btn-sm" id="btn-validate-policy" type="button">Validate CEL</button>
+              <button class="btn btn-secondary btn-sm" id="btn-send-to-sim" type="button">Test Draft in Simulator</button>
+              <button class="btn btn-ghost btn-sm" id="btn-copy-yaml" type="button">Copy YAML</button>
+              <button class="btn btn-ghost btn-sm" id="btn-download-yaml" type="button">Export YAML</button>
+              <button class="btn btn-ghost btn-sm" id="btn-reload-policy" type="button">Reset Live</button>
+            </div>
+          </div>
+
+          <div class="banner hidden" id="policy-validation-result"></div>
+
+          <div class="split-2">
+            <div class="panel">
+              <div class="panel-header">
+                <div>
+                  <h2>Visual Rule Builder</h2>
+                  <p class="muted">First-match order. Edit fields below or edit YAML directly on the right.</p>
+                </div>
+                <span class="badge" id="policy-rule-count">0 rules</span>
+              </div>
+              <div class="rule-list" id="policy-rules-list"></div>
+            </div>
+
+            <div class="panel">
+              <div class="panel-header">
+                <div>
+                  <h2>Policy YAML</h2>
+                  <p class="muted">Save to your config file and send <code>SIGHUP</code> to hot-reload atomically.</p>
+                </div>
+                <button class="btn btn-ghost btn-sm" id="btn-sync-from-yaml" type="button">Sync Visual &larr; YAML</button>
+              </div>
+              <textarea id="policy-yaml-editor" class="code-editor" spellcheck="false" aria-label="Policy YAML"></textarea>
+            </div>
+          </div>
+        </section>
+
+        <section class="view" id="view-pins">
+          <div class="toolbar">
+            <div class="toolbar-group">
+              <span class="badge" id="pins-mode-badge">mode: —</span>
+              <div class="segmented" id="pins-filter">
+                <button class="seg active" data-filter="all" type="button">All</button>
+                <button class="seg" data-filter="pending" type="button">Pending</button>
+                <button class="seg" data-filter="changed" type="button">Changed</button>
+                <button class="seg" data-filter="new" type="button">New</button>
+                <button class="seg" data-filter="approved" type="button">Approved</button>
+              </div>
+            </div>
+            <div class="toolbar-group">
+              <input class="input input-sm" id="pins-search" type="search" placeholder="Filter tool name…">
+            </div>
+          </div>
+
+          <div class="split-pins">
+            <div class="panel">
+              <div class="panel-header">
+                <h2>Catalog Tools</h2>
+                <span class="badge" id="pins-count">0</span>
+              </div>
+              <div class="pin-list" id="pins-list"></div>
+            </div>
+
+            <div class="panel">
+              <div class="panel-header">
+                <div>
+                  <h2 id="pin-detail-title">Select a tool</h2>
+                  <p class="muted" id="pin-detail-sub">Inspect approved vs. current canonical JSON definition and SHA-256 pins.</p>
+                </div>
+                <button class="btn btn-secondary btn-sm hidden" id="btn-copy-approve" type="button">Copy Approve CLI</button>
+              </div>
+              <div id="pin-detail-body" class="pin-detail-body">
+                <p class="empty">Choose any tool on the left to inspect its pin hash and definition diff.</p>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <section class="view" id="view-simulator">
+          <div class="toolbar">
+            <div class="toolbar-group">
+              <span class="muted">Presets:</span>
+              <button class="btn btn-ghost btn-sm" data-preset="reader" type="button">Read-Only</button>
+              <button class="btn btn-ghost btn-sm" data-preset="writer" type="button">Scoped Writer</button>
+              <button class="btn btn-ghost btn-sm" data-preset="stepup" type="button">Stale Auth (Step-Up)</button>
+              <button class="btn btn-ghost btn-sm" data-preset="delegated" type="button">Delegated Agent</button>
+            </div>
+            <div class="toolbar-group">
+              <label class="toggle-inline">
+                <input type="checkbox" id="sim-use-draft">
+                <span>Evaluate Draft YAML from Policy Editor</span>
+              </label>
+              <button class="btn btn-primary btn-sm" id="btn-run-sim" type="button">Run Simulation</button>
+            </div>
+          </div>
+
+          <div class="split-2">
+            <div class="panel">
+              <div class="panel-header">
+                <div>
+                  <h2>Request &amp; Principal</h2>
+                  <p class="muted">Evaluated in-memory against CEL policy and pinning state. Upstreams are never called.</p>
+                </div>
+              </div>
+              <form id="sim-form" class="form-grid">
+                <label class="field">
+                  <span>Kind</span>
+                  <select id="sim-kind">
+                    <option value="tool">tool</option>
+                    <option value="prompt">prompt</option>
+                    <option value="resource">resource</option>
+                    <option value="template">template</option>
+                  </select>
+                </label>
+                <label class="field">
+                  <span>Target Name / URI</span>
+                  <input class="input" id="sim-name" list="catalog-tools-datalist" placeholder="e.g. files__delete_file" required>
+                  <datalist id="catalog-tools-datalist"></datalist>
+                </label>
+                <label class="field">
+                  <span>Subject (sub)</span>
+                  <input class="input" id="sim-sub" value="alice" placeholder="alice">
+                </label>
+                <label class="field">
+                  <span>Tenant</span>
+                  <input class="input" id="sim-tenant" placeholder="acme">
+                </label>
+                <label class="field">
+                  <span>Client ID</span>
+                  <input class="input" id="sim-client-id" value="coding-agent">
+                </label>
+                <label class="field">
+                  <span>Actor (RFC 8693 act)</span>
+                  <input class="input" id="sim-actor" placeholder="optional actor subject">
+                </label>
+                <label class="field field-full">
+                  <span>Scopes (comma or space separated)</span>
+                  <input class="input" id="sim-scopes" value="mcp:tools">
+                </label>
+                <label class="field">
+                  <span>Roles (comma separated)</span>
+                  <input class="input" id="sim-roles" placeholder="analyst, admin">
+                </label>
+                <label class="field">
+                  <span>Groups (comma separated)</span>
+                  <input class="input" id="sim-groups" placeholder="engineering">
+                </label>
+                <label class="field">
+                  <span>ACR</span>
+                  <input class="input" id="sim-acr" placeholder="phr">
+                </label>
+                <label class="field">
+                  <span>Auth Age (seconds)</span>
+                  <input class="input" id="sim-auth-age" type="number" min="0" value="60">
+                </label>
+                <div class="field field-full checkbox-row">
+                  <label class="toggle-inline"><input type="checkbox" id="sim-dpop"><span>DPoP Verified</span></label>
+                  <label class="toggle-inline"><input type="checkbox" id="sim-ann-readonly"><span>Override readOnlyHint</span></label>
+                  <label class="toggle-inline"><input type="checkbox" id="sim-ann-destructive"><span>Override destructiveHint</span></label>
+                </div>
+                <label class="field field-full">
+                  <span>Arguments (JSON)</span>
+                  <textarea id="sim-args" class="code-editor code-editor-sm" spellcheck="false">{}</textarea>
+                </label>
+              </form>
+            </div>
+
+            <div class="panel">
+              <div class="panel-header">
+                <div>
+                  <h2>Evaluation Result &amp; Trace</h2>
+                  <p class="muted">Real output from <code>policy.Explain</code>, <code>Visible</code>, and pin guard.</p>
+                </div>
+              </div>
+              <div id="sim-result" class="sim-result">
+                <p class="empty">Configure a call on the left and click <strong>Run Simulation</strong>.</p>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <section class="view" id="view-audit">
+          <div class="banner hidden" id="audit-watchdog-banner"></div>
+
+          <div class="panel">
+            <div class="panel-header">
+              <div>
+                <h2>Audit Event Explorer</h2>
+                <p class="muted" id="audit-source-meta">Tail of local hash-chained audit.jsonl</p>
+              </div>
+              <span class="badge" id="audit-count">0 events</span>
+            </div>
+
+            <form class="filter-bar" id="audit-filter-form">
+              <select class="input input-sm" id="af-decision" aria-label="Decision">
+                <option value="">All decisions</option>
+                <option value="allow">allow</option>
+                <option value="deny">deny</option>
+                <option value="step_up">step_up</option>
+                <option value="rate_limited">rate_limited</option>
+                <option value="rejected">rejected</option>
+              </select>
+              <select class="input input-sm" id="af-phase" aria-label="Phase">
+                <option value="">All phases</option>
+                <option value="intent">intent</option>
+                <option value="outcome">outcome</option>
+                <option value="decision">decision</option>
+                <option value="config">config</option>
+              </select>
+              <select class="input input-sm" id="af-kind" aria-label="Kind">
+                <option value="">All kinds</option>
+                <option value="event">event</option>
+                <option value="checkpoint">checkpoint</option>
+                <option value="anchor">anchor</option>
+                <option value="key_rotation">key_rotation</option>
+              </select>
+              <input class="input input-sm" id="af-tenant" type="search" placeholder="tenant">
+              <input class="input input-sm" id="af-sub" type="search" placeholder="sub">
+              <input class="input input-sm" id="af-tool" type="search" placeholder="tool">
+              <input class="input input-sm" id="af-q" type="search" placeholder="full-text search…">
+              <select class="input input-sm" id="af-limit" aria-label="Limit">
+                <option value="50">50</option>
+                <option value="100" selected>100</option>
+                <option value="250">250</option>
+                <option value="500">500</option>
+              </select>
+              <button class="btn btn-primary btn-sm" type="submit">Apply</button>
+              <button class="btn btn-ghost btn-sm" id="btn-audit-clear" type="button">Clear</button>
+            </form>
+
+            <div class="table-wrap">
+              <table class="data-table">
+                <thead>
+                  <tr>
+                    <th class="num">Seq</th>
+                    <th>Timestamp (UTC)</th>
+                    <th>Kind</th>
+                    <th>Decision</th>
+                    <th>Subject / Tenant</th>
+                    <th>Tool / Method</th>
+                    <th>Rule</th>
+                    <th class="num">Latency</th>
+                    <th>Hash</th>
+                  </tr>
+                </thead>
+                <tbody id="audit-tbody">
+                  <tr><td colspan="9" class="empty">Loading audit records…</td></tr>
+                </tbody>
+              </table>
+            </div>
+
+            <div class="audit-drawer hidden" id="audit-drawer">
+              <div class="panel-header">
+                <h3 id="audit-drawer-title">Record Detail</h3>
+                <button class="btn btn-ghost btn-sm" id="btn-close-drawer" type="button">Close</button>
+              </div>
+              <pre class="code-block" id="audit-drawer-json"></pre>
+            </div>
+          </div>
+        </section>
+      </main>
+    </div>
+  </div>
+
+  <div class="modal-backdrop hidden" id="auth-modal">
+    <div class="modal" role="dialog" aria-modal="true" aria-labelledby="auth-modal-title">
+      <h2 id="auth-modal-title">Admin Report Token</h2>
+      <p class="muted">This gateway requires a Bearer token (<code>pinning.report_token</code>) for admin API access. The token is stored in session memory only.</p>
+      <form id="auth-modal-form" class="modal-form">
+        <input class="input" id="auth-token-input" type="password" placeholder="Paste Bearer token…" autocomplete="off">
+        <div class="modal-actions">
+          <button class="btn btn-ghost btn-sm" id="btn-auth-clear" type="button">Clear</button>
+          <button class="btn btn-ghost btn-sm" id="btn-auth-cancel" type="button">Cancel</button>
+          <button class="btn btn-primary btn-sm" type="submit">Authenticate</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <div class="toast hidden" id="toast"></div>
+  <script src="/ui/app.js"></script>
+</body>
+</html>
