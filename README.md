@@ -245,7 +245,9 @@ A rule applies to tools, prompts or resources only through its own `tools`, `pro
 | `auth.mode` | `jwt` | `introspection` checks opaque tokens at an RFC 7662 endpoint (`auth.introspection.url`, `client_id`, `client_secret`, `audiences`, optional `issuer`); results are cached by token hash for `cache_ttl` (1m), never past `exp` ([example](examples/configs/keycloak-introspection.yaml)). `none` exists for local experiments and logs a warning |
 | `auth.jwt.algorithms` | RS256, ES256, EdDSA | HS* and `none` are never accepted |
 | `auth.jwt.types` | any | e.g. `["at+jwt"]` to accept only RFC 9068 access tokens |
-| `upstreams[].transport` | | `stdio` (explicit env allowlist, process-group kill) or `streamable_http` |
+| `upstreams[].transport` | | `stdio` (explicit env allowlist, process-group kill, Linux `Pdeathsig`) or `streamable_http` |
+| `upstreams[].block_private_ips` | `false` | Block loopback, RFC 1918, link-local/IMDS (`169.254.169.254`) and reserved IPs at `Dialer.Control` before `connect()` (DNS-rebinding proof) |
+| `upstreams[].sandbox` | `mode: off` | Optional stdio subprocess isolation (`off`, `warn`, `enforce`) with `workdir`, Linux `rlimits` (`prlimit`) and namespace/filesystem isolation (`bwrap`: `network: none`, `read_only_paths`, `read_write_paths`); `enforce` fails closed ([ADR 0011](docs/adr/0011-stdio-sandboxing.md)) |
 | `upstreams[].auth.type` | `none` | `bearer` or `client_credentials` with RFC 8707 `resource` |
 | `rate_limits.rules[].per` | | `subject`, `subject_tool`, `client_id`, `upstream`, `tool`, `global` |
 | `rate_limits.store` | `memory` | `redis` shares limits across replicas; set `rate_limits.redis.addrs`, `key_prefix`, `timeout` (50 ms) and `on_error` (`local` fallback or `deny`) |
