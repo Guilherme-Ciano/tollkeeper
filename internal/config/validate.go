@@ -140,9 +140,19 @@ func (c *Config) validateServer(v *validator) {
 
 func (c *Config) validateAuth(v *validator) {
 	v.oneOf("auth.mode", c.Auth.Mode, AuthModeJWT, AuthModeIntrospection, AuthModeNone)
+	v.oneOf(
+		"auth.provider",
+		c.Auth.Provider,
+		AuthProviderGeneric,
+		AuthProviderEntra,
+		AuthProviderOkta,
+		AuthProviderKeycloak,
+		AuthProviderAuth0,
+	)
 	if c.Auth.Mode == AuthModeNone {
 		return
 	}
+	c.validateDPoP(v)
 	v.url("auth.resource", c.Auth.Resource, "http", "https")
 	if len(c.Auth.AuthorizationServers) == 0 {
 		v.add("auth.authorization_servers", "at least one authorization server is required")
@@ -155,9 +165,13 @@ func (c *Config) validateAuth(v *validator) {
 		return
 	}
 	v.url("auth.jwt.issuer", c.Auth.JWT.Issuer, "http", "https")
-	v.url("auth.jwt.jwks_url", c.Auth.JWT.JWKSURL, "http", "https")
-	if strings.HasPrefix(c.Auth.JWT.JWKSURL, "http://") && !c.Auth.JWT.AllowInsecure {
-		v.add("auth.jwt.jwks_url", "plain http requires auth.jwt.allow_insecure_jwks: true")
+	if c.Auth.JWT.JWKSURL != "" {
+		v.url("auth.jwt.jwks_url", c.Auth.JWT.JWKSURL, "http", "https")
+		if strings.HasPrefix(c.Auth.JWT.JWKSURL, "http://") && !c.Auth.JWT.AllowInsecure {
+			v.add("auth.jwt.jwks_url", "plain http requires auth.jwt.allow_insecure_jwks: true")
+		}
+	} else if strings.HasPrefix(c.Auth.JWT.Issuer, "http://") && !c.Auth.JWT.AllowInsecure {
+		v.add("auth.jwt.issuer", "plain http OIDC discovery requires auth.jwt.allow_insecure_jwks: true")
 	}
 	if len(c.Auth.JWT.Audiences) == 0 {
 		v.add("auth.jwt.audiences", "at least one audience is required (RFC 8707)")
@@ -186,6 +200,38 @@ func (c *Config) validateAuth(v *validator) {
 	}
 	if c.Auth.JWT.ClockSkew < 0 || c.Auth.JWT.ClockSkew > 5*time.Minute {
 		v.add("auth.jwt.clock_skew", "must be within [0, 5m]")
+	}
+}
+
+func (c *Config) validateDPoP(v *validator) {
+	d := c.Auth.DPoP
+	v.oneOf("auth.dpop.mode", d.Mode, DPoPModeOff, DPoPModeOptional, DPoPModeRequired)
+	if d.Mode == DPoPModeOff {
+		return
+	}
+	if len(d.Algorithms) == 0 {
+		v.add("auth.dpop.algorithms", "at least one asymmetric algorithm is required")
+	}
+	for i, a := range d.Algorithms {
+		v.oneOf(
+			fmt.Sprintf("auth.dpop.algorithms[%d]", i),
+			a,
+			"ES256",
+			"ES384",
+			"EdDSA",
+			"RS256",
+			"RS384",
+			"RS512",
+			"PS256",
+			"PS384",
+			"PS512",
+		)
+	}
+	if d.MaxAge <= 0 || d.MaxAge > 10*time.Minute {
+		v.add("auth.dpop.max_age", "must be within (0, 10m]")
+	}
+	if d.NonceRequired && (d.NonceTTL <= 0 || d.NonceTTL > time.Hour) {
+		v.add("auth.dpop.nonce_ttl", "must be within (0, 1h]")
 	}
 }
 

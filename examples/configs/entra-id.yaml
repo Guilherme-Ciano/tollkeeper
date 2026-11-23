@@ -1,0 +1,53 @@
+server:
+  listen: ":8080"
+  admin_listen: "127.0.0.1:9090"
+  public_url: "https://mcp.corp.example.com/mcp"
+
+auth:
+  mode: jwt
+  provider: entra
+  resource: "https://mcp.corp.example.com/mcp"
+  authorization_servers:
+    - "https://login.microsoftonline.com/00000000-0000-0000-0000-000000000000/v2.0"
+  scopes_supported: ["mcp:read", "mcp:write"]
+  dpop:
+    mode: optional
+    algorithms: ["ES256", "EdDSA", "RS256"]
+    max_age: 60s
+    nonce_required: true
+    nonce_ttl: 5m
+  jwt:
+    issuer: "https://login.microsoftonline.com/00000000-0000-0000-0000-000000000000/v2.0"
+    audiences:
+      - "https://mcp.corp.example.com/mcp"
+    algorithms: ["RS256", "ES256"]
+
+upstreams:
+  - id: sharepoint
+    transport: streamable_http
+    url: "https://sharepoint-mcp.internal/mcp"
+    block_private_ips: false
+    auth:
+      type: token_exchange
+      token_url: "https://login.microsoftonline.com/00000000-0000-0000-0000-000000000000/oauth2/v2.0/token"
+      client_id: "tollkeeper-gateway"
+      client_secret: "${ENTRA_CLIENT_SECRET}"
+      resource: "https://sharepoint-mcp.internal/mcp"
+      scopes: ["Files.Read"]
+      token_exchange:
+        intersect_caller_scopes: true
+        max_delegation_depth: 1
+
+policy:
+  default: deny
+  rules:
+    - name: entra-operators
+      tools: ["sharepoint__*"]
+      when: 'principal.tenant == "00000000-0000-0000-0000-000000000000" && "MCP.Operator" in principal.roles'
+      effect: allow
+
+audit:
+  enabled: true
+  path: "/var/lib/tollkeeper/audit.jsonl"
+  chain_id: "entra-prod"
+  fsync: true

@@ -195,9 +195,9 @@ func subjectsMatch(s config.Subjects, p identity.Principal) bool {
 	return p.HasAllScopes(s.ScopesAll)
 }
 
-func scopesList(p identity.Principal) []any {
-	out := make([]any, len(p.Scopes))
-	for i, s := range p.Scopes {
+func stringSliceAny(in []string) []any {
+	out := make([]any, len(in))
+	for i, s := range in {
 		out[i] = s
 	}
 	return out
@@ -239,7 +239,13 @@ func activation(in Input, withArgs bool) (map[string]any, error) {
 			"tenant":      in.Principal.Tenant,
 			"delegated":   in.Principal.Actor != nil,
 			"actor":       actorMap(in.Principal.Actor),
-			"scopes":      scopesList(in.Principal),
+			"scopes":      stringSliceAny(in.Principal.Scopes),
+			"roles":       stringSliceAny(in.Principal.Roles),
+			"groups":      stringSliceAny(in.Principal.Groups),
+			"acr":         in.Principal.ACR,
+			"amr":         stringSliceAny(in.Principal.AMR),
+			"dpop":        in.Principal.DPoPVerified,
+			"jkt":         in.Principal.TokenThumbprint,
 			"claims":      claims,
 		},
 		"tool": map[string]any{

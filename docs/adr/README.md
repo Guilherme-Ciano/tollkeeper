@@ -17,6 +17,7 @@ Each record states the context, the decision, the alternatives that lost and wha
 | [0011](0011-stdio-sandboxing.md) | Stdio upstream sandboxing with fail-closed enforcement | Accepted |
 | [0012](0012-audit-key-rotation-and-kms.md) | Pure-Go KMS checkpoint signing and zero-downtime audit key rotation | Accepted |
 | [0013](0013-oauth-token-exchange-and-delegation.md) | OAuth 2.0 Token Exchange (RFC 8693) and controlled delegation | Accepted |
+| [0014](0014-dpop-and-enterprise-idp.md) | Sender-constrained tokens with DPoP (RFC 9449) and enterprise IdP integration | Accepted |
 
 
 The threat model that ties these together is in [../threat-model.md](../threat-model.md).

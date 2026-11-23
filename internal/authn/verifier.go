@@ -38,6 +38,7 @@ type VerifierOptions struct {
 	Audiences  []string
 	Algorithms []string
 	Leeway     time.Duration
+	Claims     ClaimMapping
 	Now        func() time.Time
 }
 
@@ -45,6 +46,7 @@ type Verifier struct {
 	keys   KeySource
 	parser *jwt.Parser
 	types  []string
+	claims ClaimMapping
 }
 
 func NewVerifier(keys KeySource, o VerifierOptions) *Verifier {
@@ -60,7 +62,12 @@ func NewVerifier(keys KeySource, o VerifierOptions) *Verifier {
 	if o.Now != nil {
 		opts = append(opts, jwt.WithTimeFunc(o.Now))
 	}
-	return &Verifier{keys: keys, parser: jwt.NewParser(opts...), types: o.Types}
+	return &Verifier{
+		keys:   keys,
+		parser: jwt.NewParser(opts...),
+		types:  o.Types,
+		claims: ResolveClaimMapping("", o.Claims),
+	}
 }
 
 func Fingerprint(raw string) string {
@@ -96,19 +103,24 @@ func (v *Verifier) Verify(ctx context.Context, raw string) (identity.Principal, 
 		return identity.Principal{}, fmt.Errorf("%w: missing sub", ErrInvalidToken)
 	}
 	iss := claimString(claims, "iss")
-	clientID := claimString(claims, "client_id")
-	if clientID == "" {
-		clientID = claimString(claims, "azp")
-	}
+	clientID := extractStringClaim(claims, v.claims.ClientIDClaim, "client_id", "azp", "appid", "cid")
+	tenant := extractStringClaim(claims, v.claims.TenantClaim, "tenant_id", "tid", "org_id")
+	tokenScopes := scopesWithMapping(claims, v.claims.ScopeClaim)
 	return identity.Principal{
-		Subject:     sub,
-		ClientID:    clientID,
-		Issuer:      iss,
-		Tenant:      extractTenant(claims),
-		Actor:       parseActor(claims["act"], 0),
-		Scopes:      scopes(claims),
-		Claims:      claims,
-		Fingerprint: Fingerprint(raw),
+		Subject:         sub,
+		ClientID:        clientID,
+		Issuer:          iss,
+		Tenant:          tenant,
+		Actor:           parseActor(claims["act"], 0),
+		Scopes:          tokenScopes,
+		Roles:           extractStringSliceClaim(claims, v.claims.RolesClaim),
+		Groups:          extractStringSliceClaim(claims, v.claims.GroupsClaim),
+		ACR:             claimString(claims, "acr"),
+		AMR:             extractStringSliceClaim(claims, "amr"),
+		AuthTime:        extractAuthTime(claims),
+		TokenThumbprint: extractConfirmationJKT(claims),
+		Claims:          claims,
+		Fingerprint:     Fingerprint(raw),
 	}, nil
 }
 
@@ -146,13 +158,13 @@ func parseActor(raw any, depth int) *identity.Actor {
 	}
 }
 
-func extractTenant(claims map[string]any) string {
-	for _, key := range []string{"tenant_id", "tid", "org_id"} {
-		if s, ok := claims[key].(string); ok && s != "" {
-			return s
+func scopesWithMapping(c jwt.MapClaims, claimPath string) []string {
+	if claimPath != "" {
+		if got := extractStringSliceClaim(c, claimPath); len(got) > 0 {
+			return got
 		}
 	}
-	return ""
+	return scopes(c)
 }
 
 func (v *Verifier) typeAllowed(t *jwt.Token) bool {

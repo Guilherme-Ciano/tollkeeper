@@ -105,7 +105,15 @@ func Build(ctx context.Context, cfg config.Config, log *slog.Logger, version str
 	if err != nil {
 		return nil, err
 	}
-	verifier := a.verifier(ctx, cfg)
+	var verifier gateway.TokenVerifier
+	if cfg.Auth.Mode == config.AuthModeNone {
+		log.WarnContext(ctx, "authentication disabled: every caller is anonymous")
+	} else {
+		verifier, err = a.verifier(ctx, cfg)
+		if err != nil {
+			return nil, err
+		}
+	}
 	for _, w := range cfg.Warnings() {
 		log.WarnContext(ctx, "config warning", slog.String("detail", w))
 	}
@@ -123,8 +131,47 @@ func Build(ctx context.Context, cfg config.Config, log *slog.Logger, version str
 	if a.pins != nil {
 		pins = a.pins
 	}
+	callers, err := a.buildUpstreams(ctx, cfg, log, version)
+	if err != nil {
+		return nil, err
+	}
+	stateKey, err := readStateKey(cfg.Server.RequestStateKey)
+	if err != nil {
+		return nil, err
+	}
+	if stateKey == nil {
+		log.InfoContext(ctx, "request state key is ephemeral",
+			slog.String("hint", "set server.request_state_key_file when running several replicas"))
+	}
+	a.gateway = gateway.New(gateway.Deps{
+		Config:     cfg,
+		Verifier:   verifier,
+		DPoP:       buildDPoP(cfg, stateKey),
+		Policy:     pol,
+		Limiter:    lim,
+		Audit:      auditor,
+		Catalog:    a.catalog,
+		Directory:  a.directory,
+		Upstreams:  callers,
+		Metrics:    a.metrics,
+		Tracer:     tr.Tracer(),
+		Propagator: tr.Propagator,
+		Log:        log,
+		Version:    version,
+		Pins:       pins,
+		StateKey:   stateKey,
+	})
+	return a, nil
+}
+
+func (a *App) buildUpstreams(
+	ctx context.Context,
+	cfg config.Config,
+	log *slog.Logger,
+	version string,
+) (map[string]gateway.Caller, error) {
 	naming := cfg.Naming()
-	callers := map[string]gateway.Caller{}
+	callers := make(map[string]gateway.Caller, len(cfg.Upstreams))
 	hooks := upstream.Hooks{
 		Up: func(id string, up bool) {
 			v := 0.0
@@ -146,32 +193,22 @@ func Build(ctx context.Context, cfg config.Config, log *slog.Logger, version str
 		a.upstreams = append(a.upstreams, u)
 		callers[uc.ID] = u
 	}
-	stateKey, err := readStateKey(cfg.Server.RequestStateKey)
-	if err != nil {
-		return nil, err
+	return callers, nil
+}
+
+func buildDPoP(cfg config.Config, stateKey []byte) *authn.DPoPVerifier {
+	if cfg.Auth.Mode == config.AuthModeNone || cfg.Auth.DPoP.Mode == "" || cfg.Auth.DPoP.Mode == config.DPoPModeOff {
+		return nil
 	}
-	if stateKey == nil {
-		log.InfoContext(ctx, "request state key is ephemeral",
-			slog.String("hint", "set server.request_state_key_file when running several replicas"))
-	}
-	a.gateway = gateway.New(gateway.Deps{
-		Config:     cfg,
-		Verifier:   verifier,
-		Policy:     pol,
-		Limiter:    lim,
-		Audit:      auditor,
-		Catalog:    a.catalog,
-		Directory:  a.directory,
-		Upstreams:  callers,
-		Metrics:    a.metrics,
-		Tracer:     tr.Tracer(),
-		Propagator: tr.Propagator,
-		Log:        log,
-		Version:    version,
-		Pins:       pins,
-		StateKey:   stateKey,
+	return authn.NewDPoPVerifier(authn.DPoPOptions{
+		Algorithms:    cfg.Auth.DPoP.Algorithms,
+		MaxAge:        cfg.Auth.DPoP.MaxAge,
+		Leeway:        cfg.Auth.JWT.ClockSkew,
+		NonceRequired: cfg.Auth.DPoP.NonceRequired,
+		NonceTTL:      cfg.Auth.DPoP.NonceTTL,
+		NonceKey:      stateKey,
+		TargetURL:     cfg.Server.PublicURL,
 	})
-	return a, nil
 }
 
 func (a *App) openPins(ctx context.Context) error {
@@ -819,27 +856,43 @@ func (a *App) resyncDirectory(ctx context.Context, u *upstream.Upstream, up bool
 	}
 }
 
-func (a *App) verifier(ctx context.Context, cfg config.Config) gateway.TokenVerifier {
+func (a *App) verifier(ctx context.Context, cfg config.Config) (gateway.TokenVerifier, error) {
+	claims := authn.ResolveClaimMapping(cfg.Auth.Provider, authn.ClaimMapping{
+		TenantClaim:   cfg.Auth.Claims.Tenant,
+		GroupsClaim:   cfg.Auth.Claims.Groups,
+		RolesClaim:    cfg.Auth.Claims.Roles,
+		ClientIDClaim: cfg.Auth.Claims.ClientID,
+		ScopeClaim:    cfg.Auth.Claims.Scope,
+	})
 	switch cfg.Auth.Mode {
 	case config.AuthModeJWT:
-		a.keys = authn.NewKeySet(
-			cfg.Auth.JWT.JWKSURL,
-			&http.Client{Timeout: 10 * time.Second, CheckRedirect: upstream.NoRedirects},
-			cfg.Auth.JWT.JWKSMinRetry,
-		)
+		jwksClient := &http.Client{Timeout: 10 * time.Second, CheckRedirect: upstream.NoRedirects}
+		jwksURL := cfg.Auth.JWT.JWKSURL
+		if jwksURL == "" {
+			meta, err := authn.DiscoverMetadata(ctx, cfg.Auth.JWT.Issuer, jwksClient, cfg.Auth.JWT.AllowInsecure)
+			if err != nil {
+				return nil, fmt.Errorf("discover jwks for %s: %w", cfg.Auth.JWT.Issuer, err)
+			}
+			jwksURL = meta.JWKSURI
+			a.log.InfoContext(ctx, "discovered jwks_uri via oidc metadata",
+				slog.String("issuer", cfg.Auth.JWT.Issuer),
+				slog.String("jwks_uri", jwksURL))
+		}
+		a.keys = authn.NewKeySet(jwksURL, jwksClient, cfg.Auth.JWT.JWKSMinRetry)
 		return authn.NewVerifier(authn.FromKeySet(a.keys), authn.VerifierOptions{
 			Issuer: cfg.Auth.JWT.Issuer, Audiences: cfg.Auth.JWT.Audiences,
-			Algorithms: cfg.Auth.JWT.Algorithms, Leeway: cfg.Auth.JWT.ClockSkew, Types: cfg.Auth.JWT.Types,
-		})
+			Algorithms: cfg.Auth.JWT.Algorithms, Leeway: cfg.Auth.JWT.ClockSkew,
+			Types: cfg.Auth.JWT.Types, Claims: claims,
+		}), nil
 	case config.AuthModeIntrospection:
 		in := cfg.Auth.Introspection
 		return authn.NewIntrospector(authn.IntrospectorOptions{
 			URL: in.URL, ClientID: in.ClientID, ClientSecret: in.ClientSecret, Issuer: in.Issuer,
 			Audiences: in.Audiences, CacheTTL: in.CacheTTL, Leeway: cfg.Auth.JWT.ClockSkew,
+			Claims: claims,
 			Client: &http.Client{Timeout: in.Timeout, CheckRedirect: upstream.NoRedirects},
-		})
+		}), nil
 	default:
-		a.log.WarnContext(ctx, "authentication disabled: every caller is anonymous")
-		return nil
+		return nil, fmt.Errorf("unsupported auth mode %q: %w", cfg.Auth.Mode, config.ErrInvalid)
 	}
 }
