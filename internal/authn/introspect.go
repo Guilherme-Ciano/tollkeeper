@@ -60,7 +60,12 @@ func NewIntrospector(o IntrospectorOptions) *Introspector {
 		o.MaxEntries = 10000
 	}
 	if o.Client == nil {
-		o.Client = &http.Client{Timeout: 5 * time.Second}
+		o.Client = &http.Client{
+			Timeout: 5 * time.Second,
+			CheckRedirect: func(*http.Request, []*http.Request) error {
+				return http.ErrUseLastResponse
+			},
+		}
 	}
 	return &Introspector{o: o, cache: map[[32]byte]cached{}}
 }

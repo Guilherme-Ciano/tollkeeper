@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
-	"net"
 	"net/http"
 	"net/url"
 	"os"
@@ -22,6 +21,7 @@ import (
 	"golang.org/x/oauth2/clientcredentials"
 
 	"github.com/Guilherme-Ciano/tollkeeper/internal/config"
+	"github.com/Guilherme-Ciano/tollkeeper/internal/netguard"
 )
 
 var ErrUnknownTransport = errors.New("unknown transport")
@@ -142,10 +142,10 @@ func (b bearerTransport) RoundTrip(r *http.Request) (*http.Response, error) {
 	return resp, nil
 }
 
-func baseTransport() *http.Transport {
+func baseTransport(blockPrivate bool) *http.Transport {
 	return &http.Transport{
 		Proxy:                 http.ProxyFromEnvironment,
-		DialContext:           (&net.Dialer{Timeout: 5 * time.Second, KeepAlive: 30 * time.Second}).DialContext,
+		DialContext:           netguard.Dialer(5*time.Second, 30*time.Second, blockPrivate).DialContext,
 		MaxIdleConns:          256,
 		MaxIdleConnsPerHost:   256,
 		IdleConnTimeout:       90 * time.Second,
@@ -156,7 +156,7 @@ func baseTransport() *http.Transport {
 }
 
 func HTTPClient(ctx context.Context, cfg config.Upstream) (*http.Client, error) {
-	var rt http.RoundTripper = otelhttp.NewTransport(baseTransport())
+	var rt http.RoundTripper = otelhttp.NewTransport(baseTransport(cfg.BlockPrivateIPs))
 	switch cfg.Auth.Type {
 	case config.UpstreamAuthBearer:
 		u, err := url.Parse(cfg.URL)
@@ -178,7 +178,7 @@ func HTTPClient(ctx context.Context, cfg config.Upstream) (*http.Client, error) 
 			AuthStyle:      oauth2.AuthStyleInHeader,
 		}
 		tokenClient := &http.Client{
-			Transport:     otelhttp.NewTransport(baseTransport()),
+			Transport:     otelhttp.NewTransport(baseTransport(cfg.BlockPrivateIPs)),
 			Timeout:       10 * time.Second,
 			CheckRedirect: NoRedirects,
 		}

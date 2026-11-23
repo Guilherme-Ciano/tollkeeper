@@ -85,8 +85,9 @@ type Upstream struct {
 	Command        []string          `koanf:"command"`
 	Env            map[string]string `koanf:"env"`
 	EnvPassthrough []string          `koanf:"env_passthrough"`
-	URL            string            `koanf:"url"`
-	Timeout        time.Duration     `koanf:"timeout"`
+	URL             string            `koanf:"url"`
+	BlockPrivateIPs bool              `koanf:"block_private_ips"`
+	Timeout         time.Duration     `koanf:"timeout"`
 	MaxConcurrency int               `koanf:"max_concurrency"`
 	Breaker        Breaker           `koanf:"breaker"`
 	Auth           UpstreamAuth      `koanf:"auth"`
