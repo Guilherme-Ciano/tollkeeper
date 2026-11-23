@@ -356,10 +356,55 @@ func (c *Config) validateAudit(v *validator) {
 	if c.Audit.FlushInterval <= 0 {
 		v.add("audit.flush_interval", "must be positive")
 	}
-	if c.Audit.Checkpoint.SigningKeyFile != "" && c.Audit.Checkpoint.Every < 1 && c.Audit.Checkpoint.Interval <= 0 {
+	c.validateAuditCheckpoint(v)
+	c.validateAnchor(v)
+}
+
+func (c *Config) validateAuditCheckpoint(v *validator) {
+	ck := c.Audit.Checkpoint
+	hasKMS := ck.KMS != nil && ck.KMS.Provider != ""
+	if ck.SigningKeyFile != "" && hasKMS {
+		v.add("audit.checkpoint", "signing_key_file and kms.provider are mutually exclusive")
+	}
+	if (ck.SigningKeyFile != "" || hasKMS) && ck.Every < 1 && ck.Interval <= 0 {
 		v.add("audit.checkpoint", "set every or interval when a signing key is configured")
 	}
-	c.validateAnchor(v)
+	if ck.KMS != nil && (ck.KMS.Provider != "" || ck.KMS.KeyID != "") {
+		validateAuditKMS(v, ck.KMS)
+	}
+}
+
+func validateAuditKMS(v *validator, k *AuditKMS) {
+	v.oneOf("audit.checkpoint.kms.provider", k.Provider, KMSProviderVault, KMSProviderAWS)
+	v.require("audit.checkpoint.kms.key_id", k.KeyID)
+	if k.Timeout < 0 || k.Timeout > time.Minute {
+		v.add("audit.checkpoint.kms.timeout", "must be within [0, 1m]")
+	}
+	switch k.Provider {
+	case KMSProviderVault:
+		v.url("audit.checkpoint.kms.vault.address", k.Vault.Address, "http", "https")
+		if strings.HasPrefix(k.Vault.Address, "http://") && !k.AllowInsecure && !Loopback(hostPort(k.Vault.Address)) {
+			v.add(
+				"audit.checkpoint.kms.vault.address",
+				"plain http to a non-loopback Vault requires audit.checkpoint.kms.allow_insecure: true",
+			)
+		}
+		v.require("audit.checkpoint.kms.vault.token", k.Vault.Token)
+	case KMSProviderAWS:
+		v.require("audit.checkpoint.kms.aws.region", k.AWS.Region)
+		v.require("audit.checkpoint.kms.aws.access_key_id", k.AWS.AccessKeyID)
+		v.require("audit.checkpoint.kms.aws.secret_access_key", k.AWS.SecretAccessKey)
+		if k.AWS.Endpoint != "" {
+			v.url("audit.checkpoint.kms.aws.endpoint", k.AWS.Endpoint, "http", "https")
+			if strings.HasPrefix(k.AWS.Endpoint, "http://") && !k.AllowInsecure &&
+				!Loopback(hostPort(k.AWS.Endpoint)) {
+				v.add(
+					"audit.checkpoint.kms.aws.endpoint",
+					"plain http to a non-loopback endpoint requires audit.checkpoint.kms.allow_insecure: true",
+				)
+			}
+		}
+	}
 }
 
 func (c *Config) validateAnchor(v *validator) {

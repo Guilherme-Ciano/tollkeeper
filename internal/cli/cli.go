@@ -215,6 +215,7 @@ type verifyOpts struct {
 	postgres     string
 	timeout      time.Duration
 	pubkey       string
+	pubkeyDir    string
 	chainID      string
 	maxUnsigned  uint64
 	noSignatures bool
@@ -234,7 +235,7 @@ func verifyCmd() *cobra.Command {
 	var o verifyOpts
 	verify := &cobra.Command{
 		Use:   "verify",
-		Short: "Recompute the hash chain and check Ed25519 checkpoints",
+		Short: "Recompute the hash chain and check signed checkpoints and key rotations",
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			return runVerify(cmd.OutOrStdout(), o)
 		},
@@ -243,7 +244,18 @@ func verifyCmd() *cobra.Command {
 	verify.Flags().StringVar(&o.postgres, "postgres", "",
 		"verify the chain stored in Postgres (DSN) instead of a file; requires --chain-id")
 	verify.Flags().DurationVar(&o.timeout, "timeout", 10*time.Minute, "maximum time to read a chain from Postgres")
-	verify.Flags().StringVar(&o.pubkey, "pubkey", "", "Ed25519 public key (PEM); required unless --no-signatures")
+	verify.Flags().StringVar(
+		&o.pubkey,
+		"pubkey",
+		"",
+		"checkpoint public key (Ed25519 or ECDSA P-256 PEM); required unless --pubkey-dir or --no-signatures",
+	)
+	verify.Flags().StringVar(
+		&o.pubkeyDir,
+		"pubkey-dir",
+		"",
+		"directory of trusted checkpoint public keys (.pub/.pem) for verifying rotated chains",
+	)
 	verify.Flags().StringVar(&o.chainID, "chain-id", "", "expected chain id")
 	verify.Flags().
 		Uint64Var(&o.maxUnsigned, "max-unsigned", 1000, "maximum records allowed after the last signed checkpoint")
@@ -337,12 +349,27 @@ func (o *verifyOpts) options() (audit.VerifyOptions, error) {
 		return audit.VerifyOptions{}, err
 	}
 	var vo audit.VerifyOptions
-	if o.pubkey != "" {
-		k, err := audit.LoadPublicKey(o.pubkey)
+	if o.pubkeyDir != "" {
+		ks, err := audit.LoadKeySetDir(o.pubkeyDir)
 		if err != nil {
 			return vo, err
 		}
-		vo.PublicKey = k
+		vo.Keys = ks
+	}
+	if o.pubkey != "" {
+		k, err := audit.LoadAnyPublicKey(o.pubkey)
+		if err != nil {
+			return vo, err
+		}
+		if vo.Keys == nil {
+			ks, err := audit.NewKeySet(k)
+			if err != nil {
+				return vo, err
+			}
+			vo.Keys = ks
+		} else if err := vo.Keys.Add(k); err != nil {
+			return vo, err
+		}
 	}
 	if len(o.rekorTrust) > 0 {
 		v, err := o.anchorVerifier()
@@ -355,6 +382,11 @@ func (o *verifyOpts) options() (audit.VerifyOptions, error) {
 }
 
 func printVerifyWarnings(out io.Writer, rep audit.Report) error {
+	if rep.KeyRotations > 0 {
+		if err := printf(out, "ROTATIONS count=%d\n", rep.KeyRotations); err != nil {
+			return err
+		}
+	}
 	if err := printAnchors(out, rep); err != nil {
 		return err
 	}
@@ -405,8 +437,11 @@ func checkSignatures(rep audit.Report, o verifyOpts) error {
 }
 
 func runVerify(out io.Writer, o verifyOpts) error {
-	if o.pubkey == "" && !o.noSignatures {
-		return fmt.Errorf("%w: pass --pubkey, or --no-signatures to check only the hash chain", ErrVerify)
+	if o.pubkey == "" && o.pubkeyDir == "" && !o.noSignatures {
+		return fmt.Errorf(
+			"%w: pass --pubkey or --pubkey-dir, or --no-signatures to check only the hash chain",
+			ErrVerify,
+		)
 	}
 	vo, err := o.options()
 	if err != nil {

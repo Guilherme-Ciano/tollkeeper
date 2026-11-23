@@ -222,10 +222,41 @@ type AuditPostgres struct {
 	Migrate bool          `koanf:"migrate"`
 }
 
+const (
+	KMSProviderVault = "vault"
+	KMSProviderAWS   = "aws"
+)
+
 type Checkpoint struct {
 	Every          int           `koanf:"every"`
 	Interval       time.Duration `koanf:"interval"`
 	SigningKeyFile string        `koanf:"signing_key_file"`
+	KMS            *AuditKMS     `koanf:"kms"`
+}
+
+type AuditKMS struct {
+	Provider        string        `koanf:"provider"`
+	KeyID           string        `koanf:"key_id"`
+	Timeout         time.Duration `koanf:"timeout"`
+	BlockPrivateIPs bool          `koanf:"block_private_ips"`
+	AllowInsecure   bool          `koanf:"allow_insecure"`
+	Vault           AuditKMSVault `koanf:"vault"`
+	AWS             AuditKMSAWS   `koanf:"aws"`
+}
+
+type AuditKMSVault struct {
+	Address   string `koanf:"address"`
+	Mount     string `koanf:"mount"`
+	Token     string `koanf:"token"`
+	Namespace string `koanf:"namespace"`
+}
+
+type AuditKMSAWS struct {
+	Region          string `koanf:"region"`
+	Endpoint        string `koanf:"endpoint"`
+	AccessKeyID     string `koanf:"access_key_id"`
+	SecretAccessKey string `koanf:"secret_access_key"`
+	SessionToken    string `koanf:"session_token"`
 }
 
 type Telemetry struct {

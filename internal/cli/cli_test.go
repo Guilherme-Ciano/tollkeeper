@@ -113,3 +113,64 @@ func TestVerifyPostgresUnreachableIsASourceError(t *testing.T) {
 		t.Fatalf("runVerify = %v, want ErrSource", err)
 	}
 }
+
+func TestVerifyCLIRotatedChainAndPubkeyDir(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	keyDir := filepath.Join(dir, "keys")
+	if err := os.MkdirAll(keyDir, 0o750); err != nil {
+		t.Fatal(err)
+	}
+	priv1PEM, pub1PEM, err := audit.GenerateKeyPair()
+	if err != nil {
+		t.Fatal(err)
+	}
+	priv2PEM, pub2PEM, err := audit.GenerateKeyPair()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(keyDir, "root.pub"), pub1PEM, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(keyDir, "next.pub"), pub2PEM, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	priv1, err := audit.ParsePrivateKey(priv1PEM)
+	if err != nil {
+		t.Fatal(err)
+	}
+	priv2, err := audit.ParsePrivateKey(priv2PEM)
+	if err != nil {
+		t.Fatal(err)
+	}
+	s2, err := audit.NewLocalSigner(priv2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	logPath := filepath.Join(dir, "audit.jsonl")
+	l, err := audit.Open(audit.Options{Path: logPath, ChainID: "rot", Signer: priv1, FlushInterval: time.Millisecond})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := l.Append(t.Context(), audit.Event{Method: "m1", Decision: audit.DecisionAllow}); err != nil {
+		t.Fatal(err)
+	}
+	if err := l.RotateSigner(t.Context(), s2); err != nil {
+		t.Fatal(err)
+	}
+	if err := l.Append(t.Context(), audit.Event{Method: "m2", Decision: audit.DecisionAllow}); err != nil {
+		t.Fatal(err)
+	}
+	if err := l.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	var out bytes.Buffer
+	if err := runVerify(&out, verifyOpts{file: logPath, pubkeyDir: keyDir, maxUnsigned: 0}); err != nil {
+		t.Fatalf("runVerify --pubkey-dir: %v out=%s", err, out.String())
+	}
+	got := out.String()
+	if !strings.Contains(got, "OK chain=rot") || !strings.Contains(got, "ROTATIONS count=1") {
+		t.Fatalf("unexpected verify output: %q", got)
+	}
+}
