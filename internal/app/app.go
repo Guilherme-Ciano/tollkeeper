@@ -595,6 +595,7 @@ func (a *App) adminHandler() http.Handler {
 		mux.HandleFunc("GET /debug/pprof/symbol", pprof.Symbol)
 	}
 	mux.HandleFunc("GET /pins", a.pinReport)
+	mux.HandleFunc("GET /upstreams", a.upstreamDiagnostics)
 	mux.HandleFunc("GET /livez", func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusOK)
 	})
@@ -619,16 +620,47 @@ func (a *App) adminHandler() http.Handler {
 	return mux
 }
 
-func (a *App) pinReportAllowed(r *http.Request) bool {
-	if a.pins == nil {
-		return false
-	}
+func (a *App) adminReportAllowed(r *http.Request) bool {
 	token := a.cfg.Pinning.ReportToken
 	if token == "" {
 		return config.Loopback(a.cfg.Server.AdminListen)
 	}
 	got, ok := strings.CutPrefix(r.Header.Get("Authorization"), "Bearer ")
 	return ok && subtle.ConstantTimeCompare([]byte(got), []byte(token)) == 1
+}
+
+func (a *App) pinReportAllowed(r *http.Request) bool {
+	return a.pins != nil && a.adminReportAllowed(r)
+}
+
+type upstreamReportEntry struct {
+	upstream.Diagnostics
+	Synced bool `json:"synced"`
+	Tools  int  `json:"tools"`
+}
+
+func (a *App) upstreamDiagnostics(w http.ResponseWriter, r *http.Request) {
+	if !a.adminReportAllowed(r) {
+		http.NotFound(w, r)
+		return
+	}
+	counts := map[string]int{}
+	tools := a.catalog.Snapshot().Tools()
+	for i := range tools {
+		counts[tools[i].Upstream]++
+	}
+	entries := make([]upstreamReportEntry, 0, len(a.upstreams))
+	for _, u := range a.upstreams {
+		entries = append(entries, upstreamReportEntry{
+			Diagnostics: u.Diagnostics(),
+			Synced:      a.serving(u),
+			Tools:       counts[u.ID()],
+		})
+	}
+	w.Header().Set("Content-Type", "application/json")
+	if err := json.NewEncoder(w).Encode(map[string]any{"upstreams": entries}); err != nil {
+		a.log.DebugContext(r.Context(), "upstream diagnostics write failed", slog.String("error", err.Error()))
+	}
 }
 
 func (a *App) pinReport(w http.ResponseWriter, r *http.Request) {

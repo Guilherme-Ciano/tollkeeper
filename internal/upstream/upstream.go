@@ -55,6 +55,7 @@ type Upstream struct {
 	signalled   atomic.Uint32
 	progress    sync.Map
 	progressSeq atomic.Uint64
+	diag        diagTracker
 
 	mu sync.RWMutex
 	cs *mcp.ClientSession
@@ -217,6 +218,7 @@ func (u *Upstream) Run(ctx context.Context) {
 	for ctx.Err() == nil {
 		cs, cleanup, err := u.connect(ctx)
 		if err != nil {
+			u.diag.recordError(err, time.Now())
 			u.log.WarnContext(ctx, "upstream connect failed",
 				slog.String("error", err.Error()), slog.Duration("retry_in", backoff))
 			if !sleep(ctx, jitter(backoff)) {
@@ -227,6 +229,7 @@ func (u *Upstream) Run(ctx context.Context) {
 		}
 		connectedAt := time.Now()
 		u.setUp(cs)
+		u.diag.recordConnect(connectedAt, u.gen.Load() > 1)
 		u.log.InfoContext(ctx, "upstream connected")
 		u.notify()
 		u.readyOnce.Do(func() { close(u.ready) })
@@ -285,6 +288,7 @@ func (u *Upstream) probe(ctx context.Context, cs *mcp.ClientSession) bool {
 	pctx, cancel := context.WithTimeout(ctx, u.cfg.Timeout)
 	defer cancel()
 	_, err := cs.ListTools(pctx, nil)
+	u.diag.recordProbe(err == nil, err, time.Now())
 	return err == nil
 }
 
@@ -393,16 +397,21 @@ type Call struct {
 }
 
 func (u *Upstream) CallTool(ctx context.Context, c Call) (*mcp.CallToolResult, error) {
+	callStart := time.Now()
 	cs := u.session()
 	if cs == nil {
-		return nil, fmt.Errorf("%s: %w", u.cfg.ID, ErrUnavailable)
+		err := fmt.Errorf("%s: %w", u.cfg.ID, ErrUnavailable)
+		u.diag.recordCall(time.Since(callStart), err, time.Now())
+		return nil, err
 	}
 	ctx, cancel := context.WithTimeoutCause(ctx, u.cfg.Timeout, ErrTimeout)
 	defer cancel()
 	select {
 	case u.sem <- struct{}{}:
 	default:
-		return nil, fmt.Errorf("%s: %w", u.cfg.ID, ErrSaturated)
+		err := fmt.Errorf("%s: %w", u.cfg.ID, ErrSaturated)
+		u.diag.recordCall(time.Since(callStart), err, time.Now())
+		return nil, err
 	}
 	defer func() { <-u.sem }()
 	if c.Progress != nil {
@@ -431,12 +440,19 @@ func (u *Upstream) CallTool(ctx context.Context, c Call) (*mcp.CallToolResult, e
 	})
 	switch {
 	case errors.Is(err, gobreaker.ErrOpenState), errors.Is(err, gobreaker.ErrTooManyRequests):
-		return nil, fmt.Errorf("%s: %w", u.cfg.ID, ErrBreakerOpen)
+		wrapped := fmt.Errorf("%s: %w", u.cfg.ID, ErrBreakerOpen)
+		u.diag.recordCall(time.Since(callStart), wrapped, time.Now())
+		return nil, wrapped
 	case err != nil && errors.Is(context.Cause(ctx), ErrTimeout):
-		return nil, fmt.Errorf("%s: %w", u.cfg.ID, ErrTimeout)
+		wrapped := fmt.Errorf("%s: %w", u.cfg.ID, ErrTimeout)
+		u.diag.recordCall(time.Since(callStart), wrapped, time.Now())
+		return nil, wrapped
 	case err != nil:
-		return nil, fmt.Errorf("call %s/%s: %w", u.cfg.ID, c.Tool, err)
+		wrapped := fmt.Errorf("call %s/%s: %w", u.cfg.ID, c.Tool, err)
+		u.diag.recordCall(time.Since(callStart), wrapped, time.Now())
+		return nil, wrapped
 	}
+	u.diag.recordCall(time.Since(callStart), nil, time.Now())
 	return res, nil
 }
 
