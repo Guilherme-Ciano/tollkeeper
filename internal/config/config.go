@@ -80,19 +80,19 @@ type JWT struct {
 }
 
 type Upstream struct {
-	ID             string            `koanf:"id"`
-	Transport      string            `koanf:"transport"`
-	Command        []string          `koanf:"command"`
-	Env            map[string]string `koanf:"env"`
-	EnvPassthrough []string          `koanf:"env_passthrough"`
+	ID              string            `koanf:"id"`
+	Transport       string            `koanf:"transport"`
+	Command         []string          `koanf:"command"`
+	Env             map[string]string `koanf:"env"`
+	EnvPassthrough  []string          `koanf:"env_passthrough"`
 	URL             string            `koanf:"url"`
 	BlockPrivateIPs bool              `koanf:"block_private_ips"`
 	Timeout         time.Duration     `koanf:"timeout"`
-	MaxConcurrency int               `koanf:"max_concurrency"`
-	Breaker        Breaker           `koanf:"breaker"`
-	Auth           UpstreamAuth      `koanf:"auth"`
-	RestartBackoff time.Duration     `koanf:"restart_backoff"`
-	RestartMax     time.Duration     `koanf:"restart_max"`
+	MaxConcurrency  int               `koanf:"max_concurrency"`
+	Breaker         Breaker           `koanf:"breaker"`
+	Auth            UpstreamAuth      `koanf:"auth"`
+	RestartBackoff  time.Duration     `koanf:"restart_backoff"`
+	RestartMax      time.Duration     `koanf:"restart_max"`
 }
 
 type Breaker struct {

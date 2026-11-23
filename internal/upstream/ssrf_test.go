@@ -53,7 +53,9 @@ func TestSSRFBlockPrivateIPsRefusesClientCredentialsTokenEndpoint(t *testing.T) 
 	tokenSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		tokenHits.Add(1)
 		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write([]byte(`{"access_token":"tok","token_type":"Bearer","expires_in":60}`))
+		if _, err := w.Write([]byte(`{"access_token":"tok","token_type":"Bearer","expires_in":60}`)); err != nil {
+			t.Errorf("write token response: %v", err)
+		}
 	}))
 	defer tokenSrv.Close()
 
