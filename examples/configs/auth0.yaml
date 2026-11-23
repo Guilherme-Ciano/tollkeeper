@@ -8,12 +8,12 @@ auth:
   provider: auth0
   resource: "https://mcp.saas.example.com/mcp"
   authorization_servers:
-    - "https://${AUTH0_DOMAIN}/"
+    - "https://corp.us.auth0.com/"
   dpop:
     mode: optional
     algorithms: ["ES256", "EdDSA"]
   jwt:
-    issuer: "https://${AUTH0_DOMAIN}/"
+    issuer: "https://corp.us.auth0.com/"
     audiences:
       - "https://mcp.saas.example.com/mcp"
 

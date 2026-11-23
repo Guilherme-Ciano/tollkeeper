@@ -8,13 +8,13 @@ auth:
   provider: okta
   resource: "https://mcp.corp.example.com/mcp"
   authorization_servers:
-    - "https://${OKTA_DOMAIN}/oauth2/${OKTA_AUTH_SERVER}"
+    - "https://corp.okta.com/oauth2/default"
   dpop:
     mode: required
     algorithms: ["ES256", "RS256"]
     max_age: 60s
   jwt:
-    issuer: "https://${OKTA_DOMAIN}/oauth2/${OKTA_AUTH_SERVER}"
+    issuer: "https://corp.okta.com/oauth2/default"
     audiences:
       - "https://mcp.corp.example.com/mcp"
 

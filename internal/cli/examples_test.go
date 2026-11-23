@@ -9,6 +9,7 @@ import (
 func TestExampleConfigsValidate(t *testing.T) {
 	t.Setenv("GITHUB_PAT", "placeholder")
 	t.Setenv("TOLLKEEPER_INTROSPECTION_SECRET", "placeholder")
+	t.Setenv("ENTRA_CLIENT_SECRET", "placeholder")
 	paths, err := filepath.Glob(filepath.Join("..", "..", "examples", "configs", "*.yaml"))
 	if err != nil {
 		t.Fatal(err)

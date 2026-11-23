@@ -131,8 +131,47 @@ func Build(ctx context.Context, cfg config.Config, log *slog.Logger, version str
 	if a.pins != nil {
 		pins = a.pins
 	}
+	callers, err := a.buildUpstreams(ctx, cfg, log, version)
+	if err != nil {
+		return nil, err
+	}
+	stateKey, err := readStateKey(cfg.Server.RequestStateKey)
+	if err != nil {
+		return nil, err
+	}
+	if stateKey == nil {
+		log.InfoContext(ctx, "request state key is ephemeral",
+			slog.String("hint", "set server.request_state_key_file when running several replicas"))
+	}
+	a.gateway = gateway.New(gateway.Deps{
+		Config:     cfg,
+		Verifier:   verifier,
+		DPoP:       buildDPoP(cfg, stateKey),
+		Policy:     pol,
+		Limiter:    lim,
+		Audit:      auditor,
+		Catalog:    a.catalog,
+		Directory:  a.directory,
+		Upstreams:  callers,
+		Metrics:    a.metrics,
+		Tracer:     tr.Tracer(),
+		Propagator: tr.Propagator,
+		Log:        log,
+		Version:    version,
+		Pins:       pins,
+		StateKey:   stateKey,
+	})
+	return a, nil
+}
+
+func (a *App) buildUpstreams(
+	ctx context.Context,
+	cfg config.Config,
+	log *slog.Logger,
+	version string,
+) (map[string]gateway.Caller, error) {
 	naming := cfg.Naming()
-	callers := map[string]gateway.Caller{}
+	callers := make(map[string]gateway.Caller, len(cfg.Upstreams))
 	hooks := upstream.Hooks{
 		Up: func(id string, up bool) {
 			v := 0.0
@@ -154,45 +193,22 @@ func Build(ctx context.Context, cfg config.Config, log *slog.Logger, version str
 		a.upstreams = append(a.upstreams, u)
 		callers[uc.ID] = u
 	}
-	stateKey, err := readStateKey(cfg.Server.RequestStateKey)
-	if err != nil {
-		return nil, err
+	return callers, nil
+}
+
+func buildDPoP(cfg config.Config, stateKey []byte) *authn.DPoPVerifier {
+	if cfg.Auth.Mode == config.AuthModeNone || cfg.Auth.DPoP.Mode == "" || cfg.Auth.DPoP.Mode == config.DPoPModeOff {
+		return nil
 	}
-	if stateKey == nil {
-		log.InfoContext(ctx, "request state key is ephemeral",
-			slog.String("hint", "set server.request_state_key_file when running several replicas"))
-	}
-	var dpopVerifier *authn.DPoPVerifier
-	if cfg.Auth.Mode != config.AuthModeNone && cfg.Auth.DPoP.Mode != "" && cfg.Auth.DPoP.Mode != config.DPoPModeOff {
-		dpopVerifier = authn.NewDPoPVerifier(authn.DPoPOptions{
-			Algorithms:    cfg.Auth.DPoP.Algorithms,
-			MaxAge:        cfg.Auth.DPoP.MaxAge,
-			Leeway:        cfg.Auth.JWT.ClockSkew,
-			NonceRequired: cfg.Auth.DPoP.NonceRequired,
-			NonceTTL:      cfg.Auth.DPoP.NonceTTL,
-			NonceKey:      stateKey,
-			TargetURL:     cfg.Server.PublicURL,
-		})
-	}
-	a.gateway = gateway.New(gateway.Deps{
-		Config:     cfg,
-		Verifier:   verifier,
-		DPoP:       dpopVerifier,
-		Policy:     pol,
-		Limiter:    lim,
-		Audit:      auditor,
-		Catalog:    a.catalog,
-		Directory:  a.directory,
-		Upstreams:  callers,
-		Metrics:    a.metrics,
-		Tracer:     tr.Tracer(),
-		Propagator: tr.Propagator,
-		Log:        log,
-		Version:    version,
-		Pins:       pins,
-		StateKey:   stateKey,
+	return authn.NewDPoPVerifier(authn.DPoPOptions{
+		Algorithms:    cfg.Auth.DPoP.Algorithms,
+		MaxAge:        cfg.Auth.DPoP.MaxAge,
+		Leeway:        cfg.Auth.JWT.ClockSkew,
+		NonceRequired: cfg.Auth.DPoP.NonceRequired,
+		NonceTTL:      cfg.Auth.DPoP.NonceTTL,
+		NonceKey:      stateKey,
+		TargetURL:     cfg.Server.PublicURL,
 	})
-	return a, nil
 }
 
 func (a *App) openPins(ctx context.Context) error {

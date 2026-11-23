@@ -8,7 +8,7 @@ auth:
   provider: entra
   resource: "https://mcp.corp.example.com/mcp"
   authorization_servers:
-    - "https://login.microsoftonline.com/${ENTRA_TENANT_ID}/v2.0"
+    - "https://login.microsoftonline.com/00000000-0000-0000-0000-000000000000/v2.0"
   scopes_supported: ["mcp:read", "mcp:write"]
   dpop:
     mode: optional
@@ -17,7 +17,7 @@ auth:
     nonce_required: true
     nonce_ttl: 5m
   jwt:
-    issuer: "https://login.microsoftonline.com/${ENTRA_TENANT_ID}/v2.0"
+    issuer: "https://login.microsoftonline.com/00000000-0000-0000-0000-000000000000/v2.0"
     audiences:
       - "https://mcp.corp.example.com/mcp"
     algorithms: ["RS256", "ES256"]
@@ -29,8 +29,8 @@ upstreams:
     block_private_ips: false
     auth:
       type: token_exchange
-      token_url: "https://login.microsoftonline.com/${ENTRA_TENANT_ID}/oauth2/v2.0/token"
-      client_id: "${ENTRA_CLIENT_ID}"
+      token_url: "https://login.microsoftonline.com/00000000-0000-0000-0000-000000000000/oauth2/v2.0/token"
+      client_id: "tollkeeper-gateway"
       client_secret: "${ENTRA_CLIENT_SECRET}"
       resource: "https://sharepoint-mcp.internal/mcp"
       scopes: ["Files.Read"]
@@ -43,7 +43,7 @@ policy:
   rules:
     - name: entra-operators
       tools: ["sharepoint__*"]
-      when: 'principal.tenant == "${ENTRA_TENANT_ID}" && "MCP.Operator" in principal.roles'
+      when: 'principal.tenant == "00000000-0000-0000-0000-000000000000" && "MCP.Operator" in principal.roles'
       effect: allow
 
 audit:
