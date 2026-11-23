@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"bytes"
 	"errors"
 	"os"
 	"path/filepath"
@@ -102,7 +103,7 @@ func TestInitRefusesOverwriteAndPreservesKeysOnForce(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if string(firstKey) != string(secondKey) {
+	if !bytes.Equal(firstKey, secondKey) {
 		t.Fatal("init --force replaced an existing audit signing key")
 	}
 }

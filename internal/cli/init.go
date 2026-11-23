@@ -30,6 +30,7 @@ const (
 	initRuleReadOnly    = "read-only-tools"
 	initRuleWriteStepUp = "writes-need-step-up"
 	initToolWriteFile   = "write_file"
+	initArgPath         = "path"
 )
 
 var ErrInit = errors.New("init failed")
@@ -437,28 +438,28 @@ func localRulesAndFixtures(customUpstream bool) ([]initPolicyRule, initFixtureDo
 		{
 			Name:   "reading workspace files is allowed",
 			Tool:   "read_text_file",
-			Args:   map[string]any{"path": "./README.md"},
+			Args:   map[string]any{initArgPath: "./README.md"},
 			Expect: initEffectAllow,
 			Rule:   "reads-anywhere-in-workspace",
 		},
 		{
 			Name:   "writing inside drafts is allowed",
 			Tool:   initToolWriteFile,
-			Args:   map[string]any{"path": "./drafts/note.md"},
+			Args:   map[string]any{initArgPath: "./drafts/note.md"},
 			Expect: initEffectAllow,
 			Rule:   "writes-only-under-drafts",
 		},
 		{
 			Name:   "writing outside drafts is denied",
 			Tool:   initToolWriteFile,
-			Args:   map[string]any{"path": "./etc/passwd"},
+			Args:   map[string]any{initArgPath: "./etc/passwd"},
 			Expect: initEffectDeny,
 			Rule:   initRuleDefault,
 		},
 		{
 			Name:   "path traversal out of drafts is denied",
 			Tool:   initToolWriteFile,
-			Args:   map[string]any{"path": "./drafts/../secret.txt"},
+			Args:   map[string]any{initArgPath: "./drafts/../secret.txt"},
 			Expect: initEffectDeny,
 			Rule:   initRuleDefault,
 		},
