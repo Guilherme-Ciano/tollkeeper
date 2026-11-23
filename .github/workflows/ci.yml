@@ -21,6 +21,29 @@ jobs:
       - run: go run ./internal/tools/nocomments
       - run: go mod tidy -diff
       - run: go run golang.org/x/vuln/cmd/govulncheck@v1.9.0 ./...
+      - name: Verify workflow YAML and full-length SHA pinning
+        run: |
+          python3 - <<'PY'
+          import glob, re, sys, yaml
+          sha_re = re.compile(r"^[^@]+@[0-9a-f]{40}$")
+          errors = []
+          for path in sorted(glob.glob(".github/workflows/*.yml")):
+              with open(path, encoding="utf-8") as f:
+                  data = yaml.safe_load(f)
+              if not isinstance(data, dict):
+                  errors.append(f"{path}: invalid workflow YAML")
+                  continue
+              for jname, job in (data.get("jobs") or {}).items():
+                  for idx, step in enumerate((job or {}).get("steps") or []):
+                      uses = (step or {}).get("uses")
+                      if isinstance(uses, str) and not uses.startswith("./") and not uses.startswith("docker://"):
+                          if not sha_re.match(uses.strip()):
+                              errors.append(f"{path} job={jname} step={idx}: unpinned action {uses!r}")
+          if errors:
+              print("\n".join(errors), file=sys.stderr)
+              sys.exit(1)
+          print("All workflow files valid and SHA-pinned")
+          PY
   test:
     runs-on: ubuntu-24.04
     services:
@@ -140,6 +163,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: actions/setup-go@d8cbb8045d7f43706b9177cceb36c1f91a6644d5 # v7.1.0
         with: { go-version-file: go.mod }
+      - run: docker compose --profile obs config -q
       - run: docker compose up --build -d --wait
       - run: go run ./cmd/democlient
       - run: docker compose exec -T gateway /usr/local/bin/tollkeeper audit verify -f /var/log/tollkeeper/audit.jsonl --pubkey /var/lib/tollkeeper/keys/audit-ed25519.pub
@@ -152,3 +176,36 @@ jobs:
       - uses: docker/setup-qemu-action@99012661954931238ded8c8b007157a8430204e1 # v4.4.0
       - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
       - run: docker buildx build --platform linux/amd64,linux/arm64 --target gateway .
+  release-check:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: step-security/harden-runner@aebdcf6156ab6691adf63218240e476564a1ed4c # v2.23.0
+        with: { egress-policy: audit }
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with: { fetch-depth: 0, persist-credentials: false }
+      - uses: actions/setup-go@d8cbb8045d7f43706b9177cceb36c1f91a6644d5 # v7.1.0
+        with: { go-version-file: go.mod }
+      - uses: goreleaser/goreleaser-action@a4f02ab5355a589de60d917a659ce617ed19b3de # v7.3.0
+        with: { version: "~> v2", args: check }
+      - uses: goreleaser/goreleaser-action@a4f02ab5355a589de60d917a659ce617ed19b3de # v7.3.0
+        with: { version: "~> v2", args: release --snapshot --clean --skip=sign,publish,docker,sbom,before }
+      - name: Verify Dockerfile.release builds with snapshot binary
+        run: |
+          mkdir -p /tmp/release-ctx/linux/amd64
+          cp dist/tollkeeper_linux_amd64_v1/tollkeeper /tmp/release-ctx/linux/amd64/tollkeeper
+          docker build -f Dockerfile.release --build-arg TARGETPLATFORM=linux/amd64 /tmp/release-ctx
+  ci-gate:
+    name: ci-gate
+    if: always()
+    needs: [lint, test, fuzz, build, ops, compose, docker, release-check]
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Require every CI job to succeed
+        env:
+          RESULTS: ${{ toJSON(needs.*.result) }}
+        run: |
+          echo "CI job results: $RESULTS"
+          if echo "$RESULTS" | grep -qE '"(failure|cancelled|skipped)"'; then
+            echo "::error::One or more required CI jobs did not succeed"
+            exit 1
+          fi

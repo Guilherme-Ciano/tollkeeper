@@ -71,3 +71,18 @@ jobs:
             conformance-output.txt
             /tmp/tollkeeper-conformance/*.log
           retention-days: 14
+  conformance-gate:
+    name: conformance-gate
+    if: always()
+    needs: [server]
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Require MCP conformance to succeed
+        env:
+          RESULT: ${{ needs.server.result }}
+        run: |
+          echo "Conformance result: $RESULT"
+          if [ "$RESULT" != "success" ]; then
+            echo "::error::MCP conformance did not succeed ($RESULT)"
+            exit 1
+          fi
