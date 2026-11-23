@@ -371,7 +371,7 @@ func readRecentAuditEvents(path string, f auditEventFilter) (events []auditEvent
 		return nil, 0, err
 	}
 	lines := bytes.Split(data, []byte{'\n'})
-	out := make([]auditEventView, 0, min(f.limit, len(lines)))
+	out := make([]auditEventView, 0, defaultAuditPageLimit)
 	for i := len(lines) - 1; i >= 0 && len(out) < f.limit; i-- {
 		line := bytes.TrimSpace(lines[i])
 		if len(line) == 0 {

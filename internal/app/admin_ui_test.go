@@ -74,6 +74,14 @@ func TestAdminDashboardOverviewPolicySimulatePinsAndAudit(t *testing.T) {
 	}
 	a := runApp(t, cfg)
 	base := "http://" + a.Addr("admin")
+	readyDeadline := time.Now().Add(3 * time.Second)
+	for {
+		st, _, _ := adminReq(t, http.MethodGet, base+"/readyz", "", nil)
+		if st == http.StatusOK || time.Now().After(readyDeadline) {
+			break
+		}
+		time.Sleep(15 * time.Millisecond)
+	}
 
 	status, hdr, body := adminReq(t, http.MethodGet, base+"/ui/", "", nil)
 	if status != http.StatusOK {
@@ -269,16 +277,29 @@ func TestAdminDashboardOverviewPolicySimulatePinsAndAudit(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	status, _, body = adminReq(t, http.MethodGet, base+"/api/audit/events?decision=deny&tenant=acme&sub=alice", "", nil)
-	if status != http.StatusOK {
-		t.Fatalf("GET /api/audit/events = %d: %s", status, body)
-	}
 	var auditRes struct {
 		Enabled bool             `json:"enabled"`
 		Events  []auditEventView `json:"events"`
 	}
-	if err := json.Unmarshal(body, &auditRes); err != nil {
-		t.Fatal(err)
+	deadline := time.Now().Add(2 * time.Second)
+	for {
+		status, _, body = adminReq(
+			t,
+			http.MethodGet,
+			base+"/api/audit/events?decision=deny&tenant=acme&sub=alice",
+			"",
+			nil,
+		)
+		if status != http.StatusOK {
+			t.Fatalf("GET /api/audit/events = %d: %s", status, body)
+		}
+		if err := json.Unmarshal(body, &auditRes); err != nil {
+			t.Fatal(err)
+		}
+		if len(auditRes.Events) > 0 || time.Now().After(deadline) {
+			break
+		}
+		time.Sleep(20 * time.Millisecond)
 	}
 	if !auditRes.Enabled || len(auditRes.Events) == 0 || auditRes.Events[0].Event == nil ||
 		auditRes.Events[0].Event.Tool != "fake__secret" {
