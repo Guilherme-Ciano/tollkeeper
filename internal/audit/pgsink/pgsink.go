@@ -188,6 +188,18 @@ func (s *Sink) ExcessPrivileges(ctx context.Context) ([]string, error) {
 	return privs, nil
 }
 
+func (s *Sink) ListChains(ctx context.Context) ([]string, error) {
+	rows, err := s.pool.Query(ctx, "SELECT DISTINCT chain_id FROM tollkeeper_audit ORDER BY chain_id")
+	if err != nil {
+		return nil, fmt.Errorf("list audit chains: %w", err)
+	}
+	chains, err := pgx.CollectRows(rows, pgx.RowTo[string])
+	if err != nil {
+		return nil, fmt.Errorf("list audit chains: %w", err)
+	}
+	return chains, nil
+}
+
 func (s *Sink) Export(ctx context.Context, chainID string, w io.Writer) error {
 	rows, err := s.pool.Query(ctx,
 		"SELECT raw, hash FROM tollkeeper_audit WHERE chain_id = $1 ORDER BY seq", chainID)

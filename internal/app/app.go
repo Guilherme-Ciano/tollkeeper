@@ -58,6 +58,7 @@ type App struct {
 	auditLog  *audit.Log
 	auditPG   *pgsink.Sink
 	anchorer  *anchor.Anchorer
+	watchdog  *audit.Watchdog
 	otlp      *otlpsink.Sink
 	version   string
 	catalog   *catalog.Catalog
@@ -337,6 +338,56 @@ func (a *App) openAudit(ctx context.Context) error {
 	if ref, ok := l.RecoveredCheckpoint(); ok && a.anchorer != nil {
 		a.anchorer.Offer(ref)
 	}
+	if a.cfg.Audit.Verify.Enabled {
+		if err := a.openWatchdog(ctx, opts.CheckpointSigner); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (a *App) openWatchdog(ctx context.Context, signer audit.CheckpointSigner) error {
+	vc := a.cfg.Audit.Verify
+	var vo audit.VerifyOptions
+	if vc.PubKeyDir != "" {
+		ks, err := audit.LoadKeySetDir(vc.PubKeyDir)
+		if err != nil {
+			return err
+		}
+		vo.Keys = ks
+	}
+	if signer != nil {
+		if vo.Keys == nil {
+			ks, err := audit.NewKeySet(signer.PublicKey())
+			if err != nil {
+				return err
+			}
+			vo.Keys = ks
+		} else if err := vo.Keys.Add(signer.PublicKey()); err != nil {
+			return err
+		}
+	}
+	a.watchdog = audit.NewWatchdog(audit.WatchdogOptions{
+		Path:          a.cfg.Audit.Path,
+		ChainID:       a.cfg.Audit.ChainID,
+		VerifyOptions: vo,
+		Interval:      vc.Interval,
+		MaxUnsigned:   vc.MaxUnsigned,
+		OnResult: func(st audit.WatchStatus) {
+			a.metrics.AuditVerifyLastSeq.Set(float64(st.LastSeq))
+			if st.Healthy {
+				a.metrics.AuditVerifyRuns.WithLabelValues("ok").Inc()
+				a.metrics.AuditVerifyHealthy.Set(1)
+				return
+			}
+			a.metrics.AuditVerifyRuns.WithLabelValues("failed").Inc()
+			a.metrics.AuditVerifyHealthy.Set(0)
+			a.log.ErrorContext(ctx, "continuous audit verification failed",
+				slog.String("chain_id", st.ChainID),
+				slog.Uint64("last_seq", st.LastSeq),
+				slog.String("error", st.Error))
+		},
+	})
 	return nil
 }
 
@@ -740,6 +791,9 @@ func (a *App) Run(ctx context.Context) error {
 	}
 	if a.anchorer != nil {
 		bg.Go(func() { a.anchorer.Run(bgCtx) })
+	}
+	if a.watchdog != nil {
+		bg.Go(func() { a.watchdog.Run(bgCtx) })
 	}
 	for _, u := range a.upstreams {
 		bg.Go(func() { u.Run(bgCtx) })

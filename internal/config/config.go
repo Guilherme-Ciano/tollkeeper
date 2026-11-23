@@ -269,19 +269,34 @@ type RateRule struct {
 }
 
 type Audit struct {
-	Enabled        bool          `koanf:"enabled"`
-	Path           string        `koanf:"path"`
-	ChainID        string        `koanf:"chain_id"`
-	OnBackpressure string        `koanf:"on_backpressure"`
-	Buffer         int           `koanf:"buffer"`
-	BatchSize      int           `koanf:"batch_size"`
-	FlushInterval  time.Duration `koanf:"flush_interval"`
-	Fsync          bool          `koanf:"fsync"`
-	RecordArgs     string        `koanf:"record_args"`
-	Checkpoint     Checkpoint    `koanf:"checkpoint"`
-	Postgres       AuditPostgres `koanf:"postgres"`
-	Anchor         AuditAnchor   `koanf:"anchor"`
-	OTLP           AuditOTLP     `koanf:"otlp"`
+	Enabled        bool           `koanf:"enabled"`
+	Path           string         `koanf:"path"`
+	ChainID        string         `koanf:"chain_id"`
+	OnBackpressure string         `koanf:"on_backpressure"`
+	Buffer         int            `koanf:"buffer"`
+	BatchSize      int            `koanf:"batch_size"`
+	FlushInterval  time.Duration  `koanf:"flush_interval"`
+	Fsync          bool           `koanf:"fsync"`
+	RecordArgs     string         `koanf:"record_args"`
+	Checkpoint     Checkpoint     `koanf:"checkpoint"`
+	Postgres       AuditPostgres  `koanf:"postgres"`
+	Anchor         AuditAnchor    `koanf:"anchor"`
+	OTLP           AuditOTLP      `koanf:"otlp"`
+	Verify         AuditVerify    `koanf:"verify"`
+	Retention      AuditRetention `koanf:"retention"`
+}
+
+type AuditVerify struct {
+	Enabled     bool          `koanf:"enabled"`
+	Interval    time.Duration `koanf:"interval"`
+	MaxUnsigned uint64        `koanf:"max_unsigned"`
+	PubKeyDir   string        `koanf:"pubkey_dir"`
+}
+
+type AuditRetention struct {
+	ArchiveDir  string        `koanf:"archive_dir"`
+	MaxAge      time.Duration `koanf:"max_age"`
+	MaxArchives int           `koanf:"max_archives"`
 }
 
 type AuditOTLP struct {
@@ -408,6 +423,7 @@ func Defaults() Config {
 			Anchor: AuditAnchor{
 				Interval: 15 * time.Minute, Timeout: time.Minute, MaxBackoff: 10 * time.Minute, MinSpacing: time.Minute,
 			},
+			Verify: AuditVerify{Interval: 5 * time.Minute},
 		},
 		Pinning: Pinning{Mode: PinModeWarn, ReloadInterval: 5 * time.Second},
 		Telemetry: Telemetry{
