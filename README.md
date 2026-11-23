@@ -243,6 +243,8 @@ A rule applies to tools, prompts or resources only through its own `tools`, `pro
 | `server.request_state_ttl` | `10m` | How long a sealed `requestState` stays valid |
 | `server.disable_fast_path` | `false` | Serve every `tools/call` through the go-sdk transport instead of the direct path for protocol 2026-07-28 |
 | `auth.mode` | `jwt` | `introspection` checks opaque tokens at an RFC 7662 endpoint (`auth.introspection.url`, `client_id`, `client_secret`, `audiences`, optional `issuer`); results are cached by token hash for `cache_ttl` (1m), never past `exp` ([example](examples/configs/keycloak-introspection.yaml)). `none` exists for local experiments and logs a warning |
+| `auth.provider` / `auth.claims` | generic | Presets for `entra`, `okta`, `keycloak`, `auth0` plus custom claim paths (`tenant`, `groups`, `roles`, `client_id`, `scope`); omit `auth.jwt.jwks_url` to discover `jwks_uri` from `auth.jwt.issuer` via OIDC metadata ([examples](examples/configs/), [ADR 0014](docs/adr/0014-dpop-and-enterprise-idp.md)) |
+| `auth.dpop.mode` | `off` | RFC 9449 DPoP proof verification (`off`, `optional`, `required`) with `cnf.jkt` binding, `ath`, `jti` replay cache, optional rotating `DPoP-Nonce` (`nonce_required: true`), and RFC 9728 metadata advertisement |
 | `auth.jwt.algorithms` | RS256, ES256, EdDSA | HS* and `none` are never accepted |
 | `auth.jwt.types` | any | e.g. `["at+jwt"]` to accept only RFC 9068 access tokens |
 | `upstreams[].transport` | | `stdio` (explicit env allowlist, process-group kill, Linux `Pdeathsig`) or `streamable_http` |

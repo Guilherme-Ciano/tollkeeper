@@ -1,0 +1,37 @@
+server:
+  listen: ":8080"
+  admin_listen: "127.0.0.1:9090"
+  public_url: "https://mcp.saas.example.com/mcp"
+
+auth:
+  mode: jwt
+  provider: auth0
+  resource: "https://mcp.saas.example.com/mcp"
+  authorization_servers:
+    - "https://${AUTH0_DOMAIN}/"
+  dpop:
+    mode: optional
+    algorithms: ["ES256", "EdDSA"]
+  jwt:
+    issuer: "https://${AUTH0_DOMAIN}/"
+    audiences:
+      - "https://mcp.saas.example.com/mcp"
+
+upstreams:
+  - id: crm
+    transport: streamable_http
+    url: "https://crm-mcp.saas.example.com/mcp"
+
+policy:
+  default: deny
+  rules:
+    - name: auth0-org-readers
+      tools: ["crm__get_*", "crm__list_*"]
+      when: 'principal.tenant != "" && "read:crm" in principal.roles'
+      effect: allow
+
+audit:
+  enabled: true
+  path: "/var/lib/tollkeeper/audit.jsonl"
+  chain_id: "auth0-prod"
+  fsync: true

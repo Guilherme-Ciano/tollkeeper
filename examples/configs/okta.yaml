@@ -1,0 +1,38 @@
+server:
+  listen: ":8080"
+  admin_listen: "127.0.0.1:9090"
+  public_url: "https://mcp.corp.example.com/mcp"
+
+auth:
+  mode: jwt
+  provider: okta
+  resource: "https://mcp.corp.example.com/mcp"
+  authorization_servers:
+    - "https://${OKTA_DOMAIN}/oauth2/${OKTA_AUTH_SERVER}"
+  dpop:
+    mode: required
+    algorithms: ["ES256", "RS256"]
+    max_age: 60s
+  jwt:
+    issuer: "https://${OKTA_DOMAIN}/oauth2/${OKTA_AUTH_SERVER}"
+    audiences:
+      - "https://mcp.corp.example.com/mcp"
+
+upstreams:
+  - id: internal
+    transport: streamable_http
+    url: "https://internal-mcp.corp.example.com/mcp"
+
+policy:
+  default: deny
+  rules:
+    - name: okta-sre-dpop
+      tools: ["internal__*"]
+      when: 'principal.dpop && "SRE" in principal.groups'
+      effect: allow
+
+audit:
+  enabled: true
+  path: "/var/lib/tollkeeper/audit.jsonl"
+  chain_id: "okta-prod"
+  fsync: true
