@@ -46,14 +46,45 @@ type Server struct {
 	Pprof              bool          `koanf:"pprof"`
 }
 
+const (
+	DPoPModeOff      = "off"
+	DPoPModeOptional = "optional"
+	DPoPModeRequired = "required"
+
+	AuthProviderGeneric  = ""
+	AuthProviderEntra    = "entra"
+	AuthProviderOkta     = "okta"
+	AuthProviderKeycloak = "keycloak"
+	AuthProviderAuth0    = "auth0"
+)
+
 type Auth struct {
 	Mode                 string        `koanf:"mode"`
+	Provider             string        `koanf:"provider"`
 	Resource             string        `koanf:"resource"`
 	AuthorizationServers []string      `koanf:"authorization_servers"`
 	ScopesSupported      []string      `koanf:"scopes_supported"`
 	RequiredScopes       []string      `koanf:"required_scopes"`
+	Claims               AuthClaims    `koanf:"claims"`
+	DPoP                 DPoP          `koanf:"dpop"`
 	JWT                  JWT           `koanf:"jwt"`
 	Introspection        Introspection `koanf:"introspection"`
+}
+
+type AuthClaims struct {
+	Tenant   string `koanf:"tenant"`
+	Groups   string `koanf:"groups"`
+	Roles    string `koanf:"roles"`
+	ClientID string `koanf:"client_id"`
+	Scope    string `koanf:"scope"`
+}
+
+type DPoP struct {
+	Mode          string        `koanf:"mode"`
+	Algorithms    []string      `koanf:"algorithms"`
+	MaxAge        time.Duration `koanf:"max_age"`
+	NonceRequired bool          `koanf:"nonce_required"`
+	NonceTTL      time.Duration `koanf:"nonce_ttl"`
 }
 
 type Introspection struct {
@@ -331,6 +362,12 @@ func Defaults() Config {
 		},
 		Auth: Auth{
 			Mode: AuthModeJWT,
+			DPoP: DPoP{
+				Mode:       DPoPModeOff,
+				Algorithms: []string{"ES256", "ES384", "EdDSA", "RS256", "PS256"},
+				MaxAge:     60 * time.Second,
+				NonceTTL:   5 * time.Minute,
+			},
 			JWT: JWT{
 				Algorithms:   []string{"RS256", "ES256", "EdDSA"},
 				ClockSkew:    30 * time.Second,

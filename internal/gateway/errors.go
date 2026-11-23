@@ -83,3 +83,23 @@ func (c challenge) header(errCode, desc string, extraScopes []string) string {
 	}
 	return "Bearer " + strings.Join(parts, ", ")
 }
+
+func (c challenge) dpopHeader(errCode, desc string, algs []string) string {
+	var parts []string
+	if errCode != "" {
+		parts = append(parts, `error="`+errCode+`"`)
+	}
+	if desc != "" {
+		parts = append(parts, `error_description="`+strings.ReplaceAll(desc, `"`, "'")+`"`)
+	}
+	if len(algs) > 0 {
+		parts = append(parts, `algs="`+strings.Join(algs, " ")+`"`)
+	}
+	if c.resourceMetadata != "" {
+		parts = append(parts, `resource_metadata="`+c.resourceMetadata+`"`)
+	}
+	if len(parts) == 0 {
+		return "DPoP"
+	}
+	return "DPoP " + strings.Join(parts, ", ")
+}

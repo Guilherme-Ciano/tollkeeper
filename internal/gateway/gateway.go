@@ -26,6 +26,7 @@ import (
 	"go.opentelemetry.io/otel/trace"
 
 	"github.com/Guilherme-Ciano/tollkeeper/internal/audit"
+	"github.com/Guilherme-Ciano/tollkeeper/internal/authn"
 	"github.com/Guilherme-Ciano/tollkeeper/internal/catalog"
 	"github.com/Guilherme-Ciano/tollkeeper/internal/config"
 	"github.com/Guilherme-Ciano/tollkeeper/internal/identity"
@@ -52,6 +53,7 @@ type Caller interface {
 type Deps struct {
 	Config     config.Config
 	Verifier   TokenVerifier
+	DPoP       *authn.DPoPVerifier
 	Policy     *policy.Engine
 	Limiter    *ratelimit.Limiter
 	Audit      Auditor
@@ -77,6 +79,8 @@ type PinGuard interface {
 type Gateway struct {
 	server         *mcp.Server
 	verifier       TokenVerifier
+	dpop           *authn.DPoPVerifier
+	dpopMode       string
 	authDisabled   bool
 	requiredScopes []string
 	challenge      challenge
@@ -133,6 +137,8 @@ func New(d Deps) *Gateway {
 	}
 	g := &Gateway{
 		verifier:       d.Verifier,
+		dpop:           d.DPoP,
+		dpopMode:       d.Config.Auth.DPoP.Mode,
 		authDisabled:   d.Config.Auth.Mode == config.AuthModeNone,
 		requiredScopes: d.Config.Auth.RequiredScopes,
 		audit:          d.Audit,
@@ -178,6 +184,10 @@ func New(d Deps) *Gateway {
 			ScopesSupported:        d.Config.Auth.ScopesSupported,
 			BearerMethodsSupported: []string{"header"},
 			ResourceName:           "tollkeeper MCP gateway",
+		}
+		if g.dpop != nil && g.dpopMode != config.DPoPModeOff {
+			g.prm.DPOPSigningAlgValuesSupported = g.dpop.Algorithms()
+			g.prm.DPOPBoundAccessTokensRequired = g.dpopMode == config.DPoPModeRequired
 		}
 	}
 	g.impl = &mcp.Implementation{Name: "tollkeeper", Version: d.Version}
