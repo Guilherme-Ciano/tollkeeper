@@ -70,7 +70,7 @@
 
             <p class="hero-lead">
               Most MCP proxies forward the caller's token upstream and log JSON to stdout.
-              <strong>tollkeeper</strong> terminates OAuth 2.1 tokens at the boundary, evaluates compiled CEL policies and lock-free GCRA limits, pins upstream tool definitions against rug pulls, and seals every call into an Ed25519-signed SHA-256 chain.
+              <strong>tollkeeper</strong> terminates OAuth 2.1 &amp; DPoP tokens at the boundary, exchanges downscoped upstream tokens via RFC 8693, evaluates tenant-scoped CEL policies and lock-free GCRA limits, pins tool definitions against rug pulls, sandboxes stdio upstreams, seals every call into a KMS/Ed25519 SHA-256 chain with SIEM export, and ships an embedded Admin Console at <code>/ui/</code>.
             </p>
 
             <div class="hero-actions">
@@ -253,17 +253,17 @@
 
         <div class="ledger">
           <article class="ledger-row">
-            <div class="ledger-idx">01 / RFC 8707</div>
+            <div class="ledger-idx">01 / RFC 8693 &amp; 9449</div>
             <div class="ledger-copy">
-              <h3>Zero token passthrough by construction</h3>
+              <h3>Zero token passthrough, DPoP &amp; sandboxed upstreams</h3>
               <p>
-                The MCP spec prohibits forwarding a caller's access token upstream (the official Go proxy example forwards every inbound header, <code>Authorization</code> included). tollkeeper constructs upstream HTTP clients purely from static config so inbound requests are unreachable, authenticating upstream with isolated <code>client_credentials</code> or an explicit stdio env allowlist.
+                The MCP spec prohibits forwarding a caller's access token upstream. tollkeeper verifies OAuth 2.1 JWTs and RFC 9449 DPoP sender-constrained proofs (with Entra, Okta, Keycloak, and Auth0 presets + OIDC discovery), authenticates upstreams with isolated <code>client_credentials</code> or RFC 8693 downscoped <code>token_exchange</code>, blocks SSRF via <code>netguard</code>, and isolates stdio subprocesses with <code>bwrap</code>, <code>prlimit</code>, and <code>Pdeathsig</code>.
               </p>
             </div>
             <div class="ledger-artifact">
-              <pre><code>INBOUND   Bearer eyJ...alice  ──✕ TERMINATED
-OUTBOUND  upstream "files"    ──▶ gateway client_credentials
-STDIO     upstream "github"   ──▶ env_allowlist: [GITHUB_PAT]</code></pre>
+              <pre><code>INBOUND   DPoP + Bearer alice  ──✕ TERMINATED (cnf.jkt)
+OUTBOUND  upstream "files"     ──▶ RFC 8693 downscoped token
+STDIO     upstream "github"    ──▶ bwrap + prlimit + env_allowlist</code></pre>
             </div>
           </article>
 
@@ -298,19 +298,19 @@ Verified by FuzzParseEnvelope &amp; FuzzRejectDuplicateKeys</code></pre>
           </article>
 
           <article class="ledger-row">
-            <div class="ledger-idx">04 / CEL + SHADOW</div>
+            <div class="ledger-idx">04 / CEL + RFC 9470</div>
             <div class="ledger-copy">
-              <h3>Policy-as-code with shadow rollouts &amp; CI fixtures</h3>
+              <h3>Tenant-scoped CEL policies, shadow rollouts &amp; step-up MFA</h3>
               <p>
-                First-match default-deny rules pair a <code>102 ns</code> RBAC fast path with compiled CEL expressions (cost-bounded, 50 ms cap) over principal, annotations, arguments, and time. Observe new denials safely in <code>mode: shadow</code>, test in CI with <code>tollkeeper policy test</code>, and hot-reload atomically via <code>SIGHUP</code>.
+                First-match default-deny rules (global or isolated under <code>policy.tenants.&lt;id&gt;</code>) pair a <code>102 ns</code> RBAC fast path with compiled CEL expressions over principal, roles, delegation chains, annotations, arguments, and time. Enforce RFC 9470 step-up (<code>acr_values</code>, <code>max_age</code>, <code>require_dpop</code>), adopt CI-verified packs from <code>policies/library/</code>, test with <code>policy test</code>, and hot-reload via <code>SIGHUP</code>.
               </p>
             </div>
             <div class="ledger-artifact">
-              <pre><code>- name: issue-comments-org-scoped
-  tools: ["github__add_issue_comment"]
-  when: 'has(args.owner) &amp;&amp; args.owner == "acme-corp"'
-  on_deny: { step_up_scopes: ["github:write"] }
-  mode: shadow</code></pre>
+              <pre><code>- name: destructive-requires-phr-mfa
+  tools: ["billing__*"]
+  when: 'tool.annotations.destructiveHint == true'
+  on_deny: { acr_values: ["phr"], max_age: 5m, step_up_scopes: ["billing:approve"] }
+  effect: allow</code></pre>
             </div>
           </article>
 
@@ -319,7 +319,7 @@ Verified by FuzzParseEnvelope &amp; FuzzRejectDuplicateKeys</code></pre>
             <div class="ledger-copy">
               <h3>All-or-nothing rate limiting at 97 nanoseconds</h3>
               <p>
-                Lock-free CAS on a single <code>int64</code> per key in memory (<code>0 allocs</code>) or one atomic Lua script per call in Redis across replicas. Scope limits per subject, subject+tool, client, upstream, tool, or global with RFC <code>429</code>, <code>Retry-After</code>, and IETF <code>RateLimit</code> headers.
+                Lock-free CAS on a single <code>int64</code> per key in memory (<code>0 allocs</code>) or one atomic Lua script per call in Redis across replicas. Scope limits per subject, subject+tool, client, tenant, tenant+tool, upstream, tool, or global with RFC <code>429</code>, <code>Retry-After</code>, and IETF <code>RateLimit</code> headers.
               </p>
             </div>
             <div class="ledger-artifact">
@@ -330,17 +330,17 @@ RateLimit: "weather-per-subject";r=0;t=10</code></pre>
           </article>
 
           <article class="ledger-row">
-            <div class="ledger-idx">06 / OPS</div>
+            <div class="ledger-idx">06 / OPS &amp; UI</div>
             <div class="ledger-copy">
-              <h3>Built for Kubernetes, Prometheus, Grafana &amp; Sigstore</h3>
+              <h3>Embedded Admin Console, SIEM sinks &amp; Sigstore releases</h3>
               <p>
-                Multi-arch binaries and distroless containers ship with keyless Cosign signatures, SBOMs, and SLSA build provenance. Includes a StatefulSet Helm chart (NetworkPolicy, PDB, ServiceMonitor), provisioned Grafana dashboard, <code>promtool</code>-tested alerts, OTLP traces/logs, and official MCP conformance in CI.
+                Ships a zero-dependency embedded Admin Console at <code>/ui/</code> (upstream p50/p95 diagnostics, visual CEL policy editor, tool pinning diff viewer, dry-run call simulator, and hash-chain audit explorer), native SIEM export (JSON, Splunk HEC, CEF), OTLP traces/logs, StatefulSet Helm chart, Grafana dashboard, and keyless Cosign + SBOM + SLSA releases.
               </p>
             </div>
             <div class="ledger-artifact">
-              <pre><code>ARTIFACTS   cosign keyless · spdx sbom · slsa provenance
-DEPLOY      helm statefulset · grafana · promtool alerts
-CONFORMANCE official modelcontextprotocol suite in CI</code></pre>
+              <pre><code>ADMIN UI    /ui/ · policy editor · pin diffs · call simulator
+EXPORTERS   siem (json / splunk_hec / cef) · otlp · prometheus
+ARTIFACTS   cosign keyless · spdx sbom · slsa provenance</code></pre>
             </div>
           </article>
         </div>
@@ -355,7 +355,7 @@ CONFORMANCE official modelcontextprotocol suite in CI</code></pre>
           <div>
             <h2>Cryptographic Audit Proof</h2>
             <p class="band-sub">
-              Logs anyone with database access can rewrite are not an audit trail. Every intent and outcome is chained with SHA-256, signed with Ed25519 checkpoints, optionally mirrored to Postgres append-only triggers, and anchored in Rekor v2 with RFC 3161 timestamps.
+              Logs anyone with database access can rewrite are not an audit trail. Every intent and outcome is chained with SHA-256, signed with local Ed25519 or pure-Go Vault Transit / AWS KMS checkpoints (with zero-downtime key rotation), continuously verified by the background watchdog, optionally mirrored to Postgres append-only triggers, anchored in Rekor v2 with RFC 3161 timestamps, and shipped to SIEMs (JSON, Splunk HEC, CEF) and OTLP.
             </p>
           </div>
         </div>
@@ -515,10 +515,16 @@ CONFORMANCE official modelcontextprotocol suite in CI</code></pre>
                 <td><span class="m-mid">○</span> HTTP layer only</td>
               </tr>
               <tr>
-                <td>Policy-as-code with shadow mode &amp; CI fixtures</td>
-                <td class="col-tk"><span class="m-yes">■</span> CEL + policy test + SIGHUP</td>
+                <td>Policy-as-code with shadow mode, tenant scopes &amp; RFC 9470</td>
+                <td class="col-tk"><span class="m-yes">■</span> CEL + library packs + SIGHUP</td>
                 <td><span class="m-no">—</span> Hardcoded allowlists</td>
                 <td><span class="m-mid">○</span> Proprietary UI / Rego</td>
+              </tr>
+              <tr>
+                <td>Embedded Admin Console &amp; SIEM export</td>
+                <td class="col-tk"><span class="m-yes">■</span> Built-in /ui/ + JSON/HEC/CEF</td>
+                <td><span class="m-no">—</span> None</td>
+                <td><span class="m-mid">○</span> Paid dashboard add-on</td>
               </tr>
               <tr>
                 <td>Runtime footprint &amp; air-gap readiness</td>
@@ -561,7 +567,7 @@ CONFORMANCE official modelcontextprotocol suite in CI</code></pre>
 $ tollkeeper policy test -c tollkeeper.yaml -f policies_test.yaml
 $ tollkeeper serve -c tollkeeper.yaml</code></pre>
             <p class="wb-note">
-              Grab signed binaries from <a href="https://github.com/Guilherme-Ciano/tollkeeper/releases" target="_blank" rel="noopener">GitHub Releases</a> or run <code>docker pull ghcr.io/guilherme-ciano/tollkeeper:latest</code>. Use <code>--profile team</code> for an OAuth 2.1 JWT + <code>pinning.mode: enforce</code> skeleton.
+              Open <code>http://127.0.0.1:9090/ui/</code> for the embedded Admin Console, grab signed binaries from <a href="https://github.com/Guilherme-Ciano/tollkeeper/releases" target="_blank" rel="noopener">GitHub Releases</a>, or run <code>docker pull ghcr.io/guilherme-ciano/tollkeeper:latest</code>. Use <code>--profile team</code> for OAuth 2.1 + <code>pinning.mode: enforce</code>.
             </p>
           </div>
 
