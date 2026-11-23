@@ -239,12 +239,63 @@ func validateTransport(v *validator, f string, u *Upstream) {
 		if u.Auth.Type != UpstreamAuthNone {
 			v.add(f+".auth.type", "stdio upstreams take credentials through env, not auth")
 		}
+		validateSandbox(v, f+".sandbox", u.Sandbox)
 	case TransportStreamable:
 		v.url(f+".url", u.URL, "http", "https")
 		if len(u.Command) > 0 {
 			v.add(f+".command", "not allowed for streamable_http transport")
 		}
+		if u.Sandbox.Configured() {
+			v.add(f+".sandbox", "only allowed for stdio transport")
+		}
 		validateUpstreamAuth(v, f+".auth", u.Auth)
+	}
+}
+
+func validateSandbox(v *validator, f string, s StdioSandbox) {
+	mode := s.Mode
+	if mode == "" {
+		mode = SandboxModeOff
+	}
+	v.oneOf(f+".mode", mode, SandboxModeOff, SandboxModeWarn, SandboxModeEnforce)
+	backend := s.Backend
+	if backend == "" {
+		backend = SandboxBackendAuto
+	}
+	v.oneOf(f+".backend", backend, SandboxBackendAuto, SandboxBackendOS, SandboxBackendBwrap)
+	netMode := s.Network
+	if netMode == "" {
+		netMode = SandboxNetworkInherit
+	}
+	v.oneOf(f+".network", netMode, SandboxNetworkInherit, SandboxNetworkNone)
+	if strings.ContainsRune(s.WorkDir, '\x00') {
+		v.add(f+".workdir", "must not contain NUL bytes")
+	}
+	validateSandboxPaths(v, f+".read_only_paths", s.ReadOnlyPaths)
+	validateSandboxPaths(v, f+".read_write_paths", s.ReadWritePaths)
+	validateSandboxLimits(v, f+".rlimits", s.RLimits)
+}
+
+func validateSandboxPaths(v *validator, f string, paths []string) {
+	for i, p := range paths {
+		if strings.TrimSpace(p) == "" || strings.ContainsRune(p, '\x00') || !strings.HasPrefix(p, "/") {
+			v.add(fmt.Sprintf("%s[%d]", f, i), "must be a clean absolute path starting with /")
+		}
+	}
+}
+
+func validateSandboxLimits(v *validator, f string, l SandboxLimits) {
+	if l.MaxMemoryMB < 0 {
+		v.add(f+".max_memory_mb", "must be non-negative")
+	}
+	if l.MaxOpenFiles < 0 {
+		v.add(f+".max_open_files", "must be non-negative")
+	}
+	if l.MaxProcesses < 0 {
+		v.add(f+".max_processes", "must be non-negative")
+	}
+	if l.MaxFileSizeMB < 0 {
+		v.add(f+".max_file_size_mb", "must be non-negative")
 	}
 }
 

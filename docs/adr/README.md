@@ -14,5 +14,6 @@ Each record states the context, the decision, the alternatives that lost and wha
 | [0008](0008-zero-code-comments.md) | Zero code comments | Accepted |
 | [0009](0009-shared-state-redis-postgres.md) | Redis for shared rate limits, Postgres as an immutable audit sink | Accepted |
 | [0010](0010-rekor-checkpoint-anchoring.md) | Anchor audit checkpoints in a Rekor v2 transparency log | Accepted |
+| [0011](0011-stdio-sandboxing.md) | Stdio upstream sandboxing with fail-closed enforcement | Accepted |
 
 The threat model that ties these together is in [../threat-model.md](../threat-model.md).
