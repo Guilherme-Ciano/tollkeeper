@@ -206,13 +206,14 @@ func policyCmd() *cobra.Command {
 
 func auditCmd() *cobra.Command {
 	cmd := &cobra.Command{Use: "audit", Short: "Audit log tools"}
-	cmd.AddCommand(verifyCmd(), keygenCmd())
+	cmd.AddCommand(verifyCmd(), keygenCmd(), archiveCmd(), watchCmd())
 	return cmd
 }
 
 type verifyOpts struct {
 	file         string
 	postgres     string
+	allChains    bool
 	timeout      time.Duration
 	pubkey       string
 	pubkeyDir    string
@@ -242,7 +243,9 @@ func verifyCmd() *cobra.Command {
 	}
 	verify.Flags().StringVarP(&o.file, "file", "f", "audit.jsonl", "audit JSONL file")
 	verify.Flags().StringVar(&o.postgres, "postgres", "",
-		"verify the chain stored in Postgres (DSN) instead of a file; requires --chain-id")
+		"verify the chain stored in Postgres (DSN) instead of a file; requires --chain-id or --all-chains")
+	verify.Flags().BoolVar(&o.allChains, "all-chains", false,
+		"verify every chain stored in Postgres (requires --postgres)")
 	verify.Flags().DurationVar(&o.timeout, "timeout", 10*time.Minute, "maximum time to read a chain from Postgres")
 	verify.Flags().StringVar(
 		&o.pubkey,
@@ -437,6 +440,9 @@ func checkSignatures(rep audit.Report, o verifyOpts) error {
 }
 
 func runVerify(out io.Writer, o verifyOpts) error {
+	if o.allChains {
+		return runVerifyAllChains(out, o)
+	}
 	if o.pubkey == "" && o.pubkeyDir == "" && !o.noSignatures {
 		return fmt.Errorf(
 			"%w: pass --pubkey or --pubkey-dir, or --no-signatures to check only the hash chain",

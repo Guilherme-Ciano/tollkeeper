@@ -34,10 +34,13 @@ type Metrics struct {
 	PinUnapproved   *prometheus.GaugeVec
 	RateBackendErrs prometheus.Counter
 
-	AnchorAttempts    *prometheus.CounterVec
-	AnchorDuration    prometheus.Histogram
-	AnchorLastSuccess prometheus.Gauge
-	AnchorCoveredSeq  prometheus.Gauge
+	AnchorAttempts     *prometheus.CounterVec
+	AnchorDuration     prometheus.Histogram
+	AnchorLastSuccess  prometheus.Gauge
+	AnchorCoveredSeq   prometheus.Gauge
+	AuditVerifyRuns    *prometheus.CounterVec
+	AuditVerifyLastSeq prometheus.Gauge
+	AuditVerifyHealthy prometheus.Gauge
 }
 
 func latencyBuckets() []float64 {
@@ -153,6 +156,18 @@ func NewMetrics() *Metrics {
 		AnchorCoveredSeq: prometheus.NewGauge(prometheus.GaugeOpts{
 			Name: "mcpgw_audit_anchor_covered_seq", Help: "Audit sequence number covered by the latest anchor.",
 		}),
+		AuditVerifyRuns: prometheus.NewCounterVec(prometheus.CounterOpts{
+			Name: "mcpgw_audit_verify_runs_total",
+			Help: "Continuous audit chain verification runs by result: ok or failed.",
+		}, []string{"result"}),
+		AuditVerifyLastSeq: prometheus.NewGauge(prometheus.GaugeOpts{
+			Name: "mcpgw_audit_verify_last_seq",
+			Help: "Last sequence number verified by the continuous audit watchdog.",
+		}),
+		AuditVerifyHealthy: prometheus.NewGauge(prometheus.GaugeOpts{
+			Name: "mcpgw_audit_verify_healthy",
+			Help: "1 when the latest continuous audit verification passed, 0 otherwise.",
+		}),
 	}
 	reg.MustRegister(
 		collectors.NewGoCollector(),
@@ -182,6 +197,9 @@ func NewMetrics() *Metrics {
 		m.AnchorDuration,
 		m.AnchorLastSuccess,
 		m.AnchorCoveredSeq,
+		m.AuditVerifyRuns,
+		m.AuditVerifyLastSeq,
+		m.AuditVerifyHealthy,
 	)
 	return m
 }

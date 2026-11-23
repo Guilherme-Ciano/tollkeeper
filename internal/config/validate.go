@@ -537,6 +537,24 @@ func (c *Config) validateAudit(v *validator) {
 	}
 	c.validateAuditCheckpoint(v)
 	c.validateAnchor(v)
+	c.validateAuditVerifyAndRetention(v)
+}
+
+func (c *Config) validateAuditVerifyAndRetention(v *validator) {
+	av := c.Audit.Verify
+	if av.Enabled && (av.Interval < 5*time.Second || av.Interval > 24*time.Hour) {
+		v.add("audit.verify.interval", "must be within [5s, 24h]")
+	}
+	ar := c.Audit.Retention
+	if ar.MaxAge < 0 {
+		v.add("audit.retention.max_age", "must not be negative")
+	}
+	if ar.MaxArchives < 0 {
+		v.add("audit.retention.max_archives", "must not be negative")
+	}
+	if (ar.MaxAge > 0 || ar.MaxArchives > 0) && strings.TrimSpace(ar.ArchiveDir) == "" {
+		v.add("audit.retention.archive_dir", "required when max_age or max_archives is set")
+	}
 }
 
 func (c *Config) validateAuditCheckpoint(v *validator) {
