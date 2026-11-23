@@ -85,6 +85,7 @@ type Upstream struct {
 	Command         []string          `koanf:"command"`
 	Env             map[string]string `koanf:"env"`
 	EnvPassthrough  []string          `koanf:"env_passthrough"`
+	Sandbox         StdioSandbox      `koanf:"sandbox"`
 	URL             string            `koanf:"url"`
 	BlockPrivateIPs bool              `koanf:"block_private_ips"`
 	Timeout         time.Duration     `koanf:"timeout"`
@@ -93,6 +94,37 @@ type Upstream struct {
 	Auth            UpstreamAuth      `koanf:"auth"`
 	RestartBackoff  time.Duration     `koanf:"restart_backoff"`
 	RestartMax      time.Duration     `koanf:"restart_max"`
+}
+
+type StdioSandbox struct {
+	Mode           string        `koanf:"mode"`
+	Backend        string        `koanf:"backend"`
+	WorkDir        string        `koanf:"workdir"`
+	Network        string        `koanf:"network"`
+	ReadOnlyPaths  []string      `koanf:"read_only_paths"`
+	ReadWritePaths []string      `koanf:"read_write_paths"`
+	RLimits        SandboxLimits `koanf:"rlimits"`
+}
+
+type SandboxLimits struct {
+	MaxMemoryMB   int64 `koanf:"max_memory_mb"`
+	MaxOpenFiles  int64 `koanf:"max_open_files"`
+	MaxProcesses  int64 `koanf:"max_processes"`
+	MaxFileSizeMB int64 `koanf:"max_file_size_mb"`
+}
+
+func (l SandboxLimits) Any() bool {
+	return l.MaxMemoryMB > 0 || l.MaxOpenFiles > 0 || l.MaxProcesses > 0 || l.MaxFileSizeMB > 0
+}
+
+func (s StdioSandbox) Configured() bool {
+	return (s.Mode != "" && s.Mode != SandboxModeOff) ||
+		(s.Backend != "" && s.Backend != SandboxBackendAuto) ||
+		s.WorkDir != "" ||
+		(s.Network != "" && s.Network != SandboxNetworkInherit) ||
+		len(s.ReadOnlyPaths) > 0 ||
+		len(s.ReadWritePaths) > 0 ||
+		s.RLimits.Any()
 }
 
 type Breaker struct {
@@ -343,10 +375,30 @@ func defaultUpstream(u Upstream) Upstream {
 	if u.Auth.Type == "" {
 		u.Auth.Type = UpstreamAuthNone
 	}
+	if u.Sandbox.Mode == "" {
+		u.Sandbox.Mode = SandboxModeOff
+	}
+	if u.Sandbox.Backend == "" {
+		u.Sandbox.Backend = SandboxBackendAuto
+	}
+	if u.Sandbox.Network == "" {
+		u.Sandbox.Network = SandboxNetworkInherit
+	}
 	return u
 }
 
 const (
+	SandboxModeOff     = "off"
+	SandboxModeWarn    = "warn"
+	SandboxModeEnforce = "enforce"
+
+	SandboxBackendAuto  = "auto"
+	SandboxBackendOS    = "os"
+	SandboxBackendBwrap = "bwrap"
+
+	SandboxNetworkInherit = "inherit"
+	SandboxNetworkNone    = "none"
+
 	AuthModeJWT           = "jwt"
 	AuthModeIntrospection = "introspection"
 	AuthModeNone          = "none"

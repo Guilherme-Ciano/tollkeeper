@@ -1,0 +1,30 @@
+#!/usr/bin/env sh
+set -eu
+
+staged_go="$(git diff --cached --name-only --diff-filter=ACMR -- '*.go' 'go.mod' 'go.sum' || true)"
+if [ -z "$staged_go" ]; then
+  exit 0
+fi
+
+gopath_bin="$(go env GOPATH)/bin"
+if command -v cygpath >/dev/null 2>&1; then
+  gopath_bin="$(cygpath -u "$gopath_bin")"
+fi
+if [ -d "$gopath_bin" ]; then
+  PATH="$gopath_bin:$PATH"
+fi
+
+echo "[pre-commit] checking zero-comments rule..."
+go run ./internal/tools/nocomments
+
+echo "[pre-commit] checking go.mod tidiness..."
+go mod tidy -diff
+
+echo "[pre-commit] running golangci-lint..."
+if command -v golangci-lint >/dev/null 2>&1; then
+  LINT_BIN="golangci-lint"
+else
+  LINT_BIN="go run github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.15.0"
+fi
+
+$LINT_BIN run --new-from-rev=HEAD ./...
