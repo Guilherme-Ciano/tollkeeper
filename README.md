@@ -7,8 +7,6 @@
 [![CI](https://github.com/Guilherme-Ciano/tollkeeper/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/Guilherme-Ciano/tollkeeper/actions/workflows/ci.yml)
 [![MCP conformance](https://github.com/Guilherme-Ciano/tollkeeper/actions/workflows/conformance.yml/badge.svg?branch=main)](conformance/README.md)
 [![Coverage](https://img.shields.io/endpoint?url=https%3A%2F%2Fraw.githubusercontent.com%2FGuilherme-Ciano%2Ftollkeeper%2Fbadges%2Fcoverage.json)](https://github.com/Guilherme-Ciano/tollkeeper/actions/workflows/ci.yml)
-[![Go Report Card](https://goreportcard.com/badge/github.com/Guilherme-Ciano/tollkeeper)](https://goreportcard.com/report/github.com/Guilherme-Ciano/tollkeeper)
-[![OpenSSF Scorecard](https://api.scorecard.dev/projects/github.com/Guilherme-Ciano/tollkeeper/badge)](https://scorecard.dev/viewer/?uri=github.com/Guilherme-Ciano/tollkeeper)
 [![Release](https://img.shields.io/github/v/release/Guilherme-Ciano/tollkeeper?sort=semver)](https://github.com/Guilherme-Ciano/tollkeeper/releases)
 [![Go Reference](https://pkg.go.dev/badge/github.com/Guilherme-Ciano/tollkeeper.svg)](https://pkg.go.dev/github.com/Guilherme-Ciano/tollkeeper)
 [![License](https://img.shields.io/badge/license-Apache--2.0-blue)](LICENSE)
@@ -18,7 +16,7 @@
 
 - Every MCP server you connect is a new door into your systems, and the spec now forbids the shortcut most proxies take: **forwarding the caller's token upstream** (the official Go proxy example forwards every inbound header, `Authorization` included). tollkeeper validates the token, then calls upstreams with its *own* credentials.
 - "Who called which tool with what, and was it allowed?" is the question compliance teams ask. Most gateways answer it with logs anyone with database access can quietly rewrite. tollkeeper writes a **SHA-256 hash chain with Ed25519-signed checkpoints**, and `tollkeeper audit verify` names the exact record that was changed or deleted.
-- Overhead is measured, not claimed: about 0.6 ms p50 and 1.3 ms p99 added at 1,000 calls/s with every feature on. See [Benchmarks](#benchmarks).
+- Overhead is measured, not claimed: about 0.36 ms p50 and 0.55 ms p99 added at 1,000 calls/s (and under 2 ms p99 up to 4,000 calls/s) with every feature on. See [Benchmarks](#benchmarks).
 
 ## What it does
 
@@ -326,10 +324,20 @@ Shipped in v1.1:
 
 - [x] Checkpoint anchoring in a Rekor v2 transparency log with RFC 3161 timestamps ([ADR 0010](docs/adr/0010-rekor-checkpoint-anchoring.md))
 
+Shipped in v1.2:
+
+- [x] Direct `tools/call` path, sealed multi-round-trip `requestState`, progress forwarding, input-required pass-through
+
+Shipped in v1.3:
+
+- [x] Resources and prompts aggregation, `subscriptions/listen` relayed list-changed notifications
+- [x] Shadow policy rules, `policy explain`, and `SIGHUP` hot config reload
+- [x] RFC 7662 opaque token introspection and OTLP audit log sink
+- [x] Grafana dashboard, Prometheus alert rules, and Helm chart
+
 Next:
 
-- [x] v1.2 (unreleased): direct `tools/call` path, sealed MRTR state, progress forwarding, input-required pass-through
-- [ ] v1.3: ~~resources and prompts aggregation~~, ~~shadow policy rules and `policy explain`~~, ~~hot config reload~~, ~~RFC 7662 introspection~~, ~~OTLP log sink~~, ~~Grafana dashboard, alerts and Helm chart~~ (done, unreleased), the tasks extension (SEP-2663)
+- [ ] v1.4: the tasks extension (SEP-2663)
 - [ ] v2.0: RFC 8693 token exchange to upstreams, DPoP, stdio upstream sandboxing
 
 ## Development
