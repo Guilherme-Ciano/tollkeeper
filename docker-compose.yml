@@ -64,7 +64,7 @@ services:
     ports: ["127.0.0.1:9091:9090"]
 
   grafana:
-    image: docker.io/grafana/grafana-oss:13.0.2@sha256:b8f6abae513b839b2f3487343fa5e44d9c9d7871271fdd17689c4c452cb8098e
+    image: docker.io/grafana/grafana-oss:13.0.2@sha256:5dad0df181cb644a14e13617b913b261a54f7d4fd4510721dba420929f35bea2
     profiles: ["obs"]
     environment:
       GF_AUTH_ANONYMOUS_ENABLED: "true"
