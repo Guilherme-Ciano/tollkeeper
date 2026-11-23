@@ -3,6 +3,7 @@ package app
 import (
 	"bytes"
 	"context"
+	"crypto/ed25519"
 	"crypto/subtle"
 	"crypto/tls"
 	"encoding/json"
@@ -26,6 +27,7 @@ import (
 
 	"github.com/Guilherme-Ciano/tollkeeper/internal/audit"
 	"github.com/Guilherme-Ciano/tollkeeper/internal/audit/anchor"
+	"github.com/Guilherme-Ciano/tollkeeper/internal/audit/kms"
 	"github.com/Guilherme-Ciano/tollkeeper/internal/audit/otlpsink"
 	"github.com/Guilherme-Ciano/tollkeeper/internal/audit/pgsink"
 	"github.com/Guilherme-Ciano/tollkeeper/internal/authn"
@@ -269,12 +271,19 @@ func (a *App) openAudit(ctx context.Context) error {
 		})
 		opts.Committed = a.otlp.Committed
 	}
-	if a.cfg.Audit.Checkpoint.SigningKeyFile != "" {
-		k, err := audit.LoadPrivateKey(a.cfg.Audit.Checkpoint.SigningKeyFile)
+	if hasAuditSigner(a.cfg.Audit.Checkpoint) {
+		signer, rawEd, err := buildAuditSigner(ctx, a.cfg.Audit.Checkpoint)
 		if err != nil {
 			return err
 		}
-		opts.Signer = k
+		opts.CheckpointSigner = signer
+		opts.Signer = rawEd
+		if a.cfg.Audit.Checkpoint.KMS != nil && a.cfg.Audit.Checkpoint.KMS.Timeout > 0 {
+			opts.SignTimeout = a.cfg.Audit.Checkpoint.KMS.Timeout
+		}
+		a.log.InfoContext(ctx, "audit checkpoint signer enabled",
+			slog.String("key_id", signer.KeyID()),
+			slog.String("algorithm", signer.Algorithm()))
 	} else {
 		a.log.WarnContext(ctx, "audit checkpoints disabled: no signing key configured")
 	}
@@ -292,6 +301,60 @@ func (a *App) openAudit(ctx context.Context) error {
 		a.anchorer.Offer(ref)
 	}
 	return nil
+}
+
+func hasAuditSigner(ck config.Checkpoint) bool {
+	return ck.SigningKeyFile != "" || (ck.KMS != nil && ck.KMS.Provider != "")
+}
+
+func buildAuditSigner(ctx context.Context, ck config.Checkpoint) (audit.CheckpointSigner, ed25519.PrivateKey, error) {
+	if ck.SigningKeyFile != "" {
+		k, err := audit.LoadPrivateKey(ck.SigningKeyFile)
+		if err != nil {
+			return nil, nil, err
+		}
+		s, err := audit.NewLocalSigner(k)
+		if err != nil {
+			return nil, nil, err
+		}
+		return s, k, nil
+	}
+	if ck.KMS == nil {
+		return nil, nil, audit.ErrNoSigner
+	}
+	switch ck.KMS.Provider {
+	case config.KMSProviderVault:
+		s, err := kms.NewVaultSigner(ctx, kms.VaultOptions{
+			Address:         ck.KMS.Vault.Address,
+			Mount:           ck.KMS.Vault.Mount,
+			KeyID:           ck.KMS.KeyID,
+			Token:           ck.KMS.Vault.Token,
+			Namespace:       ck.KMS.Vault.Namespace,
+			Timeout:         ck.KMS.Timeout,
+			BlockPrivateIPs: ck.KMS.BlockPrivateIPs,
+		})
+		if err != nil {
+			return nil, nil, err
+		}
+		return s, nil, nil
+	case config.KMSProviderAWS:
+		s, err := kms.NewAWSSigner(ctx, kms.AWSOptions{
+			Region:          ck.KMS.AWS.Region,
+			KeyID:           ck.KMS.KeyID,
+			Endpoint:        ck.KMS.AWS.Endpoint,
+			AccessKeyID:     ck.KMS.AWS.AccessKeyID,
+			SecretAccessKey: ck.KMS.AWS.SecretAccessKey,
+			SessionToken:    ck.KMS.AWS.SessionToken,
+			Timeout:         ck.KMS.Timeout,
+			BlockPrivateIPs: ck.KMS.BlockPrivateIPs,
+		})
+		if err != nil {
+			return nil, nil, err
+		}
+		return s, nil, nil
+	default:
+		return nil, nil, fmt.Errorf("unsupported audit kms provider %q: %w", ck.KMS.Provider, config.ErrInvalid)
+	}
 }
 
 func (a *App) openMirror(ctx context.Context, opts *audit.Options) error {

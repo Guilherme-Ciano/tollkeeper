@@ -54,6 +54,15 @@ func (a *App) Reload(ctx context.Context, next config.Config) error {
 		a.metrics.ConfigReloads.WithLabelValues("invalid").Inc()
 		return fmt.Errorf("rate limits: %w", err)
 	}
+	rotated, err := a.rotateAuditKey(ctx, next.Audit.Checkpoint)
+	if err != nil {
+		a.metrics.ConfigReloads.WithLabelValues("invalid").Inc()
+		return fmt.Errorf("rotate audit key: %w", err)
+	}
+	if rotated {
+		a.cfg.Audit.Checkpoint.SigningKeyFile = next.Audit.Checkpoint.SigningKeyFile
+		a.cfg.Audit.Checkpoint.KMS = next.Audit.Checkpoint.KMS
+	}
 	restart := restartSections(a.cfg, next)
 	detail := ""
 	if len(restart) > 0 {
@@ -72,6 +81,28 @@ func (a *App) Reload(ctx context.Context, next config.Config) error {
 	}
 	a.log.InfoContext(ctx, "config reloaded: policy and rate limit rules applied", attrs...)
 	return nil
+}
+
+func (a *App) rotateAuditKey(ctx context.Context, next config.Checkpoint) (bool, error) {
+	if a.auditLog == nil || a.auditLog.ActiveKeyID() == "" || a.anchorer != nil || !hasAuditSigner(next) {
+		return false, nil
+	}
+	signer, _, err := buildAuditSigner(ctx, next)
+	if err != nil {
+		return false, err
+	}
+	prevID := a.auditLog.ActiveKeyID()
+	if signer.KeyID() == prevID {
+		return false, nil
+	}
+	if err := a.auditLog.RotateSigner(ctx, signer); err != nil {
+		return false, err
+	}
+	a.log.InfoContext(ctx, "audit signing key rotated",
+		slog.String("prev_key_id", prevID),
+		slog.String("new_key_id", signer.KeyID()),
+		slog.String("algorithm", signer.Algorithm()))
+	return true, nil
 }
 
 func (a *App) reloadFromFile(ctx context.Context, path string) {

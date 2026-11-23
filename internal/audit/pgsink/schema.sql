@@ -3,7 +3,7 @@ CREATE TABLE IF NOT EXISTS tollkeeper_audit (
     seq      bigint      NOT NULL CHECK (seq > 0),
     ts       timestamptz NOT NULL,
     kind     text        NOT NULL CONSTRAINT tollkeeper_audit_kind_check
-                         CHECK (kind IN ('event', 'checkpoint', 'anchor')),
+                         CHECK (kind IN ('event', 'checkpoint', 'anchor', 'key_rotation')),
     hash     char(64)    NOT NULL,
     prev     char(64)    NOT NULL,
     body     jsonb,
@@ -18,11 +18,11 @@ BEGIN
     IF NOT EXISTS (
         SELECT 1 FROM pg_constraint
         WHERE conrelid = 'tollkeeper_audit'::regclass AND contype = 'c'
-          AND pg_get_constraintdef(oid) LIKE '%''anchor''%'
+          AND pg_get_constraintdef(oid) LIKE '%''key_rotation''%'
     ) THEN
         ALTER TABLE tollkeeper_audit DROP CONSTRAINT IF EXISTS tollkeeper_audit_kind_check;
         ALTER TABLE tollkeeper_audit ADD CONSTRAINT tollkeeper_audit_kind_check
-            CHECK (kind IN ('event', 'checkpoint', 'anchor'));
+            CHECK (kind IN ('event', 'checkpoint', 'anchor', 'key_rotation'));
     END IF;
 END
 $$;
@@ -61,6 +61,7 @@ BEGIN
         OR parsed->>'prev' IS DISTINCT FROM NEW.prev
         OR (parsed ? 'checkpoint') IS DISTINCT FROM (NEW.kind = 'checkpoint')
         OR (parsed ? 'anchor') IS DISTINCT FROM (NEW.kind = 'anchor')
+        OR (parsed ? 'key_rotation') IS DISTINCT FROM (NEW.kind = 'key_rotation')
     ) THEN
         RAISE EXCEPTION 'chain % record %: columns disagree with the stored record', NEW.chain_id, NEW.seq
             USING ERRCODE = 'check_violation';

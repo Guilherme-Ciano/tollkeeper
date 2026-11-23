@@ -150,3 +150,61 @@ func TestRestartSections(t *testing.T) {
 		t.Fatalf("got %q", got)
 	}
 }
+
+func TestReloadRotatesAuditSigningKeyLive(t *testing.T) {
+	up := fakeUpstream(t, &headerLog{})
+	dir := t.TempDir()
+	priv1PEM, pub1PEM, err := audit.GenerateKeyPair()
+	if err != nil {
+		t.Fatal(err)
+	}
+	keyPath := filepath.Join(dir, "audit-key.pem")
+	if err := os.WriteFile(keyPath, priv1PEM, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	pub1, err := audit.ParsePublicKey(pub1PEM)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	cfg := testConfig(t, up.URL)
+	cfg.Audit.Checkpoint.SigningKeyFile = keyPath
+	cfg.Audit.Checkpoint.Every = 1
+	a, _ := readyApp(t, cfg)
+	initialID := a.auditLog.ActiveKeyID()
+	if initialID == "" {
+		t.Fatal("expected active audit signing key id")
+	}
+
+	priv2PEM, _, err := audit.GenerateKeyPair()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(keyPath, priv2PEM, 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	next := cfg
+	next.Digest = "rotated"
+	if err := a.Reload(t.Context(), next); err != nil {
+		t.Fatalf("reload with rotated key: %v", err)
+	}
+	if a.auditLog.ActiveKeyID() == initialID {
+		t.Fatalf("signing key did not rotate on reload (still %q)", initialID)
+	}
+	if err := a.auditLog.Close(); err != nil {
+		t.Fatalf("close audit log: %v", err)
+	}
+	f, err := os.Open(cfg.Audit.Path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer f.Close()
+	rep, err := audit.Verify(f, pub1)
+	if err != nil {
+		t.Fatalf("verify rotated chain from root pubkey: %v", err)
+	}
+	if rep.KeyRotations != 1 || rep.UnsignedTail != 0 {
+		t.Fatalf("unexpected report after live reload rotation: %+v", rep)
+	}
+}

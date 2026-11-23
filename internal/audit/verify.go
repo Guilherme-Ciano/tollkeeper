@@ -18,6 +18,7 @@ type Report struct {
 	Records       uint64
 	Events        uint64
 	Checkpoints   uint64
+	KeyRotations  uint64
 	Gaps          uint64
 	DroppedEvents uint64
 	LastSeq       uint64
@@ -61,6 +62,7 @@ type AnchorVerifier interface {
 
 type VerifyOptions struct {
 	PublicKey ed25519.PublicKey
+	Keys      *KeySet
 	Anchors   AnchorVerifier
 }
 
@@ -137,7 +139,7 @@ func (c *checkpointRing) find(seq uint64) (ringEntry, bool) {
 }
 
 type verifier struct {
-	pub     ed25519.PublicKey
+	keys    *KeySet
 	anchors AnchorVerifier
 	rep     Report
 	prev    string
@@ -152,11 +154,32 @@ func Verify(r io.Reader, pub ed25519.PublicKey) (Report, error) {
 	return VerifyWith(r, VerifyOptions{PublicKey: pub})
 }
 
+func resolveVerifyKeys(o VerifyOptions) (*KeySet, error) {
+	if o.Keys != nil {
+		ks := o.Keys.Clone()
+		if o.PublicKey != nil {
+			if err := ks.Add(o.PublicKey); err != nil {
+				return nil, err
+			}
+		}
+		return ks, nil
+	}
+	return NewKeySet(o.PublicKey)
+}
+
 func VerifyWith(r io.Reader, o VerifyOptions) (Report, error) {
-	if o.Anchors != nil && o.PublicKey == nil {
+	var ks *KeySet
+	if o.Keys != nil || o.PublicKey != nil {
+		var err error
+		ks, err = resolveVerifyKeys(o)
+		if err != nil {
+			return Report{}, err
+		}
+	}
+	if o.Anchors != nil && (ks == nil || ks.Len() == 0) {
 		return Report{}, ErrAnchorNeedsKey
 	}
-	v := &verifier{pub: o.PublicKey, anchors: o.Anchors, prev: ZeroHash}
+	v := &verifier{keys: ks, anchors: o.Anchors, prev: ZeroHash}
 	br := bufio.NewReaderSize(r, 1<<20)
 	for {
 		line, err := br.ReadBytes('\n')
@@ -224,7 +247,7 @@ func (v *verifier) line(line []byte, terminated bool) error {
 	v.lastTS = max(v.lastTS, body.TS)
 	v.ckpts.next(body.TS)
 	if body.kinds() != 1 {
-		return v.fail(body.Seq, "record must hold exactly one of event, checkpoint or anchor")
+		return v.fail(body.Seq, "record must hold exactly one of event, checkpoint, anchor or key_rotation")
 	}
 	if err := v.account(&body, rec.Hash); err != nil {
 		return err
@@ -246,11 +269,32 @@ func (v *verifier) account(body *Body, hash string) error {
 		return nil
 	case body.Anchor != nil:
 		return v.anchor(body)
+	case body.KeyRotation != nil:
+		return v.keyRotation(body)
 	}
 	if err := v.checkpoint(body); err != nil {
 		return err
 	}
 	v.ckpts.add(CheckpointRef{ChainID: body.ChainID, Seq: body.Seq, Hash: hash, TS: body.TS})
+	return nil
+}
+
+func (v *verifier) keyRotation(body *Body) error {
+	kr := body.KeyRotation
+	if v.keys != nil {
+		prevPub, ok := v.keys.Lookup(kr.PrevKeyID)
+		if !ok {
+			return v.fail(body.Seq, "key rotation signed by unknown key %s", kr.PrevKeyID)
+		}
+		newPub, err := VerifyKeyRotation(prevPub, body.ChainID, kr)
+		if err != nil {
+			return v.fail(body.Seq, "invalid key rotation: %v", err)
+		}
+		if err := v.keys.Add(newPub); err != nil {
+			return v.fail(body.Seq, "register rotated key: %v", err)
+		}
+	}
+	v.rep.KeyRotations++
 	return nil
 }
 
@@ -261,15 +305,24 @@ func (v *verifier) anchor(body *Body) error {
 	if !ok || covered.Hash != a.CoversHash {
 		return v.fail(body.Seq, "anchor covers an unknown or different checkpoint at seq %d", a.CoversSeq)
 	}
-	if v.pub != nil && a.KeyID != KeyID(v.pub) {
-		return v.fail(body.Seq, "anchor signed by unknown key %s", a.KeyID)
+	var anchorPub ed25519.PublicKey
+	if v.keys != nil {
+		pub, ok := v.keys.Lookup(a.KeyID)
+		if !ok {
+			return v.fail(body.Seq, "anchor signed by unknown key %s", a.KeyID)
+		}
+		edPub, ok := pub.(ed25519.PublicKey)
+		if !ok {
+			return v.fail(body.Seq, "anchor key %s is not ed25519", a.KeyID)
+		}
+		anchorPub = edPub
 	}
 	v.rep.Anchors++
 	if v.anchors == nil {
 		v.rep.UnverifiedAnchors++
 		return nil
 	}
-	ev, err := v.anchors.VerifyAnchor(body.ChainID, a, covered, v.pub)
+	ev, err := v.anchors.VerifyAnchor(body.ChainID, a, covered, anchorPub)
 	if err != nil {
 		return v.fail(body.Seq, "anchor for seq %d: %v", a.CoversSeq, err)
 	}
@@ -310,11 +363,12 @@ func (v *verifier) checkpoint(body *Body) error {
 	if ck.CoversSeq != body.Seq-1 || ck.CoversHash != body.Prev {
 		return v.fail(body.Seq, "checkpoint does not cover the preceding record")
 	}
-	if v.pub != nil {
-		if ck.KeyID != KeyID(v.pub) {
+	if v.keys != nil {
+		pub, ok := v.keys.Lookup(ck.KeyID)
+		if !ok {
 			return v.fail(body.Seq, "checkpoint signed by unknown key %s", ck.KeyID)
 		}
-		if !VerifyCheckpoint(v.pub, body.ChainID, ck) {
+		if !VerifyCheckpointAny(pub, body.ChainID, ck) {
 			return v.fail(body.Seq, "invalid checkpoint signature")
 		}
 		v.rep.LastSignedSeq = body.Seq

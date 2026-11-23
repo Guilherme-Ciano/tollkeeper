@@ -228,7 +228,7 @@ policy:
       effect: allow
 ```
 
-`kill -HUP` reloads the config file: policy rules and rate-limit rules are swapped atomically, an invalid file is rejected and the running config stays in force, and every load and reload writes a `config/load` or `config/reload` audit record carrying the file's SHA-256 (`mcpgw_config_reloads_total{result}` counts them). Changes to listeners, auth, upstreams, audit, telemetry, pinning or the rate-limit store are logged as needing a restart and are not applied. SIGHUP is not available on Windows.
+`kill -HUP` reloads the config file: policy rules and rate-limit rules are swapped atomically, changed audit checkpoint signing keys rotate live with a signed `key_rotation` record (when anchoring is disabled), an invalid file is rejected and the running config stays in force, and every load and reload writes a `config/load` or `config/reload` audit record carrying the file's SHA-256 (`mcpgw_config_reloads_total{result}` counts them). Changes to listeners, auth, upstreams, other audit settings, telemetry, pinning or the rate-limit store are logged as needing a restart and are not applied. SIGHUP is not available on Windows.
 
 A rule with `mode: shadow` is evaluated but never decides: the first shadow rule that would have decided is written to the call's audit records (`shadow_rule`, `shadow_decision`) and counted in `mcpgw_policy_shadow_decisions_total{rule, shadow_effect, effect}`, so a new deny can be watched against real traffic before it is enforced. Shadow rules never make anything visible.
 
@@ -251,6 +251,7 @@ A rule applies to tools, prompts or resources only through its own `tools`, `pro
 | `upstreams[].auth.type` | `none` | `bearer` or `client_credentials` with RFC 8707 `resource` |
 | `rate_limits.rules[].per` | | `subject`, `subject_tool`, `client_id`, `upstream`, `tool`, `global` |
 | `rate_limits.store` | `memory` | `redis` shares limits across replicas; set `rate_limits.redis.addrs`, `key_prefix`, `timeout` (50 ms) and `on_error` (`local` fallback or `deny`) |
+| `audit.checkpoint.kms` | | Pure-Go KMS checkpoint signing (`provider: vault` for Vault/OpenBao Transit Ed25519/P-256, or `provider: aws` for AWS KMS SigV4 P-256); mutually exclusive with `audit.checkpoint.signing_key_file` ([ADR 0012](docs/adr/0012-audit-key-rotation-and-kms.md)) |
 | `audit.postgres.dsn` | | Mirror the audit chain to Postgres ([roles and grants](docs/operations/postgres.md)); `audit.postgres.migrate: true` only in development; requires `audit.chain_id` and `audit.fsync` |
 | `audit.anchor.enabled` | `false` | Anchor checkpoints in a Rekor v2 log (`rekor_url`, `trust_files`, `tsa_url`, `interval` 15m, `min_spacing` 1m); entries are public and permanent ([anchoring](docs/operations/anchoring.md)) |
 | `audit.otlp.endpoint` | | Also send every committed audit record to an OpenTelemetry collector as an OTLP/HTTP JSON log (`/v1/logs`), with chain, sequence, hash, decision, tool and subject as attributes and the exact record as the body. Best effort and never authoritative: a bounded queue (`queue` 10000, `batch` 512, `interval` 2s) drops records instead of slowing the gateway, counted in `mcpgw_audit_otlp_records_total{result}`; the file stays the source of truth. `headers` for collector credentials |

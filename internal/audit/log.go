@@ -31,6 +31,8 @@ type Options struct {
 	Fsync              bool
 	FailOpen           bool
 	Signer             ed25519.PrivateKey
+	CheckpointSigner   CheckpointSigner
+	SignTimeout        time.Duration
 	CheckpointEvery    int
 	CheckpointInterval time.Duration
 	Now                func() time.Time
@@ -51,6 +53,11 @@ type queuedAnchor struct {
 	anchor *Anchor
 }
 
+type rotateReq struct {
+	next CheckpointSigner
+	done chan error
+}
+
 type logFile interface {
 	io.Writer
 	io.ReaderAt
@@ -61,20 +68,23 @@ type logFile interface {
 }
 
 type Log struct {
-	opts      Options
-	file      logFile
-	ch        chan Event
-	anchors   chan queuedAnchor
-	stop      chan struct{}
-	done      chan struct{}
-	closeOnce sync.Once
-	sendMu    sync.RWMutex
-	closed    atomic.Bool
-	dropped   atomic.Uint64
-	sinkErr   atomic.Pointer[error]
-	fatal     atomic.Bool
-	runErr    error
+	opts        Options
+	file        logFile
+	ch          chan Event
+	anchors     chan queuedAnchor
+	rotations   chan rotateReq
+	stop        chan struct{}
+	done        chan struct{}
+	closeOnce   sync.Once
+	sendMu      sync.RWMutex
+	closed      atomic.Bool
+	dropped     atomic.Uint64
+	sinkErr     atomic.Pointer[error]
+	fatal       atomic.Bool
+	activeKeyID atomic.Pointer[string]
+	runErr      error
 
+	signer       CheckpointSigner
 	seq          uint64
 	prev         string
 	lastCkptSeq  uint64
@@ -111,6 +121,17 @@ func OpenContext(ctx context.Context, opts Options) (*Log, error) {
 	if opts.MirrorTimeout <= 0 {
 		opts.MirrorTimeout = 5 * time.Second
 	}
+	if opts.SignTimeout <= 0 {
+		opts.SignTimeout = 10 * time.Second
+	}
+	signer := opts.CheckpointSigner
+	if signer == nil && opts.Signer != nil {
+		var err error
+		signer, err = NewLocalSigner(opts.Signer)
+		if err != nil {
+			return nil, err
+		}
+	}
 	f, err := os.OpenFile(opts.Path, os.O_RDWR|os.O_CREATE|os.O_APPEND, 0o600)
 	if err != nil {
 		return nil, fmt.Errorf("open audit log: %w", err)
@@ -120,11 +141,14 @@ func OpenContext(ctx context.Context, opts Options) (*Log, error) {
 		file:         f,
 		ch:           make(chan Event, opts.Buffer),
 		anchors:      make(chan queuedAnchor, anchorQueue),
+		rotations:    make(chan rotateReq, 1),
 		stop:         make(chan struct{}),
 		done:         make(chan struct{}),
+		signer:       signer,
 		prev:         ZeroHash,
 		lastCkptTime: opts.Now(),
 	}
+	l.setActiveKeyID(signer)
 	if err := l.recover(); err != nil {
 		return nil, errors.Join(err, f.Close())
 	}
@@ -171,6 +195,95 @@ func (l *Log) recover() error {
 		l.recovered = CheckpointRef{ChainID: body.ChainID, Seq: body.Seq, Hash: rec.Hash, TS: body.TS}
 		l.lastCkpt, l.hasRecovered = l.recovered, true
 	}
+	return nil
+}
+
+func (l *Log) setActiveKeyID(s CheckpointSigner) {
+	if s == nil {
+		l.activeKeyID.Store(nil)
+		return
+	}
+	id := s.KeyID()
+	l.activeKeyID.Store(&id)
+}
+
+func (l *Log) ActiveKeyID() string {
+	if p := l.activeKeyID.Load(); p != nil {
+		return *p
+	}
+	return ""
+}
+
+func (l *Log) RotateSigner(ctx context.Context, next CheckpointSigner) error {
+	if next == nil {
+		return ErrNoSigner
+	}
+	req := rotateReq{next: next, done: make(chan error, 1)}
+	l.sendMu.RLock()
+	if l.closed.Load() {
+		l.sendMu.RUnlock()
+		return ErrClosed
+	}
+	select {
+	case l.rotations <- req:
+		l.sendMu.RUnlock()
+	case <-l.stop:
+		l.sendMu.RUnlock()
+		return ErrClosed
+	case <-ctx.Done():
+		l.sendMu.RUnlock()
+		return fmt.Errorf("rotate audit signer: %w", context.Cause(ctx))
+	}
+	select {
+	case err := <-req.done:
+		return err
+	case <-l.done:
+		return ErrClosed
+	case <-ctx.Done():
+		return fmt.Errorf("rotate audit signer: %w", context.Cause(ctx))
+	}
+}
+
+func (l *Log) rotate(ctx context.Context, next CheckpointSigner) (err error) {
+	if l.fatal.Load() {
+		return ErrCorrupt
+	}
+	if l.signer == nil {
+		return ErrNoSigner
+	}
+	if next.KeyID() == l.signer.KeyID() {
+		return ErrSameKey
+	}
+	saved := l.save()
+	defer func() {
+		if err != nil {
+			l.restore(saved)
+		}
+	}()
+	l.resetBatch()
+	if l.unsigned > 0 {
+		if err := l.appendCheckpoint(ctx); err != nil {
+			return err
+		}
+	}
+	sctx, cancel := context.WithTimeout(ctx, l.opts.SignTimeout)
+	defer cancel()
+	kr, err := SignKeyRotation(sctx, l.signer, next, l.opts.ChainID)
+	if err != nil {
+		return err
+	}
+	if err := l.appendBody(&Body{KeyRotation: kr}); err != nil {
+		return err
+	}
+	l.signer = next
+	if err := l.appendCheckpoint(ctx); err != nil {
+		return err
+	}
+	if err := l.commit(ctx); err != nil {
+		return err
+	}
+	l.setActiveKeyID(next)
+	l.committed(saved)
 	return nil
 }
 
@@ -348,12 +461,12 @@ func (l *Log) shutdown(ctx context.Context, batch []Event) {
 	if err := l.write(ctx, l.drain(batch)); err != nil {
 		l.runErr = err
 	}
-	if l.opts.Signer == nil || l.seq <= l.lastCkptSeq {
+	if l.signer == nil || l.seq <= l.lastCkptSeq {
 		return
 	}
 	saved := l.save()
 	l.resetBatch()
-	err := l.appendCheckpoint()
+	err := l.appendCheckpoint(ctx)
 	if err == nil {
 		err = l.commit(ctx)
 	}
@@ -366,6 +479,7 @@ func (l *Log) shutdown(ctx context.Context, batch []Event) {
 }
 
 type sequencerState struct {
+	signer   CheckpointSigner
 	seq      uint64
 	prev     string
 	unsigned uint64
@@ -377,13 +491,14 @@ type sequencerState struct {
 
 func (l *Log) save() sequencerState {
 	return sequencerState{
-		seq: l.seq, prev: l.prev, unsigned: l.unsigned, ckSeq: l.lastCkptSeq, ckTime: l.lastCkptTime,
+		signer: l.signer, seq: l.seq, prev: l.prev, unsigned: l.unsigned, ckSeq: l.lastCkptSeq, ckTime: l.lastCkptTime,
 		ordinal: l.ckptOrdinal, lastCkpt: l.lastCkpt,
 	}
 }
 
 func (l *Log) restore(s sequencerState) {
 	atomic.StoreUint64(&l.seq, s.seq)
+	l.signer = s.signer
 	l.prev, l.unsigned, l.lastCkptSeq, l.lastCkptTime = s.prev, s.unsigned, s.ckSeq, s.ckTime
 	l.ckptOrdinal, l.lastCkpt = s.ordinal, s.lastCkpt
 }
@@ -408,6 +523,9 @@ func (l *Log) run(ctx context.Context) {
 			}
 		case q := <-l.anchors:
 			l.queueAnchor(q)
+		case req := <-l.rotations:
+			batch = l.flush(ctx, batch)
+			req.done <- l.rotate(ctx, req.next)
 		case <-ticker.C:
 			if l.opts.Hooks.QueueDepth != nil {
 				l.opts.Hooks.QueueDepth(len(l.ch))
@@ -421,7 +539,7 @@ func (l *Log) run(ctx context.Context) {
 }
 
 func (l *Log) checkpointDue() bool {
-	if l.opts.Signer == nil || l.unsigned == 0 {
+	if l.signer == nil || l.unsigned == 0 {
 		return false
 	}
 	if l.opts.CheckpointEvery > 0 && l.unsigned >= uint64(l.opts.CheckpointEvery) {
@@ -466,8 +584,10 @@ func (l *Log) appendBody(b *Body) error {
 	return nil
 }
 
-func (l *Log) appendCheckpoint() error {
-	ck, err := SignCheckpoint(l.opts.Signer, l.opts.ChainID, l.seq, l.prev)
+func (l *Log) appendCheckpoint(ctx context.Context) error {
+	sctx, cancel := context.WithTimeout(ctx, l.opts.SignTimeout)
+	defer cancel()
+	ck, err := SignCheckpointWith(sctx, l.signer, l.opts.ChainID, l.seq, l.prev)
 	if err != nil {
 		return err
 	}
@@ -501,7 +621,7 @@ func (l *Log) write(ctx context.Context, batch []Event) (err error) {
 	if err != nil {
 		return err
 	}
-	if err := l.appendBatch(d, batch); err != nil {
+	if err := l.appendBatch(ctx, d, batch); err != nil {
 		return err
 	}
 	if err := l.commit(ctx); err != nil {
@@ -517,7 +637,7 @@ func (l *Log) write(ctx context.Context, batch []Event) (err error) {
 	return nil
 }
 
-func (l *Log) appendBatch(dropped uint64, batch []Event) error {
+func (l *Log) appendBatch(ctx context.Context, dropped uint64, batch []Event) error {
 	if dropped > 0 {
 		if err := l.appendBody(
 			&Body{Event: &Event{Phase: PhaseDecision, Method: "audit", Decision: DecisionGap, Dropped: dropped}},
@@ -529,18 +649,18 @@ func (l *Log) appendBatch(dropped uint64, batch []Event) error {
 		if err := l.appendBody(&Body{Event: &batch[i]}); err != nil {
 			return err
 		}
-		if err := l.maybeCheckpoint(); err != nil {
+		if err := l.maybeCheckpoint(ctx); err != nil {
 			return err
 		}
 	}
-	return l.maybeCheckpoint()
+	return l.maybeCheckpoint(ctx)
 }
 
-func (l *Log) maybeCheckpoint() error {
+func (l *Log) maybeCheckpoint(ctx context.Context) error {
 	if !l.checkpointDue() {
 		return nil
 	}
-	return l.appendCheckpoint()
+	return l.appendCheckpoint(ctx)
 }
 
 func (l *Log) anchorsCommitted(written []queuedAnchor) {
