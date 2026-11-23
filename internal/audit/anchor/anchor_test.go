@@ -536,16 +536,28 @@ func TestAnchorerRetriesWithBackoffThenSucceedsOnNewestRef(t *testing.T) {
 	sink := newSink()
 	var mu sync.Mutex
 	outcomes := map[string]int{}
+	doneOK := make(chan struct{}, 1)
 	a := newAnchorer(t, s, key(t), sink, func(o *anchor.Options) {
 		o.Hooks.Attempt = func(out string) {
 			mu.Lock()
 			outcomes[out]++
 			mu.Unlock()
+			if out == anchor.OutcomeOK {
+				select {
+				case doneOK <- struct{}{}:
+				default:
+				}
+			}
 		}
 	})
 	a.Offer(ref(1))
 	a.Offer(ref(2))
 	sink.wait(t)
+	select {
+	case <-doneOK:
+	case <-time.After(5 * time.Second):
+		t.Fatal("timed out waiting for OutcomeOK hook")
+	}
 	mu.Lock()
 	defer mu.Unlock()
 	if outcomes[anchor.OutcomeRetry] != 3 || outcomes[anchor.OutcomeOK] != 1 || sink.got[0].CoversSeq != 2 {
