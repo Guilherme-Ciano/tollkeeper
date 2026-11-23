@@ -251,7 +251,7 @@ A rule applies to tools, prompts or resources only through its own `tools`, `pro
 | `upstreams[].block_private_ips` | `false` | Block loopback, RFC 1918, link-local/IMDS (`169.254.169.254`) and reserved IPs at `Dialer.Control` before `connect()` (DNS-rebinding proof) |
 | `upstreams[].sandbox` | `mode: off` | Optional stdio subprocess isolation (`off`, `warn`, `enforce`) with `workdir`, Linux `rlimits` (`prlimit`) and namespace/filesystem isolation (`bwrap`: `network: none`, `read_only_paths`, `read_write_paths`); `enforce` fails closed ([ADR 0011](docs/adr/0011-stdio-sandboxing.md)) |
 | `upstreams[].auth.type` | `none` | `bearer`, `client_credentials` with RFC 8707 `resource`, or `token_exchange` (RFC 8693 per-caller downscoped exchange with `intersect_caller_scopes`, `max_delegation_depth`, `actor_token`, and `allowed_issuers`; [ADR 0013](docs/adr/0013-oauth-token-exchange-and-delegation.md)) |
-| `rate_limits.rules[].per` | | `subject`, `subject_tool`, `client_id`, `upstream`, `tool`, `global` |
+| `rate_limits.rules[].per` | | `subject`, `subject_tool`, `client_id`, `tenant`, `tenant_tool`, `upstream`, `tool`, `global` |
 | `rate_limits.store` | `memory` | `redis` shares limits across replicas; set `rate_limits.redis.addrs`, `key_prefix`, `timeout` (50 ms) and `on_error` (`local` fallback or `deny`) |
 | `audit.checkpoint.kms` | | Pure-Go KMS checkpoint signing (`provider: vault` for Vault/OpenBao Transit Ed25519/P-256, or `provider: aws` for AWS KMS SigV4 P-256); mutually exclusive with `audit.checkpoint.signing_key_file` ([ADR 0012](docs/adr/0012-audit-key-rotation-and-kms.md)) |
 | `audit.postgres.dsn` | | Mirror the audit chain to Postgres ([roles and grants](docs/operations/postgres.md)); `audit.postgres.migrate: true` only in development; requires `audit.chain_id` and `audit.fsync` |
@@ -264,7 +264,7 @@ A rule applies to tools, prompts or resources only through its own `tools`, `pro
 | `pinning.file` | | Lockfile written by `tollkeeper pin approve`; required for `enforce`, reloaded every `pinning.reload_interval` (5 s); refused if group or world writable |
 | `pinning.report_token` | | Bearer token for `GET /pins`; without it the report is only served on a loopback admin listener |
 
-CEL variables: `principal{sub, client_id, scopes, claims}`, `tool{name, upstream, original, pin_hash, annotations}` (for prompts and resources: the prompt name or URI, its upstream and the upstream's own name), `args` (prompt arguments for `prompts/get`), `request{kind, method, client_name}` with `kind` one of `tool`, `prompt`, `resource`, `template`, and `now`. Programs are compiled at load time with a cost limit and a 50 ms evaluation timeout, and arguments are only decoded when a rule references `args`.
+CEL variables: `principal{sub, client_id, tenant, delegated, actor, scopes, roles, groups, acr, amr, auth_age_seconds, dpop, jkt, claims}`, `tool{name, upstream, original, pin_hash, annotations}` (for prompts and resources: the prompt name or URI, its upstream and the upstream's own name), `args` (prompt arguments for `prompts/get`), `request{kind, method, client_name}` with `kind` one of `tool`, `prompt`, `resource`, `template`, and `now`. Programs are compiled at load time with a cost limit and a 50 ms evaluation timeout, and arguments are only decoded when a rule references `args`. Per-tenant isolated policy scopes live under `policy.tenants.<id>`, and `on_deny` supports RFC 9470 `acr_values`, `max_age`, `require_dpop` and `step_up_scopes` ([ADR 0015](docs/adr/0015-tenant-policies-and-step-up.md)).
 
 ## Benchmarks
 

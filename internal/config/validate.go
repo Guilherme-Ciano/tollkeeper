@@ -407,10 +407,25 @@ func validateTokenExchange(v *validator, f string, a UpstreamAuth) {
 
 func (c *Config) validatePolicy(v *validator) {
 	v.oneOf("policy.default", c.Policy.Default, EffectAllow, EffectDeny)
+	validatePolicyRules(v, "policy.rules", c.Policy.Rules)
+	for tenantID, tp := range c.Policy.Tenants {
+		prefix := "policy.tenants." + tenantID
+		if strings.TrimSpace(tenantID) == "" {
+			v.add("policy.tenants", "tenant id must not be empty")
+			continue
+		}
+		if tp.Default != "" {
+			v.oneOf(prefix+".default", tp.Default, EffectAllow, EffectDeny)
+		}
+		validatePolicyRules(v, prefix+".rules", tp.Rules)
+	}
+}
+
+func validatePolicyRules(v *validator, prefix string, rules []Rule) {
 	names := map[string]bool{}
-	for i := range c.Policy.Rules {
-		r := &c.Policy.Rules[i]
-		f := fmt.Sprintf("policy.rules[%d]", i)
+	for i := range rules {
+		r := &rules[i]
+		f := fmt.Sprintf("%s[%d]", prefix, i)
 		v.require(f+".name", r.Name)
 		if names[r.Name] {
 			v.add(f+".name", "duplicate rule name %q", r.Name)
@@ -425,13 +440,23 @@ func (c *Config) validatePolicy(v *validator) {
 		v.globs(f+".subjects.subs", r.Subjects.Subs)
 		v.globs(f+".subjects.client_ids", r.Subjects.ClientIDs)
 		v.globs(f+".subjects.actors", r.Subjects.Actors)
+		v.globs(f+".subjects.tenants", r.Subjects.Tenants)
 		v.oneOf(f+".effect", r.Effect, EffectAllow, EffectDeny)
 		if r.Mode != "" {
 			v.oneOf(f+".mode", r.Mode, RuleModeEnforce, RuleModeShadow)
 		}
-		if len(r.OnDeny.StepUpScopes) > 0 && r.Effect != EffectAllow {
-			v.add(f+".on_deny", "step_up_scopes only make sense on allow rules")
-		}
+		validateOnDeny(v, f, r)
+	}
+}
+
+func validateOnDeny(v *validator, f string, r *Rule) {
+	od := r.OnDeny
+	hasStepUp := len(od.StepUpScopes) > 0 || len(od.ACRValues) > 0 || od.MaxAge != 0 || od.RequireDPoP
+	if hasStepUp && r.Effect != EffectAllow {
+		v.add(f+".on_deny", "step-up requirements only make sense on allow rules")
+	}
+	if od.MaxAge < 0 || od.MaxAge > 24*time.Hour {
+		v.add(f+".on_deny.max_age", "must be within [0, 24h]")
 	}
 }
 
@@ -456,7 +481,18 @@ func (c *Config) validateRateLimits(v *validator) {
 		f := fmt.Sprintf("rate_limits.rules[%d]", i)
 		v.require(f+".name", r.Name)
 		v.globs(f+".tools", r.Tools)
-		v.oneOf(f+".per", r.Per, PerGlobal, PerSubject, PerSubjectTool, PerClientID, PerUpstream, PerTool)
+		v.oneOf(
+			f+".per",
+			r.Per,
+			PerGlobal,
+			PerSubject,
+			PerSubjectTool,
+			PerClientID,
+			PerTenant,
+			PerTenantTool,
+			PerUpstream,
+			PerTool,
+		)
 		if count, per, err := ParseRate(r.Rate); err != nil {
 			v.add(f+".rate", "%v", err)
 		} else if interval := per / time.Duration(count); interval < time.Microsecond {

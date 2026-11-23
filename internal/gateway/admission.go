@@ -261,7 +261,7 @@ func (g *Gateway) admitCall(w http.ResponseWriter, r *http.Request, a *Admission
 		a.ArgsHash = audit.HashBytes(env.Arguments)
 	}
 	tool, known := g.resolveTarget(a)
-	subject := ratelimit.Subject{Sub: a.Principal.Subject, ClientID: a.Principal.ClientID}
+	subject := ratelimit.Subject{Sub: a.Principal.Subject, ClientID: a.Principal.ClientID, Tenant: a.Principal.Tenant}
 	if known {
 		a.Tool = tool
 		subject.Tool, subject.Upstream = tool.Name, tool.Upstream
@@ -340,11 +340,7 @@ func (g *Gateway) applyDecision(ctx context.Context, w http.ResponseWriter, a *A
 	case policy.StepUp:
 		g.metrics.Requests.WithLabelValues(env.Method, a.Tool.Name, a.Tool.Upstream, "step_up").Inc()
 		g.recordDecision(ctx, a, audit.DecisionStepUp, d.Rule, d.Reason)
-		w.Header().
-			Set("WWW-Authenticate", g.challenge.header("insufficient_scope", "additional scope required", d.StepUpScopes))
-		writeRPCError(w, http.StatusForbidden, env.ID, CodePolicyDenied, "insufficient scope", map[string]any{
-			"required_scopes": d.StepUpScopes,
-		})
+		g.writeStepUp(w, env, d)
 		return false
 	case policy.Deny:
 	}
@@ -352,6 +348,40 @@ func (g *Gateway) applyDecision(ctx context.Context, w http.ResponseWriter, a *A
 	g.recordDecision(ctx, a, audit.DecisionDeny, d.Rule, d.Reason)
 	writeRPCError(w, http.StatusOK, env.ID, CodePolicyDenied, "denied by policy", nil)
 	return false
+}
+
+func (g *Gateway) writeStepUp(w http.ResponseWriter, env Envelope, d policy.Decision) {
+	sc := d.StepUp
+	if sc == nil {
+		sc = &policy.StepUpChallenge{Scopes: d.StepUpScopes}
+	}
+	data := map[string]any{}
+	if len(sc.Scopes) > 0 {
+		data["required_scopes"] = sc.Scopes
+	}
+	if len(sc.ACRValues) > 0 {
+		data["acr_values"] = sc.ACRValues
+	}
+	if sc.MaxAge > 0 {
+		data["max_age"] = int64(sc.MaxAge / time.Second)
+	}
+	if sc.RequireDPoP {
+		data["require_dpop"] = true
+		var algs []string
+		if g.dpop != nil {
+			algs = g.dpop.Algorithms()
+		}
+		w.Header().Set("WWW-Authenticate", g.challenge.dpopHeader("invalid_token", "dpop proof required", algs))
+		writeRPCError(w, http.StatusUnauthorized, env.ID, CodePolicyDenied, "dpop proof required", data)
+		return
+	}
+	if len(sc.ACRValues) > 0 || sc.MaxAge > 0 {
+		w.Header().Set("WWW-Authenticate", g.challenge.stepUpAuthHeader(sc))
+		writeRPCError(w, http.StatusUnauthorized, env.ID, CodePolicyDenied, "insufficient user authentication", data)
+		return
+	}
+	w.Header().Set("WWW-Authenticate", g.challenge.header("insufficient_scope", "additional scope required", sc.Scopes))
+	writeRPCError(w, http.StatusForbidden, env.ID, CodePolicyDenied, "insufficient scope", data)
 }
 
 func (g *Gateway) recordIntent(ctx context.Context, w http.ResponseWriter, a *Admission) bool {

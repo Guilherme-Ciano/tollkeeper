@@ -12,6 +12,7 @@ import (
 type Subject struct {
 	Sub      string
 	ClientID string
+	Tenant   string
 	Tool     string
 	Upstream string
 }
@@ -74,6 +75,12 @@ func key(r rule, s Subject) string {
 		b.WriteString(s.Tool)
 	case config.PerClientID:
 		b.WriteString(s.ClientID)
+	case config.PerTenant:
+		b.WriteString(s.Tenant)
+	case config.PerTenantTool:
+		b.WriteString(s.Tenant)
+		b.WriteByte(0)
+		b.WriteString(s.Tool)
 	case config.PerUpstream:
 		b.WriteString(s.Upstream)
 	case config.PerTool:
