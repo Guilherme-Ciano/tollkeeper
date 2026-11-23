@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.4.1](https://github.com/Guilherme-Ciano/tollkeeper/compare/v1.4.0...v1.4.1) (2026-11-23)
+
+
+### Bug fixes
+
+* **release:** use .Prerelease template variable in GoReleaser Homebrew Cask ([8892658](https://github.com/Guilherme-Ciano/tollkeeper/commit/88926588f0b99553e230d336371b831a9640e46b))
+
 ## [1.4.0](https://github.com/Guilherme-Ciano/tollkeeper/compare/v1.3.0...v1.4.0) (2026-11-23)
 
 
