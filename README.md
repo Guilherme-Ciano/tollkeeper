@@ -89,6 +89,24 @@ Each release ships cosign keyless signatures, SBOMs and SLSA build provenance. [
 
 ## Quickstart
 
+### Guard a local coding agent (60 seconds)
+
+No Docker or Go toolchain needed — grab a release binary, scaffold a config + Ed25519 audit key pair + policy fixtures, and start the gateway:
+
+```bash
+tollkeeper init
+tollkeeper policy test -c tollkeeper.yaml -f policies_test.yaml
+tollkeeper serve -c tollkeeper.yaml
+```
+
+Point Claude Code, Cursor or VS Code Copilot at `http://localhost:8080/mcp` (copy-paste configs for each agent, custom upstream flags and `--profile team` are in [docs/guides/coding-agents.md](docs/guides/coding-agents.md)):
+
+```bash
+claude mcp add --transport http tollkeeper http://localhost:8080/mcp
+```
+
+### Full OAuth 2.1 + step-up + audit tamper demo (Docker Compose)
+
 Requires Docker with BuildKit/buildx (default in Docker Desktop and the docker-ce packages; on distributions that split it out, install `docker-buildx`), or rootless Podman exposing its Docker socket, plus Go 1.27 for the demo client.
 
 ```bash
@@ -169,6 +187,7 @@ Grafana on `http://127.0.0.1:3000` opens on the provisioned tollkeeper dashboard
 
 | Command | Purpose |
 |---|---|
+| `tollkeeper init [-p local\|team] [-d dir]` | Generate a validated starter config, Ed25519 audit key pair and passing policy test fixtures |
 | `tollkeeper serve -c config.yaml` | Run the gateway |
 | `tollkeeper config validate -c config.yaml` | Validate config, compile CEL rules and rate limits, report every bad field with its path |
 | `tollkeeper policy test -c config.yaml -f policies_test.yaml` | Table-driven policy fixtures for CI ([example](deploy/compose/policies_test.yaml)) |
