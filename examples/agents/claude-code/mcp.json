@@ -1,0 +1,11 @@
+{
+  "mcpServers": {
+    "tollkeeper": {
+      "type": "http",
+      "url": "https://mcp.example.com/mcp",
+      "headers": {
+        "Authorization": "Bearer ${TOLLKEEPER_ACCESS_TOKEN}"
+      }
+    }
+  }
+}
