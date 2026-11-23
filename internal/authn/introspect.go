@@ -35,6 +35,7 @@ type IntrospectorOptions struct {
 	CacheTTL     time.Duration
 	MaxEntries   int
 	Leeway       time.Duration
+	Claims       ClaimMapping
 	Client       *http.Client
 	Now          func() time.Time
 }
@@ -67,6 +68,7 @@ func NewIntrospector(o IntrospectorOptions) *Introspector {
 			},
 		}
 	}
+	o.Claims = ResolveClaimMapping("", o.Claims)
 	return &Introspector{o: o, cache: map[[32]byte]cached{}}
 }
 
@@ -171,7 +173,11 @@ func (i *Introspector) introspect(ctx context.Context, raw string) (identity.Pri
 	if err := json.Unmarshal(body, &in); err != nil {
 		return identity.Principal{}, 0, fmt.Errorf("%w: malformed response", ErrIntrospectionUnavailable)
 	}
-	p, err := i.principal(&in, raw)
+	rawClaims := map[string]any{}
+	if err := json.Unmarshal(body, &rawClaims); err != nil {
+		return identity.Principal{}, 0, fmt.Errorf("%w: malformed response", ErrIntrospectionUnavailable)
+	}
+	p, err := i.principal(&in, rawClaims, raw)
 	if err != nil {
 		return identity.Principal{}, negativeCacheTTL, err
 	}
@@ -182,7 +188,7 @@ func (i *Introspector) introspect(ctx context.Context, raw string) (identity.Pri
 	return p, max(ttl, 0), nil
 }
 
-func (i *Introspector) principal(in *introspection, raw string) (identity.Principal, error) {
+func (i *Introspector) principal(in *introspection, rawClaims map[string]any, raw string) (identity.Principal, error) {
 	now := i.o.Now()
 	switch {
 	case !in.Active:
@@ -196,6 +202,7 @@ func (i *Introspector) principal(in *introspection, raw string) (identity.Princi
 	case !slices.ContainsFunc(in.audiences(), func(a string) bool { return slices.Contains(i.o.Audiences, a) }):
 		return identity.Principal{}, fmt.Errorf("%w: audience", ErrInvalidToken)
 	case in.TokenType != "" && !strings.EqualFold(in.TokenType, "Bearer") &&
+		!strings.EqualFold(in.TokenType, "DPoP") &&
 		!strings.EqualFold(in.TokenType, "access_token"):
 		return identity.Principal{}, fmt.Errorf("%w: token_type %q", ErrInvalidToken, in.TokenType)
 	}
@@ -207,9 +214,16 @@ func (i *Introspector) principal(in *introspection, raw string) (identity.Princi
 	if in.Username != "" {
 		claims["username"] = in.Username
 	}
-	tenant := firstNonEmpty(in.TenantID, in.TID, in.OrgID)
+	tenant := extractStringClaim(rawClaims, i.o.Claims.TenantClaim, "tenant_id", "tid", "org_id")
+	if tenant == "" {
+		tenant = firstNonEmpty(in.TenantID, in.TID, in.OrgID)
+	}
 	if tenant != "" {
 		claims["tenant_id"] = tenant
+	}
+	clientID := in.ClientID
+	if mappedClient := extractStringClaim(rawClaims, i.o.Claims.ClientIDClaim); mappedClient != "" {
+		clientID = mappedClient
 	}
 	var actor *identity.Actor
 	if len(in.Act) > 0 {
@@ -222,14 +236,20 @@ func (i *Introspector) principal(in *introspection, raw string) (identity.Princi
 		}
 	}
 	return identity.Principal{
-		Subject:     sub,
-		ClientID:    in.ClientID,
-		Issuer:      in.Iss,
-		Tenant:      tenant,
-		Actor:       actor,
-		Scopes:      strings.Fields(in.Scope),
-		Claims:      claims,
-		Fingerprint: Fingerprint(raw),
+		Subject:         sub,
+		ClientID:        clientID,
+		Issuer:          in.Iss,
+		Tenant:          tenant,
+		Actor:           actor,
+		Scopes:          strings.Fields(in.Scope),
+		Roles:           extractStringSliceClaim(rawClaims, i.o.Claims.RolesClaim),
+		Groups:          extractStringSliceClaim(rawClaims, i.o.Claims.GroupsClaim),
+		ACR:             extractStringClaim(rawClaims, "acr"),
+		AMR:             extractStringSliceClaim(rawClaims, "amr"),
+		AuthTime:        extractAuthTime(rawClaims),
+		TokenThumbprint: extractConfirmationJKT(rawClaims),
+		Claims:          claims,
+		Fingerprint:     Fingerprint(raw),
 	}, nil
 }
 

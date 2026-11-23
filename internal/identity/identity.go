@@ -3,6 +3,7 @@ package identity
 import (
 	"context"
 	"slices"
+	"time"
 )
 
 type Actor struct {
@@ -34,14 +35,21 @@ func (a *Actor) Chain() []string {
 }
 
 type Principal struct {
-	Subject     string
-	ClientID    string
-	Issuer      string
-	Tenant      string
-	Actor       *Actor
-	Scopes      []string
-	Claims      map[string]any
-	Fingerprint string
+	Subject         string
+	ClientID        string
+	Issuer          string
+	Tenant          string
+	Actor           *Actor
+	Scopes          []string
+	Roles           []string
+	Groups          []string
+	ACR             string
+	AMR             []string
+	AuthTime        time.Time
+	TokenThumbprint string
+	DPoPVerified    bool
+	Claims          map[string]any
+	Fingerprint     string
 }
 
 func (p Principal) DelegationDepth() int {
