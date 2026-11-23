@@ -64,6 +64,7 @@ func Root(info BuildInfo, stdout, stderr io.Writer) *cobra.Command {
 	root.SetOut(stdout)
 	root.SetErr(stderr)
 	root.AddCommand(
+		initCmd(),
 		serveCmd(info),
 		versionCmd(info),
 		configCmd(),
