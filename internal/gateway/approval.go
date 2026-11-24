@@ -41,10 +41,7 @@ func (g *Gateway) verifyApproval(
 	if err != nil {
 		label := approvalErrorLabel(err)
 		g.metrics.ApprovalVerifications.WithLabelValues(label).Inc()
-		g.log.WarnContext(ctx, "approval token rejected",
-			slog.String("tool", a.Tool.Name),
-			slog.String("reason", label),
-			slog.String("error", err.Error()))
+		g.log.WarnContext(ctx, "approval token rejected", slog.String("reason", label))
 		return nil, policy.Approval{}
 	}
 	g.metrics.ApprovalVerifications.WithLabelValues("ok").Inc()

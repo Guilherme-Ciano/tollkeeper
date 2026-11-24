@@ -1,6 +1,7 @@
 package bundle
 
 import (
+	"bytes"
 	"crypto/ed25519"
 	"crypto/sha256"
 	"crypto/subtle"
@@ -109,10 +110,10 @@ func canonicalPayload(m *Manifest) ([]byte, error) {
 	if err != nil {
 		return nil, fmt.Errorf("marshal bundle payload: %w", err)
 	}
-	out := make([]byte, 0, len(payloadPrefix)+len(b))
-	out = append(out, payloadPrefix...)
-	out = append(out, b...)
-	return out, nil
+	var buf bytes.Buffer
+	buf.WriteString(payloadPrefix)
+	buf.Write(b)
+	return buf.Bytes(), nil
 }
 
 func Sign(priv ed25519.PrivateKey, opts SignOptions) (*Manifest, error) {

@@ -336,7 +336,7 @@ func parseCompact(tok string) (parsedToken, error) {
 		return parsedToken{}, fmt.Errorf("%w: header json", ErrMalformed)
 	}
 	if hdr.Alg != AlgorithmEdDSA || hdr.Typ != HeaderType {
-		return parsedToken{}, fmt.Errorf("%w: alg=%q typ=%q", ErrMalformed, hdr.Alg, hdr.Typ)
+		return parsedToken{}, fmt.Errorf("%w: unsupported alg or typ", ErrMalformed)
 	}
 	payloadBytes, err := base64.RawURLEncoding.DecodeString(parts[1])
 	if err != nil {
