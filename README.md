@@ -365,7 +365,7 @@ Shipped in v1.3:
 - [x] RFC 7662 opaque token introspection and OTLP audit log sink
 - [x] Grafana dashboard, Prometheus alert rules, and Helm chart
 
-Shipped in v2.0 (main):
+Shipped in v1.5:
 
 - [x] Security hardening: SSRF `netguard`, stdio upstream sandboxing (`bwrap`/`prlimit`/`Pdeathsig`), Vault Transit & AWS KMS checkpoint signing with zero-downtime key rotation ([ADR 0011](docs/adr/0011-stdio-sandboxing.md), [ADR 0012](docs/adr/0012-audit-key-rotation-and-kms.md))
 - [x] Advanced identity & authz: RFC 8693 Token Exchange with `act` delegation, RFC 9449 DPoP, enterprise IdP presets & OIDC discovery, isolated tenant policies, per-tenant GCRA limits, and RFC 9470 Step-Up ([ADR 0013](docs/adr/0013-oauth-token-exchange-and-delegation.md), [ADR 0014](docs/adr/0014-dpop-and-enterprise-idp.md), [ADR 0015](docs/adr/0015-tenant-policies-and-step-up.md))
