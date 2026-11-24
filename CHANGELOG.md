@@ -1,5 +1,68 @@
 # Changelog
 
+## [1.6.0](https://github.com/Guilherme-Ciano/tollkeeper/compare/v1.5.0...v1.6.0) (2026-11-24)
+
+
+### Features
+
+* **governance:** add stateless approval tokens (`tk-approval+jwt`), CEL `approval.*` four-eyes rules, and Ed25519-signed config+pin bundles ([4ffb27c](https://github.com/Guilherme-Ciano/tollkeeper/commit/4ffb27c5e0ccf66c89b5dfa5914c9ce56e216c2c))
+* **policy:** add static upstream provenance metadata (`trust`, `classification`, `egress`, `impact`), CEL fields, and `_meta["tollkeeper.provenance"]` response stamps ([87f53e8](https://github.com/Guilherme-Ciano/tollkeeper/commit/87f53e8))
+* **ratelimit:** add cost-based GCRA impact limits (`cost_expr` / `max_cost`) for memory and Redis backends ([87f53e8](https://github.com/Guilherme-Ciano/tollkeeper/commit/87f53e8))
+* **gateway:** add opt-in stateless idempotency / anti-replay guard (`header`, `required`, `canonical_hash`) and adversarial security test suite ([b3a5fb4](https://github.com/Guilherme-Ciano/tollkeeper/commit/b3a5fb4))
+
+### Bug Fixes
+
+* **ci:** split GitHub Pages build/deploy jobs and pin `ossf/scorecard-action` to `v2.5.0` ([421012f](https://github.com/Guilherme-Ciano/tollkeeper/commit/421012fdbfd74abf6f3335e7d50fe1745e5e6cba))
+* **security:** resolve CodeQL allocation overflow and user-input log alerts ([ccae695](https://github.com/Guilherme-Ciano/tollkeeper/commit/ccae69533f1d912fb28c9746dc0445dc727fc035))
+
+
+### Features
+
+* **gateway:** add opt-in stateless idempotency guard and adversarial security test suite ([4ffb27c](https://github.com/Guilherme-Ciano/tollkeeper/commit/4ffb27c5e0ccf66c89b5dfa5914c9ce56e216c2c))
+* **gateway:** add opt-in stateless idempotency guard and adversarial security test suite ([ccae695](https://github.com/Guilherme-Ciano/tollkeeper/commit/ccae69533f1d912fb28c9746dc0445dc727fc035))
+* **gateway:** add opt-in stateless idempotency guard and adversarial security test suite ([421012f](https://github.com/Guilherme-Ciano/tollkeeper/commit/421012fdbfd74abf6f3335e7d50fe1745e5e6cba))
+* **gateway:** add opt-in stateless idempotency guard and adversarial security test suite ([1046fa8](https://github.com/Guilherme-Ciano/tollkeeper/commit/1046fa816fd37b61ffb509a0f3179c1af2a7c284))
+* **gateway:** add opt-in stateless idempotency guard and adversarial security test suite ([fb7ebea](https://github.com/Guilherme-Ciano/tollkeeper/commit/fb7ebea246714b18fe6735b7e0a2d7c0fa715142))
+* **gateway:** add opt-in stateless idempotency guard and adversarial security test suite ([6443203](https://github.com/Guilherme-Ciano/tollkeeper/commit/64432039b43198d759e00f532c79a70dd40f503c))
+* **gateway:** add opt-in stateless idempotency guard and adversarial security test suite ([ec55179](https://github.com/Guilherme-Ciano/tollkeeper/commit/ec551790012b134aebc6eb360662673cdf4afb5e))
+* **gateway:** add opt-in stateless idempotency guard and adversarial security test suite ([0ccaec9](https://github.com/Guilherme-Ciano/tollkeeper/commit/0ccaec9364e39a337433564d87eda3eebe05c6ce))
+* **governance:** add stateless approval tokens (tk-approval+jwt) and Ed25519 signed bundles ([4ffb27c](https://github.com/Guilherme-Ciano/tollkeeper/commit/4ffb27c5e0ccf66c89b5dfa5914c9ce56e216c2c))
+* **governance:** add stateless approval tokens (tk-approval+jwt) and Ed25519 signed bundles ([ccae695](https://github.com/Guilherme-Ciano/tollkeeper/commit/ccae69533f1d912fb28c9746dc0445dc727fc035))
+* **governance:** add stateless approval tokens (tk-approval+jwt) and Ed25519 signed bundles ([421012f](https://github.com/Guilherme-Ciano/tollkeeper/commit/421012fdbfd74abf6f3335e7d50fe1745e5e6cba))
+* **governance:** add stateless approval tokens (tk-approval+jwt) and Ed25519 signed bundles ([1046fa8](https://github.com/Guilherme-Ciano/tollkeeper/commit/1046fa816fd37b61ffb509a0f3179c1af2a7c284))
+* **governance:** add stateless approval tokens (tk-approval+jwt) and Ed25519 signed bundles ([fb7ebea](https://github.com/Guilherme-Ciano/tollkeeper/commit/fb7ebea246714b18fe6735b7e0a2d7c0fa715142))
+* **governance:** add stateless approval tokens (tk-approval+jwt) and Ed25519 signed bundles ([6443203](https://github.com/Guilherme-Ciano/tollkeeper/commit/64432039b43198d759e00f532c79a70dd40f503c))
+* **governance:** add stateless approval tokens (tk-approval+jwt) and Ed25519 signed bundles ([ec55179](https://github.com/Guilherme-Ciano/tollkeeper/commit/ec551790012b134aebc6eb360662673cdf4afb5e))
+* **governance:** add stateless approval tokens (tk-approval+jwt) and Ed25519 signed bundles ([0ccaec9](https://github.com/Guilherme-Ciano/tollkeeper/commit/0ccaec9364e39a337433564d87eda3eebe05c6ce))
+* **policy:** add static upstream provenance metadata, CEL fields, and response provenance stamps ([4ffb27c](https://github.com/Guilherme-Ciano/tollkeeper/commit/4ffb27c5e0ccf66c89b5dfa5914c9ce56e216c2c))
+* **policy:** add static upstream provenance metadata, CEL fields, and response provenance stamps ([ccae695](https://github.com/Guilherme-Ciano/tollkeeper/commit/ccae69533f1d912fb28c9746dc0445dc727fc035))
+* **policy:** add static upstream provenance metadata, CEL fields, and response provenance stamps ([421012f](https://github.com/Guilherme-Ciano/tollkeeper/commit/421012fdbfd74abf6f3335e7d50fe1745e5e6cba))
+* **policy:** add static upstream provenance metadata, CEL fields, and response provenance stamps ([1046fa8](https://github.com/Guilherme-Ciano/tollkeeper/commit/1046fa816fd37b61ffb509a0f3179c1af2a7c284))
+* **policy:** add static upstream provenance metadata, CEL fields, and response provenance stamps ([fb7ebea](https://github.com/Guilherme-Ciano/tollkeeper/commit/fb7ebea246714b18fe6735b7e0a2d7c0fa715142))
+* **policy:** add static upstream provenance metadata, CEL fields, and response provenance stamps ([6443203](https://github.com/Guilherme-Ciano/tollkeeper/commit/64432039b43198d759e00f532c79a70dd40f503c))
+* **policy:** add static upstream provenance metadata, CEL fields, and response provenance stamps ([ec55179](https://github.com/Guilherme-Ciano/tollkeeper/commit/ec551790012b134aebc6eb360662673cdf4afb5e))
+* **policy:** add static upstream provenance metadata, CEL fields, and response provenance stamps ([0ccaec9](https://github.com/Guilherme-Ciano/tollkeeper/commit/0ccaec9364e39a337433564d87eda3eebe05c6ce))
+* **ratelimit:** add cost-based GCRA impact limits for memory and Redis backends ([4ffb27c](https://github.com/Guilherme-Ciano/tollkeeper/commit/4ffb27c5e0ccf66c89b5dfa5914c9ce56e216c2c))
+* **ratelimit:** add cost-based GCRA impact limits for memory and Redis backends ([ccae695](https://github.com/Guilherme-Ciano/tollkeeper/commit/ccae69533f1d912fb28c9746dc0445dc727fc035))
+* **ratelimit:** add cost-based GCRA impact limits for memory and Redis backends ([421012f](https://github.com/Guilherme-Ciano/tollkeeper/commit/421012fdbfd74abf6f3335e7d50fe1745e5e6cba))
+* **ratelimit:** add cost-based GCRA impact limits for memory and Redis backends ([1046fa8](https://github.com/Guilherme-Ciano/tollkeeper/commit/1046fa816fd37b61ffb509a0f3179c1af2a7c284))
+* **ratelimit:** add cost-based GCRA impact limits for memory and Redis backends ([fb7ebea](https://github.com/Guilherme-Ciano/tollkeeper/commit/fb7ebea246714b18fe6735b7e0a2d7c0fa715142))
+* **ratelimit:** add cost-based GCRA impact limits for memory and Redis backends ([6443203](https://github.com/Guilherme-Ciano/tollkeeper/commit/64432039b43198d759e00f532c79a70dd40f503c))
+* **ratelimit:** add cost-based GCRA impact limits for memory and Redis backends ([ec55179](https://github.com/Guilherme-Ciano/tollkeeper/commit/ec551790012b134aebc6eb360662673cdf4afb5e))
+* **ratelimit:** add cost-based GCRA impact limits for memory and Redis backends ([0ccaec9](https://github.com/Guilherme-Ciano/tollkeeper/commit/0ccaec9364e39a337433564d87eda3eebe05c6ce))
+
+
+### Documentation
+
+* **security:** update threat model for v1.5+ and publish ADRs 0020-0022 ([4ffb27c](https://github.com/Guilherme-Ciano/tollkeeper/commit/4ffb27c5e0ccf66c89b5dfa5914c9ce56e216c2c))
+* **security:** update threat model for v1.5+ and publish ADRs 0020-0022 ([ccae695](https://github.com/Guilherme-Ciano/tollkeeper/commit/ccae69533f1d912fb28c9746dc0445dc727fc035))
+* **security:** update threat model for v1.5+ and publish ADRs 0020-0022 ([421012f](https://github.com/Guilherme-Ciano/tollkeeper/commit/421012fdbfd74abf6f3335e7d50fe1745e5e6cba))
+* **security:** update threat model for v1.5+ and publish ADRs 0020-0022 ([1046fa8](https://github.com/Guilherme-Ciano/tollkeeper/commit/1046fa816fd37b61ffb509a0f3179c1af2a7c284))
+* **security:** update threat model for v1.5+ and publish ADRs 0020-0022 ([fb7ebea](https://github.com/Guilherme-Ciano/tollkeeper/commit/fb7ebea246714b18fe6735b7e0a2d7c0fa715142))
+* **security:** update threat model for v1.5+ and publish ADRs 0020-0022 ([6443203](https://github.com/Guilherme-Ciano/tollkeeper/commit/64432039b43198d759e00f532c79a70dd40f503c))
+* **security:** update threat model for v1.5+ and publish ADRs 0020-0022 ([ec55179](https://github.com/Guilherme-Ciano/tollkeeper/commit/ec551790012b134aebc6eb360662673cdf4afb5e))
+* **security:** update threat model for v1.5+ and publish ADRs 0020-0022 ([0ccaec9](https://github.com/Guilherme-Ciano/tollkeeper/commit/0ccaec9364e39a337433564d87eda3eebe05c6ce))
+
 ## [1.5.0](https://github.com/Guilherme-Ciano/tollkeeper/compare/v1.4.1...v1.5.0) (2026-11-24)
 
 
