@@ -30,6 +30,7 @@ const (
 	intentDeadline  = 100 * time.Millisecond
 	MethodToolsCall = "tools/call"
 	dataRule        = "rule"
+	keyTool         = "tool"
 
 	maxClientField   = 256
 	maxProtocolField = 32
@@ -492,7 +493,7 @@ func (g *Gateway) recordDecision(ctx context.Context, a *Admission, decision, ru
 
 func kindLabel(k catalog.Kind) string {
 	if k == "" {
-		return "tool"
+		return keyTool
 	}
 	return string(k)
 }

@@ -577,7 +577,7 @@ func stampProvenance(res *mcp.CallToolResult, tool catalog.Tool) {
 	maps.Copy(meta, res.Meta)
 	meta["tollkeeper.provenance"] = map[string]any{
 		"upstream":       tool.Upstream,
-		"tool":           tool.Name,
+		keyTool:          tool.Name,
 		"trust":          m.Trust,
 		"classification": m.Classification,
 		"egress":         m.Egress,

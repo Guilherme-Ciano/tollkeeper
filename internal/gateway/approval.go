@@ -125,7 +125,7 @@ func (g *Gateway) writeApprovalChallenge(w http.ResponseWriter, a *Admission, sc
 	}
 	data := map[string]any{
 		"approval_required": true,
-		"tool":              a.Tool.Name,
+		keyTool:             a.Tool.Name,
 		"args_hash":         approval.CanonicalArgsHash(a.Envelope.Arguments),
 		"subject":           a.Principal.Subject,
 		"header":            header,
