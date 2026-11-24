@@ -372,8 +372,12 @@ Shipped in v1.5:
 - [x] Scalability & operations: continuous audit watchdog, verified archiving/retention, `GET /upstreams` diagnostics, chaos & dependency-recovery test suites, and distributed benchmarks ([ADR 0016](docs/adr/0016-distributed-audit-verification-and-retention.md), [ADR 0017](docs/adr/0017-upstream-diagnostics-and-resilience.md))
 - [x] Developer experience: native SIEM sink (`json`, `splunk_hec`, `cef`), CI-tested reusable policy library, agent platform integrations (Claude Code, Cursor, LangGraph, OpenAI Agents, CrewAI, AG-UI), and embedded single-binary Admin Console at `/ui/` ([ADR 0018](docs/adr/0018-siem-sink-and-developer-experience.md), [ADR 0019](docs/adr/0019-embedded-admin-dashboard.md))
 
-Next:
+Next (v1.6 — Stateless Governance & Hardening, [ADR 0020](docs/adr/0020-stateless-governance-boundaries.md)):
 
+- [x] Updated v1.5+ [Threat Model](docs/threat-model.md) with explicit stateless trust boundaries and dedicated adversarial security test suite (`internal/gateway/adversarial_test.go`)
+- [ ] Static upstream/tool classification (`trust`, `classification`, `egress`, `impact`) in CEL + deterministic `_meta.tollkeeper.provenance` response stamps
+- [ ] Cost-based GCRA impact limits (`cost_expr` in CEL) and short-window idempotency / anti-replay guard
+- [ ] Stateless argument-bound Human-in-the-Loop approval tokens (`tk-approval+jwt` + `tollkeeper approval sign`) and Ed25519-signed config+pin bundles
 - [ ] Tasks extension (SEP-2663)
 
 ## Development
