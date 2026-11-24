@@ -55,6 +55,8 @@ type Upstream struct {
 	signalled   atomic.Uint32
 	progress    sync.Map
 	progressSeq atomic.Uint64
+	taskSeq     atomic.Uint64
+	taskHTTP    taskHTTPState
 	diag        diagTracker
 
 	mu sync.RWMutex

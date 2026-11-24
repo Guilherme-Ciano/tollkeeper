@@ -28,6 +28,8 @@ async def call_tollkeeper_tool(
     tool: str,
     arguments: dict[str, Any],
     authorization: str | None,
+    approval_token: str | None = None,
+    idempotency_key: str | None = None,
 ) -> tuple[int, dict[str, str], dict[str, Any]]:
     headers = {
         "Content-Type": "application/json",
@@ -38,6 +40,10 @@ async def call_tollkeeper_tool(
     }
     if authorization:
         headers["Authorization"] = authorization
+    if approval_token:
+        headers["X-Tollkeeper-Approval"] = approval_token
+    if idempotency_key:
+        headers["Idempotency-Key"] = idempotency_key
 
     rpc_body = {
         "jsonrpc": "2.0",
@@ -65,6 +71,8 @@ async def stream_ag_ui_run(
     tool: str,
     arguments: dict[str, Any],
     authorization: str | None,
+    approval_token: str | None = None,
+    idempotency_key: str | None = None,
 ) -> AsyncIterator[str]:
     tool_call_id = f"tc_{uuid.uuid4().hex[:12]}"
     message_id = f"msg_{uuid.uuid4().hex[:12]}"
@@ -86,7 +94,43 @@ async def stream_ag_ui_run(
     )
     yield sse_event({"type": "TOOL_CALL_END", "toolCallId": tool_call_id})
 
-    status, challenge, body = await call_tollkeeper_tool(tool, arguments, authorization)
+    status, challenge, body = await call_tollkeeper_tool(
+        tool, arguments, authorization, approval_token, idempotency_key
+    )
+
+    rpc_error = body.get("error") if isinstance(body, dict) else None
+    if status == 403 and isinstance(rpc_error, dict) and rpc_error.get("code") == -32010:
+        data = rpc_error.get("data") or {}
+        yield sse_event(
+            {
+                "type": "CUSTOM",
+                "name": "tollkeeper.approval_required",
+                "value": {
+                    "tool": data.get("tool", tool),
+                    "argsHash": data.get("args_hash", ""),
+                    "subject": data.get("subject", ""),
+                    "tenant": data.get("tenant", ""),
+                    "header": data.get("header", "X-Tollkeeper-Approval"),
+                    "ttlSeconds": data.get("ttl_s", 300),
+                    "reason": data.get("reason", "Explicit human approval required"),
+                    "arguments": arguments,
+                },
+            }
+        )
+        yield sse_event({"type": "TEXT_MESSAGE_START", "messageId": message_id, "role": "assistant"})
+        yield sse_event(
+            {
+                "type": "TEXT_MESSAGE_CONTENT",
+                "messageId": message_id,
+                "delta": (
+                    f"Tollkeeper requires explicit human approval ({data.get('reason', 'tk-approval+jwt')}) "
+                    f"for {tool} (args_hash={data.get('args_hash', '')}). Approve and retry with X-Tollkeeper-Approval."
+                ),
+            }
+        )
+        yield sse_event({"type": "TEXT_MESSAGE_END", "messageId": message_id})
+        yield sse_event({"type": "RUN_FINISHED", "threadId": thread_id, "runId": run_id})
+        return
 
     if status in (401, 403) and challenge.get("error") in (
         "insufficient_user_authentication",
@@ -148,6 +192,8 @@ async def stream_ag_ui_run(
 async def ag_ui_run(
     request: Request,
     authorization: str | None = Header(default=None),
+    x_tollkeeper_approval: str | None = Header(default=None),
+    idempotency_key: str | None = Header(default=None),
 ) -> StreamingResponse:
     payload = await request.json()
     thread_id = str(payload.get("threadId") or f"thread_{uuid.uuid4().hex[:8]}")
@@ -155,6 +201,8 @@ async def ag_ui_run(
     tool = str(payload.get("tool") or "notes__search")
     arguments = payload.get("arguments") or {}
     return StreamingResponse(
-        stream_ag_ui_run(thread_id, run_id, tool, arguments, authorization),
+        stream_ag_ui_run(
+            thread_id, run_id, tool, arguments, authorization, x_tollkeeper_approval, idempotency_key
+        ),
         media_type="text/event-stream",
     )

@@ -291,7 +291,7 @@ func encodeCallResult(res *mcp.CallToolResult) ([]byte, error) {
 		StructuredContent: res.StructuredContent,
 		IsError:           res.IsError,
 		RequestState:      res.RequestState,
-		ResultType:        "complete",
+		ResultType:        resultTypeComplete,
 	}
 	if res.InputRequests != nil {
 		w.ResultType = "input_required"

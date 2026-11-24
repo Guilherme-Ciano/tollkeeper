@@ -77,6 +77,7 @@ func AdmissionFrom(ctx context.Context) (*Admission, bool) {
 func allowedMethod(m string) bool {
 	switch m {
 	case "initialize", "ping", "server/discover", "tools/list", MethodToolsCall,
+		MethodTasksGet, MethodTasksUpdate, MethodTasksCancel,
 		MethodResourcesList, MethodTemplatesList, MethodPromptsList,
 		MethodPromptsGet, MethodResourcesRead, "completion/complete", "subscriptions/listen",
 		"notifications/initialized", "notifications/cancelled", "notifications/progress",
@@ -203,23 +204,15 @@ func (g *Gateway) admission(next http.Handler) http.Handler {
 		if sc := trace.SpanContextFromContext(r.Context()); sc.IsValid() {
 			a.TraceID = sc.TraceID().String()
 		}
+		if isTaskMethod(env.Method) {
+			g.serveTaskMethod(w, r, a)
+			g.metrics.Duration.WithLabelValues(env.Method).Observe(g.now().Sub(start).Seconds())
+			return
+		}
 		if admitted(env.Method) && !g.admitCall(w, r, a) {
 			return
 		}
-		fc, fast := g.fastCandidate(r, a)
-		switch {
-		case fast:
-			g.metrics.CallDispatch.WithLabelValues("fast").Inc()
-			g.serveFast(w, r, a, fc)
-		default:
-			if env.Method == MethodToolsCall {
-				g.metrics.CallDispatch.WithLabelValues("sdk").Inc()
-			}
-			r2 := r.WithContext(withAdmission(r.Context(), a))
-			r2.Body = io.NopCloser(bytes.NewReader(body))
-			r2.ContentLength = int64(len(body))
-			next.ServeHTTP(w, r2)
-		}
+		g.dispatchRequest(w, r, next, a, body)
 		total := g.now().Sub(start)
 		g.metrics.Duration.WithLabelValues(env.Method).Observe(total.Seconds())
 		if !admitted(env.Method) {
@@ -232,6 +225,33 @@ func (g *Gateway) admission(next http.Handler) http.Handler {
 			g.recordNotDispatched(r.Context(), a)
 		}
 	})
+}
+
+func (g *Gateway) dispatchRequest(
+	w http.ResponseWriter,
+	r *http.Request,
+	next http.Handler,
+	a *Admission,
+	body []byte,
+) {
+	tc, taskCapable := g.taskCallCandidate(a)
+	fc, fast := g.fastCandidate(r, a)
+	switch {
+	case taskCapable:
+		g.metrics.CallDispatch.WithLabelValues("task").Inc()
+		g.serveTaskCall(w, r, a, tc)
+	case fast:
+		g.metrics.CallDispatch.WithLabelValues("fast").Inc()
+		g.serveFast(w, r, a, fc)
+	default:
+		if a.Envelope.Method == MethodToolsCall {
+			g.metrics.CallDispatch.WithLabelValues("sdk").Inc()
+		}
+		r2 := r.WithContext(withAdmission(r.Context(), a))
+		r2.Body = io.NopCloser(bytes.NewReader(body))
+		r2.ContentLength = int64(len(body))
+		next.ServeHTTP(w, r2)
+	}
 }
 
 func (g *Gateway) fastCandidate(r *http.Request, a *Admission) (fastCall, bool) {

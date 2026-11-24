@@ -432,6 +432,7 @@
               <button class="btn btn-sm" data-preset="writer" type="button">Scoped Writer</button>
               <button class="btn btn-sm" data-preset="stepup" type="button">Stale Auth (Step-Up)</button>
               <button class="btn btn-sm" data-preset="delegated" type="button">Delegated Agent</button>
+              <button class="btn btn-sm" data-preset="approved" type="button">Approved (Four-Eyes)</button>
             </div>
           </div>
 
@@ -502,6 +503,47 @@
                   <label class="toggle-inline"><input type="checkbox" id="sim-ann-readonly"><span>Override readOnlyHint</span></label>
                   <label class="toggle-inline"><input type="checkbox" id="sim-ann-destructive"><span>Override destructiveHint</span></label>
                 </div>
+
+                <div class="form-section-title">Human Approval (tk-approval+jwt) &amp; Provenance</div>
+                <div class="field field-full checkbox-row">
+                  <label class="toggle-inline"><input type="checkbox" id="sim-approval-verified"><span>Approval Verified</span></label>
+                  <label class="toggle-inline"><input type="checkbox" id="sim-meta-egress"><span>Tool Egress</span></label>
+                </div>
+                <label class="field">
+                  <span>Approver Identity</span>
+                  <input class="input" id="sim-approver" placeholder="bob@corp.com">
+                </label>
+                <label class="field">
+                  <span>Approval Reason</span>
+                  <input class="input" id="sim-approval-reason" placeholder="CHG-1042">
+                </label>
+                <label class="field">
+                  <span>Tool Trust</span>
+                  <select id="sim-meta-trust">
+                    <option value="">catalog default</option>
+                    <option value="trusted">trusted</option>
+                    <option value="untrusted">untrusted</option>
+                  </select>
+                </label>
+                <label class="field">
+                  <span>Tool Classification</span>
+                  <select id="sim-meta-class">
+                    <option value="">catalog default</option>
+                    <option value="public">public</option>
+                    <option value="internal">internal</option>
+                    <option value="confidential">confidential</option>
+                    <option value="restricted">restricted</option>
+                  </select>
+                </label>
+                <label class="field">
+                  <span>Tool Impact</span>
+                  <select id="sim-meta-impact">
+                    <option value="">catalog default</option>
+                    <option value="read">read</option>
+                    <option value="write">write</option>
+                    <option value="destructive">destructive</option>
+                  </select>
+                </label>
 
                 <div class="form-section-title">Arguments (JSON)</div>
                 <label class="field field-full">

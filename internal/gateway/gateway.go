@@ -112,6 +112,7 @@ type Gateway struct {
 	fastDisabled   bool
 	impl           *mcp.Implementation
 	states         *stateSealer
+	tasks          *taskSealer
 	infoPrefix     []byte
 	hidden         atomic.Pointer[map[string]struct{}]
 
@@ -186,6 +187,7 @@ func New(d Deps) *Gateway {
 	}
 	states := newStateSealer(stateKey, d.Config.Server.RequestStateTTL)
 	g.states = states
+	g.tasks = newTaskSealer(stateKey, d.Config.Server.TaskTTL)
 	g.sentinel = "tollkeeper-list-changed-" + strings.ToLower(rand.Text()[:10])
 	if g.verifier == nil {
 		g.verifier = anonymousVerifier{}
@@ -745,7 +747,7 @@ func (g *Gateway) finishCall(ctx context.Context, span trace.Span, a *Admission,
 		span.SetStatus(codes.Error, "call failed")
 	case out.hasResult:
 		e.IsError = out.isError
-		e.ResultType = "complete"
+		e.ResultType = resultTypeComplete
 		if out.inputRequired {
 			e.ResultType = "input_required"
 		}

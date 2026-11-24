@@ -1,0 +1,36 @@
+cases:
+  - name: untrusted_readonly_egress_allowed
+    principal: { sub: alice }
+    tool: web__fetch
+    metadata: { trust: untrusted, classification: public, egress: true, impact: read }
+    expect: allow
+    rule: allow-untrusted-readonly-egress
+  - name: untrusted_write_denied
+    principal: { sub: alice }
+    tool: web__post
+    metadata: { trust: untrusted, classification: public, egress: true, impact: write }
+    expect: deny
+    rule: deny-untrusted-writes
+  - name: destructive_without_approval_challenges
+    principal: { sub: alice }
+    tool: files__delete_batch
+    metadata: { trust: trusted, classification: restricted, egress: false, impact: destructive }
+    args: { paths: ["/data/a.csv", "/data/b.csv"] }
+    expect: step_up
+    rule: destructive-requires-four-eyes-approval
+  - name: destructive_self_approval_denied_four_eyes
+    principal: { sub: alice }
+    approval: { verified: true, id: apr_self, approver: alice }
+    tool: files__delete_batch
+    metadata: { trust: trusted, classification: restricted, egress: false, impact: destructive }
+    args: { paths: ["/data/a.csv"] }
+    expect: deny
+    rule: default
+  - name: destructive_independent_human_approval_allowed
+    principal: { sub: alice }
+    approval: { verified: true, id: apr_1042, approver: bob@corp.com, reason: CHG-1042 }
+    tool: files__delete_batch
+    metadata: { trust: trusted, classification: restricted, egress: false, impact: destructive }
+    args: { paths: ["/data/a.csv", "/data/b.csv"] }
+    expect: allow
+    rule: destructive-requires-four-eyes-approval

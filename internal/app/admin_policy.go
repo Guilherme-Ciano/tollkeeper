@@ -61,10 +61,13 @@ type subjectsDTO struct {
 }
 
 type onDenyDTO struct {
-	StepUpScopes []string `json:"step_up_scopes,omitempty" yaml:"step_up_scopes,omitempty"`
-	ACRValues    []string `json:"acr_values,omitempty"     yaml:"acr_values,omitempty"`
-	MaxAge       string   `json:"max_age,omitempty"        yaml:"max_age,omitempty"`
-	RequireDPoP  bool     `json:"require_dpop,omitempty"   yaml:"require_dpop,omitempty"`
+	StepUpScopes    []string `json:"step_up_scopes,omitempty"   yaml:"step_up_scopes,omitempty"`
+	ACRValues       []string `json:"acr_values,omitempty"       yaml:"acr_values,omitempty"`
+	MaxAge          string   `json:"max_age,omitempty"          yaml:"max_age,omitempty"`
+	RequireDPoP     bool     `json:"require_dpop,omitempty"     yaml:"require_dpop,omitempty"`
+	RequireApproval bool     `json:"require_approval,omitempty" yaml:"require_approval,omitempty"`
+	ApprovalTTL     string   `json:"approval_ttl,omitempty"     yaml:"approval_ttl,omitempty"`
+	ApprovalReason  string   `json:"approval_reason,omitempty"  yaml:"approval_reason,omitempty"`
 }
 
 type policyDocYAML struct {
@@ -92,10 +95,13 @@ type simulateShadowDTO struct {
 }
 
 type simulateStepUpDTO struct {
-	Scopes      []string `json:"scopes,omitempty"`
-	ACRValues   []string `json:"acr_values,omitempty"`
-	MaxAge      string   `json:"max_age,omitempty"`
-	RequireDPoP bool     `json:"require_dpop,omitempty"`
+	Scopes          []string `json:"scopes,omitempty"`
+	ACRValues       []string `json:"acr_values,omitempty"`
+	MaxAge          string   `json:"max_age,omitempty"`
+	RequireDPoP     bool     `json:"require_dpop,omitempty"`
+	RequireApproval bool     `json:"require_approval,omitempty"`
+	ApprovalTTL     string   `json:"approval_ttl,omitempty"`
+	ApprovalReason  string   `json:"approval_reason,omitempty"`
 }
 
 type simulateResponse struct {
@@ -140,6 +146,10 @@ func rulesToDTO(in []config.Rule) []ruleDTO {
 		if r.OnDeny.MaxAge > 0 {
 			maxAge = r.OnDeny.MaxAge.String()
 		}
+		approvalTTL := ""
+		if r.OnDeny.ApprovalTTL > 0 {
+			approvalTTL = r.OnDeny.ApprovalTTL.String()
+		}
 		out = append(out, ruleDTO{
 			Name:      r.Name,
 			Subjects:  subjectsDTO(r.Subjects),
@@ -150,10 +160,13 @@ func rulesToDTO(in []config.Rule) []ruleDTO {
 			Mode:      r.Mode,
 			Effect:    r.Effect,
 			OnDeny: onDenyDTO{
-				StepUpScopes: r.OnDeny.StepUpScopes,
-				ACRValues:    r.OnDeny.ACRValues,
-				MaxAge:       maxAge,
-				RequireDPoP:  r.OnDeny.RequireDPoP,
+				StepUpScopes:    r.OnDeny.StepUpScopes,
+				ACRValues:       r.OnDeny.ACRValues,
+				MaxAge:          maxAge,
+				RequireDPoP:     r.OnDeny.RequireDPoP,
+				RequireApproval: r.OnDeny.RequireApproval,
+				ApprovalTTL:     approvalTTL,
+				ApprovalReason:  r.OnDeny.ApprovalReason,
 			},
 		})
 	}
@@ -195,6 +208,14 @@ func dtoToRules(prefix string, in []ruleDTO) ([]config.Rule, error) {
 			}
 			maxAge = d
 		}
+		var approvalTTL time.Duration
+		if strings.TrimSpace(r.OnDeny.ApprovalTTL) != "" {
+			d, err := time.ParseDuration(strings.TrimSpace(r.OnDeny.ApprovalTTL))
+			if err != nil {
+				return nil, fmt.Errorf("%s[%d].on_deny.approval_ttl: %w", prefix, i, err)
+			}
+			approvalTTL = d
+		}
 		out = append(out, config.Rule{
 			Name:      r.Name,
 			Subjects:  config.Subjects(r.Subjects),
@@ -205,10 +226,13 @@ func dtoToRules(prefix string, in []ruleDTO) ([]config.Rule, error) {
 			Mode:      r.Mode,
 			Effect:    r.Effect,
 			OnDeny: config.OnDeny{
-				StepUpScopes: r.OnDeny.StepUpScopes,
-				ACRValues:    r.OnDeny.ACRValues,
-				MaxAge:       maxAge,
-				RequireDPoP:  r.OnDeny.RequireDPoP,
+				StepUpScopes:    r.OnDeny.StepUpScopes,
+				ACRValues:       r.OnDeny.ACRValues,
+				MaxAge:          maxAge,
+				RequireDPoP:     r.OnDeny.RequireDPoP,
+				RequireApproval: r.OnDeny.RequireApproval,
+				ApprovalTTL:     approvalTTL,
+				ApprovalReason:  r.OnDeny.ApprovalReason,
 			},
 		})
 	}
@@ -367,12 +391,28 @@ type simulateAnnotationsReq struct {
 	OpenWorld   *bool `json:"openWorldHint"`
 }
 
+type simulateApprovalReq struct {
+	Verified bool   `json:"verified"`
+	ID       string `json:"id"`
+	Approver string `json:"approver"`
+	Reason   string `json:"reason"`
+}
+
+type simulateMetadataReq struct {
+	Trust          string `json:"trust"`
+	Classification string `json:"classification"`
+	Egress         *bool  `json:"egress"`
+	Impact         string `json:"impact"`
+}
+
 type simulateRequest struct {
 	Kind        string                  `json:"kind"`
 	Name        string                  `json:"name"`
 	Method      string                  `json:"method"`
 	ClientName  string                  `json:"client_name"`
 	Principal   simulatePrincipalReq    `json:"principal"`
+	Approval    *simulateApprovalReq    `json:"approval"`
+	Metadata    *simulateMetadataReq    `json:"metadata"`
 	Annotations *simulateAnnotationsReq `json:"annotations"`
 	Args        json.RawMessage         `json:"args"`
 	PolicyYAML  string                  `json:"policy_yaml"`
@@ -438,11 +478,18 @@ func (a *App) apiSimulate(w http.ResponseWriter, r *http.Request) {
 		if dec.StepUp.MaxAge > 0 {
 			maxAge = dec.StepUp.MaxAge.String()
 		}
+		approvalTTL := ""
+		if dec.StepUp.ApprovalTTL > 0 {
+			approvalTTL = dec.StepUp.ApprovalTTL.String()
+		}
 		resp.StepUp = &simulateStepUpDTO{
-			Scopes:      dec.StepUp.Scopes,
-			ACRValues:   dec.StepUp.ACRValues,
-			MaxAge:      maxAge,
-			RequireDPoP: dec.StepUp.RequireDPoP,
+			Scopes:          dec.StepUp.Scopes,
+			ACRValues:       dec.StepUp.ACRValues,
+			MaxAge:          maxAge,
+			RequireDPoP:     dec.StepUp.RequireDPoP,
+			RequireApproval: dec.StepUp.RequireApproval,
+			ApprovalTTL:     approvalTTL,
+			ApprovalReason:  dec.StepUp.ApprovalReason,
 		}
 	}
 	a.writeAdminJSON(r.Context(), w, http.StatusOK, resp)
@@ -488,6 +535,18 @@ func (a *App) buildSimInput(req simulateRequest) (in policy.Input, matched bool,
 	if req.Annotations != nil {
 		applySimAnnotations(&tool.Annotations, req.Annotations)
 	}
+	if req.Metadata != nil {
+		applySimMetadata(&tool.Metadata, req.Metadata)
+	}
+	var simApproval policy.Approval
+	if req.Approval != nil {
+		simApproval = policy.Approval{
+			Verified: req.Approval.Verified,
+			ID:       req.Approval.ID,
+			Approver: req.Approval.Approver,
+			Reason:   req.Approval.Reason,
+		}
+	}
 	clientName := req.ClientName
 	if clientName == "" {
 		clientName = "admin-simulator"
@@ -497,6 +556,7 @@ func (a *App) buildSimInput(req simulateRequest) (in policy.Input, matched bool,
 		Method:     method,
 		ClientName: clientName,
 		Principal:  p,
+		Approval:   simApproval,
 		Tool:       tool,
 		Args:       req.Args,
 		Now:        now,
@@ -526,6 +586,21 @@ func resolveSimKind(kind, method string) (resolved catalog.Kind, resolvedMethod 
 			method = "tools/call"
 		}
 		return "", method
+	}
+}
+
+func applySimMetadata(dst *catalog.Metadata, src *simulateMetadataReq) {
+	if src.Trust != "" {
+		dst.Trust = src.Trust
+	}
+	if src.Classification != "" {
+		dst.Classification = src.Classification
+	}
+	if src.Egress != nil {
+		dst.Egress = *src.Egress
+	}
+	if src.Impact != "" {
+		dst.Impact = src.Impact
 	}
 }
 

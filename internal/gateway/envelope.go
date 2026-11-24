@@ -233,7 +233,7 @@ func ParseEnvelope(body []byte) (Envelope, error) {
 		return env, nil
 	}
 	env.HasParams = true
-	p, err := strictObject(params, "name", "uri", "arguments", "_meta", "requestState", "inputResponses")
+	p, err := strictObject(params, "name", "uri", "arguments", "_meta", "requestState", "inputResponses", fieldTaskID)
 	if err != nil {
 		if errors.Is(err, ErrBatch) {
 			return env, fmt.Errorf("%w: params must be an object", ErrEnvelope)

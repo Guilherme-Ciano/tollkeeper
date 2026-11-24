@@ -45,6 +45,9 @@ func (g *Gateway) capabilities() *mcp.ServerCapabilities {
 		caps.Resources = &mcp.ResourceCapabilities{ListChanged: true}
 		caps.Completions = &mcp.CompletionCapabilities{}
 	}
+	if g.cfg.Server.TasksEnabled {
+		caps.AddExtension(ExtensionTasks, map[string]any{})
+	}
 	return caps
 }
 
