@@ -105,4 +105,31 @@ func TestAdminV16OverviewAndSimulateApprovalMetadata(t *testing.T) {
 	if sr2.Decision != "allow" || sr2.Rule != "four-eyes-delete" {
 		t.Fatalf("expected four-eyes allow, got %+v", sr2)
 	}
+
+	valReq := `{"yaml":"policy:\n  default: deny\n  rules:\n    - name: r1\n      tools: [\"files__*\"]\n      effect: allow\n      on_deny:\n        require_approval: true\n        approval_ttl: 5m\n        approval_reason: \"manual review\"\n"}`
+	rec = httptest.NewRecorder()
+	req = httptest.NewRequestWithContext(
+		t.Context(),
+		http.MethodPost,
+		"/api/policy/validate",
+		bytes.NewBufferString(valReq),
+	)
+	h.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("validate status %d: %s", rec.Code, rec.Body.String())
+	}
+	var vr policyValidateResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &vr); err != nil {
+		t.Fatal(err)
+	}
+	if !vr.Valid || vr.Rules != 1 {
+		t.Fatalf("expected valid approval policy draft, got %+v", vr)
+	}
+
+	badAppCfg := cfg
+	badAppCfg.Approvals.Enabled = true
+	badAppCfg.Approvals.PubKeyFiles = []string{"nonexistent-approval-key.pub"}
+	if _, err := Build(t.Context(), badAppCfg, slog.New(slog.DiscardHandler), "test"); err == nil {
+		t.Fatal("expected Build failure for missing approval pubkey file")
+	}
 }
