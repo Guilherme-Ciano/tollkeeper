@@ -23,6 +23,7 @@ Each record states the context, the decision, the alternatives that lost and wha
 | [0017](0017-upstream-diagnostics-and-resilience.md) | Upstream diagnostics, chaos testing, and dependency recovery | Accepted |
 | [0018](0018-siem-sink-and-developer-experience.md) | Native SIEM audit sink, reusable policy library, and agent integrations | Accepted |
 | [0019](0019-embedded-admin-dashboard.md) | Embedded single-binary admin dashboard | Accepted |
+| [0020](0020-stateless-governance-boundaries.md) | Deliberate stateless data-plane boundaries and stateless governance primitives | Accepted |
 | [0021](0021-provenance-impact-limits-and-idempotency.md) | Provenance metadata, cost-based GCRA impact limits, and stateless idempotency | Accepted |
 
 
