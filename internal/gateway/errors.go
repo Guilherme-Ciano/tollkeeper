@@ -23,6 +23,8 @@ const (
 	CodeAuditUnavailabe  = -32003
 	CodeUpstreamFailed   = -32004
 	CodeDuplicateRequest = -32009
+	CodeApprovalRequired = -32010
+	CodeApprovalReplayed = -32011
 	CodeHeaderMismatch   = -32020
 )
 

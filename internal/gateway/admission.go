@@ -17,6 +17,7 @@ import (
 
 	"go.opentelemetry.io/otel/trace"
 
+	"github.com/Guilherme-Ciano/tollkeeper/internal/approval"
 	"github.com/Guilherme-Ciano/tollkeeper/internal/audit"
 	"github.com/Guilherme-Ciano/tollkeeper/internal/catalog"
 	"github.com/Guilherme-Ciano/tollkeeper/internal/config"
@@ -35,17 +36,18 @@ const (
 )
 
 type Admission struct {
-	RequestID     string
-	Start         time.Time
-	Principal     identity.Principal
-	Envelope      Envelope
-	Kind          catalog.Kind
-	Tool          catalog.Tool
-	Decision      policy.Decision
-	ArgsHash      string
-	TraceID       string
-	upstreamNanos atomic.Int64
-	dispatched    atomic.Bool
+	RequestID        string
+	Start            time.Time
+	Principal        identity.Principal
+	Envelope         Envelope
+	Kind             catalog.Kind
+	Tool             catalog.Tool
+	Decision         policy.Decision
+	ApprovalVerified *approval.Verified
+	ArgsHash         string
+	TraceID          string
+	upstreamNanos    atomic.Int64
+	dispatched       atomic.Bool
 }
 
 func (a *Admission) MarkDispatched() {
@@ -295,9 +297,12 @@ func (g *Gateway) admitCall(w http.ResponseWriter, r *http.Request, a *Admission
 		writeRPCError(w, http.StatusOK, env.ID, CodePolicyDenied, "denied by policy", nil)
 		return false
 	}
+	verified, polApproval := g.verifyApproval(ctx, r, a)
+	a.ApprovalVerified = verified
 	d := g.policy.Load().Decide(ctx, policy.Input{
 		Kind:       a.Kind,
 		Principal:  a.Principal,
+		Approval:   polApproval,
 		Method:     env.Method,
 		Tool:       tool,
 		Args:       env.Arguments,
@@ -313,6 +318,9 @@ func (g *Gateway) admitCall(w http.ResponseWriter, r *http.Request, a *Admission
 		return false
 	}
 	if !g.checkIdempotency(ctx, w, r, a) {
+		return false
+	}
+	if !g.consumeApproval(ctx, w, a) {
 		return false
 	}
 	return g.recordIntent(ctx, w, a)
@@ -348,7 +356,7 @@ func (g *Gateway) applyDecision(ctx context.Context, w http.ResponseWriter, a *A
 	case policy.StepUp:
 		g.metrics.Requests.WithLabelValues(env.Method, a.Tool.Name, a.Tool.Upstream, "step_up").Inc()
 		g.recordDecision(ctx, a, audit.DecisionStepUp, d.Rule, d.Reason)
-		g.writeStepUp(w, env, d)
+		g.writeStepUp(w, a, d)
 		return false
 	case policy.Deny:
 	}
@@ -358,10 +366,15 @@ func (g *Gateway) applyDecision(ctx context.Context, w http.ResponseWriter, a *A
 	return false
 }
 
-func (g *Gateway) writeStepUp(w http.ResponseWriter, env Envelope, d policy.Decision) {
+func (g *Gateway) writeStepUp(w http.ResponseWriter, a *Admission, d policy.Decision) {
+	env := a.Envelope
 	sc := d.StepUp
 	if sc == nil {
 		sc = &policy.StepUpChallenge{Scopes: d.StepUpScopes}
+	}
+	if sc.RequireApproval {
+		g.writeApprovalChallenge(w, a, sc)
+		return
 	}
 	data := map[string]any{}
 	if len(sc.Scopes) > 0 {
@@ -453,6 +466,10 @@ func (g *Gateway) event(a *Admission, phase, decision, rule, reason string) audi
 	}
 	if g.recordArgs == config.RecordArgsFull {
 		e.Args = a.Envelope.Arguments
+	}
+	if a.ApprovalVerified != nil {
+		e.ApprovedBy = a.ApprovalVerified.Approver
+		e.ApprovalID = a.ApprovalVerified.ID
 	}
 	if sh := a.Decision.Shadow; sh != nil {
 		e.ShadowRule, e.ShadowDecision = sh.Rule, sh.Effect.String()

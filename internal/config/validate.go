@@ -80,6 +80,8 @@ func (c *Config) Validate() error {
 	c.validatePolicy(v)
 	c.validateRateLimits(v)
 	c.validateIdempotency(v)
+	c.validateApprovals(v)
+	c.validateBundle(v)
 	c.validateAudit(v)
 	c.validatePinning(v)
 	if !c.Server.NamespaceTools && len(c.Upstreams) != 1 {
@@ -498,12 +500,48 @@ func validatePolicyRules(v *validator, prefix string, rules []Rule) {
 
 func validateOnDeny(v *validator, f string, r *Rule) {
 	od := r.OnDeny
-	hasStepUp := len(od.StepUpScopes) > 0 || len(od.ACRValues) > 0 || od.MaxAge != 0 || od.RequireDPoP
+	hasStepUp := len(od.StepUpScopes) > 0 || len(od.ACRValues) > 0 || od.MaxAge != 0 ||
+		od.RequireDPoP || od.RequireApproval
 	if hasStepUp && r.Effect != EffectAllow {
 		v.add(f+".on_deny", "step-up requirements only make sense on allow rules")
 	}
 	if od.MaxAge < 0 || od.MaxAge > 24*time.Hour {
 		v.add(f+".on_deny.max_age", "must be within [0, 24h]")
+	}
+	if od.ApprovalTTL < 0 || od.ApprovalTTL > 24*time.Hour {
+		v.add(f+".on_deny.approval_ttl", "must be within [0, 24h]")
+	}
+}
+
+func (c *Config) validateApprovals(v *validator) {
+	if !c.Approvals.Enabled {
+		return
+	}
+	v.require("approvals.header", c.Approvals.Header)
+	if len(c.Approvals.PubKeyFiles) == 0 && strings.TrimSpace(c.Approvals.PubKeyDir) == "" {
+		v.add("approvals.pubkey_files", "at least one pubkey_files entry or pubkey_dir is required")
+	}
+	if c.Approvals.MaxTTL <= 0 || c.Approvals.MaxTTL > 24*time.Hour {
+		v.add("approvals.max_ttl", "must be within (0, 24h]")
+	}
+	if c.Approvals.ClockSkew < 0 || c.Approvals.ClockSkew > 5*time.Minute {
+		v.add("approvals.clock_skew", "must be within [0, 5m]")
+	}
+	if c.Approvals.SingleUse && c.Approvals.MaxEntries < 100 {
+		v.add("approvals.max_entries", "must be at least 100")
+	}
+}
+
+func (c *Config) validateBundle(v *validator) {
+	if !c.Bundle.Enabled {
+		return
+	}
+	v.require("bundle.manifest_file", c.Bundle.ManifestFile)
+	if len(c.Bundle.PubKeyFiles) == 0 && strings.TrimSpace(c.Bundle.PubKeyDir) == "" {
+		v.add("bundle.pubkey_files", "at least one pubkey_files entry or pubkey_dir is required")
+	}
+	if c.Bundle.RequirePins && strings.TrimSpace(c.Pinning.File) == "" {
+		v.add("bundle.require_pins", "requires pinning.file to be set")
 	}
 }
 

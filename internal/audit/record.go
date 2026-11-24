@@ -57,6 +57,8 @@ type Event struct {
 	LatencyMicros   int64           `json:"latency_us,omitempty"`
 	UpstreamMicros  int64           `json:"upstream_us,omitempty"`
 	PinHash         string          `json:"pin_hash,omitempty"`
+	ApprovedBy      string          `json:"approved_by,omitempty"`
+	ApprovalID      string          `json:"approval_id,omitempty"`
 	ShadowRule      string          `json:"shadow_rule,omitempty"`
 	ShadowDecision  string          `json:"shadow_decision,omitempty"`
 	Dropped         uint64          `json:"dropped,omitempty"`

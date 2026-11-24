@@ -25,6 +25,7 @@ import (
 	"go.opentelemetry.io/otel/propagation"
 	"go.opentelemetry.io/otel/trace"
 
+	"github.com/Guilherme-Ciano/tollkeeper/internal/approval"
 	"github.com/Guilherme-Ciano/tollkeeper/internal/audit"
 	"github.com/Guilherme-Ciano/tollkeeper/internal/authn"
 	"github.com/Guilherme-Ciano/tollkeeper/internal/catalog"
@@ -51,24 +52,26 @@ type Caller interface {
 }
 
 type Deps struct {
-	Config      config.Config
-	Verifier    TokenVerifier
-	DPoP        *authn.DPoPVerifier
-	Policy      *policy.Engine
-	Limiter     *ratelimit.Limiter
-	Audit       Auditor
-	Catalog     *catalog.Catalog
-	Directory   *catalog.Directory
-	Upstreams   map[string]Caller
-	Metrics     *telemetry.Metrics
-	Tracer      trace.Tracer
-	Propagator  propagation.TextMapPropagator
-	Log         *slog.Logger
-	Version     string
-	Now         func() time.Time
-	Pins        PinGuard
-	Idempotency IdempotencyStore
-	StateKey    []byte
+	Config         config.Config
+	Verifier       TokenVerifier
+	DPoP           *authn.DPoPVerifier
+	Policy         *policy.Engine
+	Limiter        *ratelimit.Limiter
+	Audit          Auditor
+	Catalog        *catalog.Catalog
+	Directory      *catalog.Directory
+	Upstreams      map[string]Caller
+	Metrics        *telemetry.Metrics
+	Tracer         trace.Tracer
+	Propagator     propagation.TextMapPropagator
+	Log            *slog.Logger
+	Version        string
+	Now            func() time.Time
+	Pins           PinGuard
+	Idempotency    IdempotencyStore
+	Approvals      *approval.Verifier
+	ApprovalReplay approval.ReplayStore
+	StateKey       []byte
 }
 
 type PinGuard interface {
@@ -102,13 +105,15 @@ type Gateway struct {
 	prm            *oauthex.ProtectedResourceMetadata
 	prmPath        string
 
-	pins         PinGuard
-	idempotency  IdempotencyStore
-	fastDisabled bool
-	impl         *mcp.Implementation
-	states       *stateSealer
-	infoPrefix   []byte
-	hidden       atomic.Pointer[map[string]struct{}]
+	pins           PinGuard
+	idempotency    IdempotencyStore
+	approvals      *approval.Verifier
+	approvalReplay approval.ReplayStore
+	fastDisabled   bool
+	impl           *mcp.Implementation
+	states         *stateSealer
+	infoPrefix     []byte
+	hidden         atomic.Pointer[map[string]struct{}]
 
 	notifyMu    sync.Mutex
 	sentinel    string
@@ -159,10 +164,15 @@ func New(d Deps) *Gateway {
 		unapproved:     map[string]pin.Status{},
 		pins:           d.Pins,
 		idempotency:    d.Idempotency,
+		approvals:      d.Approvals,
+		approvalReplay: d.ApprovalReplay,
 		fastDisabled:   d.Config.Server.DisableFastPath,
 	}
 	if d.Config.Idempotency.Enabled && g.idempotency == nil {
 		g.idempotency = NewMemoryIdempotencyStore(d.Config.Idempotency.MaxEntries, g.now)
+	}
+	if g.approvals != nil && d.Config.Approvals.SingleUse && g.approvalReplay == nil {
+		g.approvalReplay = approval.NewMemoryReplayStore(d.Config.Approvals.MaxEntries, g.now)
 	}
 	if !d.Config.Audit.Enabled {
 		g.recordArgs = config.RecordArgsNone
