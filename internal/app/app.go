@@ -25,6 +25,7 @@ import (
 	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
 	"golang.org/x/sync/errgroup"
 
+	"github.com/Guilherme-Ciano/tollkeeper/internal/approval"
 	"github.com/Guilherme-Ciano/tollkeeper/internal/audit"
 	"github.com/Guilherme-Ciano/tollkeeper/internal/audit/anchor"
 	"github.com/Guilherme-Ciano/tollkeeper/internal/audit/kms"
@@ -32,6 +33,7 @@ import (
 	"github.com/Guilherme-Ciano/tollkeeper/internal/audit/pgsink"
 	"github.com/Guilherme-Ciano/tollkeeper/internal/audit/siemsink"
 	"github.com/Guilherme-Ciano/tollkeeper/internal/authn"
+	"github.com/Guilherme-Ciano/tollkeeper/internal/bundle"
 	"github.com/Guilherme-Ciano/tollkeeper/internal/catalog"
 	"github.com/Guilherme-Ciano/tollkeeper/internal/config"
 	"github.com/Guilherme-Ciano/tollkeeper/internal/gateway"
@@ -49,30 +51,33 @@ const (
 )
 
 type App struct {
-	cfg            config.Config
-	log            *slog.Logger
-	metrics        *telemetry.Metrics
-	tracing        *telemetry.Tracing
-	keys           *authn.KeySet
-	store          *ratelimit.Store
-	redis          redis.UniversalClient
-	auditLog       *audit.Log
-	auditPG        *pgsink.Sink
-	anchorer       *anchor.Anchorer
-	watchdog       *audit.Watchdog
-	otlp           *otlpsink.Sink
-	siem           *siemsink.Sink
-	version        string
-	catalog        *catalog.Catalog
-	directory      *catalog.Directory
-	upstreams      []*upstream.Upstream
-	gateway        *gateway.Gateway
-	idempotencyMem *gateway.MemoryIdempotencyStore
-	pins           *pin.Guard
-	ready          atomic.Bool
-	synced         map[string]*atomic.Uint64
-	upstreamMeta   map[string]catalog.Metadata
-	listeners      sync.Map
+	cfg               config.Config
+	log               *slog.Logger
+	metrics           *telemetry.Metrics
+	tracing           *telemetry.Tracing
+	keys              *authn.KeySet
+	store             *ratelimit.Store
+	redis             redis.UniversalClient
+	auditLog          *audit.Log
+	auditPG           *pgsink.Sink
+	anchorer          *anchor.Anchorer
+	watchdog          *audit.Watchdog
+	otlp              *otlpsink.Sink
+	siem              *siemsink.Sink
+	version           string
+	catalog           *catalog.Catalog
+	directory         *catalog.Directory
+	upstreams         []*upstream.Upstream
+	gateway           *gateway.Gateway
+	idempotencyMem    *gateway.MemoryIdempotencyStore
+	approvalReplayMem *approval.MemoryReplayStore
+	bundleKeys        []ed25519.PublicKey
+	bundleStatus      *bundle.Result
+	pins              *pin.Guard
+	ready             atomic.Bool
+	synced            map[string]*atomic.Uint64
+	upstreamMeta      map[string]catalog.Metadata
+	listeners         sync.Map
 
 	configPath string
 	backend    ratelimit.Backend
@@ -101,6 +106,9 @@ func Build(ctx context.Context, cfg config.Config, log *slog.Logger, version str
 		return nil, err
 	}
 	a.tracing = tr
+	if err := a.openBundle(ctx); err != nil {
+		return nil, err
+	}
 	pol, err := policy.New(cfg.Policy)
 	if err != nil {
 		return nil, fmt.Errorf("compile policy: %w", err)
@@ -149,24 +157,30 @@ func Build(ctx context.Context, cfg config.Config, log *slog.Logger, version str
 		log.InfoContext(ctx, "request state key is ephemeral",
 			slog.String("hint", "set server.request_state_key_file when running several replicas"))
 	}
+	approvalVerifier, approvalReplay, err := a.openApprovals(ctx)
+	if err != nil {
+		return nil, err
+	}
 	a.gateway = gateway.New(gateway.Deps{
-		Config:      cfg,
-		Verifier:    verifier,
-		DPoP:        buildDPoP(cfg, stateKey),
-		Policy:      pol,
-		Limiter:     lim,
-		Audit:       auditor,
-		Catalog:     a.catalog,
-		Directory:   a.directory,
-		Upstreams:   callers,
-		Metrics:     a.metrics,
-		Tracer:      tr.Tracer(),
-		Propagator:  tr.Propagator,
-		Log:         log,
-		Version:     version,
-		Pins:        pins,
-		Idempotency: a.openIdempotency(),
-		StateKey:    stateKey,
+		Config:         cfg,
+		Verifier:       verifier,
+		DPoP:           buildDPoP(cfg, stateKey),
+		Policy:         pol,
+		Limiter:        lim,
+		Audit:          auditor,
+		Catalog:        a.catalog,
+		Directory:      a.directory,
+		Upstreams:      callers,
+		Metrics:        a.metrics,
+		Tracer:         tr.Tracer(),
+		Propagator:     tr.Propagator,
+		Log:            log,
+		Version:        version,
+		Pins:           pins,
+		Idempotency:    a.openIdempotency(),
+		Approvals:      approvalVerifier,
+		ApprovalReplay: approvalReplay,
+		StateKey:       stateKey,
 	})
 	return a, nil
 }
@@ -222,6 +236,72 @@ func buildDPoP(cfg config.Config, stateKey []byte) *authn.DPoPVerifier {
 		NonceKey:      stateKey,
 		TargetURL:     cfg.Server.PublicURL,
 	})
+}
+
+func (a *App) openBundle(ctx context.Context) error {
+	bc := a.cfg.Bundle
+	if !bc.Enabled {
+		return nil
+	}
+	keys, err := bundle.LoadPublicKeys(bc.PubKeyFiles, bc.PubKeyDir)
+	if err != nil {
+		return fmt.Errorf("load bundle public keys: %w", err)
+	}
+	res, err := bundle.Verify(bundle.VerifyOptions{
+		ManifestPath: bc.ManifestFile,
+		ConfigDigest: a.cfg.Digest,
+		PinsPath:     a.cfg.Pinning.File,
+		RequirePins:  bc.RequirePins,
+		Keys:         keys,
+	})
+	if err != nil {
+		return fmt.Errorf("verify signed bundle %s: %w", bc.ManifestFile, err)
+	}
+	a.bundleKeys = keys
+	a.bundleStatus = &res
+	a.metrics.BundleVerified.Set(1)
+	a.log.InfoContext(ctx, "signed bundle verified",
+		slog.String("bundle_id", res.BundleID),
+		slog.String("key_id", res.KeyID),
+		slog.String("manifest", bc.ManifestFile))
+	return nil
+}
+
+func (a *App) openApprovals(ctx context.Context) (*approval.Verifier, approval.ReplayStore, error) {
+	ac := a.cfg.Approvals
+	if !ac.Enabled {
+		return nil, nil, nil
+	}
+	keys, err := approval.LoadKeySet(ac.PubKeyFiles, ac.PubKeyDir)
+	if err != nil {
+		return nil, nil, fmt.Errorf("load approval public keys: %w", err)
+	}
+	aud := a.cfg.Auth.Resource
+	if aud == "" {
+		aud = a.cfg.Server.PublicURL
+	}
+	verifier := approval.NewVerifier(approval.VerifierOptions{
+		Keys:      keys,
+		Issuer:    ac.Issuer,
+		Audience:  aud,
+		MaxTTL:    ac.MaxTTL,
+		ClockSkew: ac.ClockSkew,
+	})
+	var replay approval.ReplayStore
+	if ac.SingleUse {
+		if a.redis != nil {
+			rc := a.cfg.RateLimits.Redis
+			replay = approval.NewRedisReplayStore(a.redis, rc.KeyPrefix+"approval:", rc.Timeout)
+		} else {
+			a.approvalReplayMem = approval.NewMemoryReplayStore(ac.MaxEntries, nil)
+			replay = a.approvalReplayMem
+		}
+	}
+	a.log.InfoContext(ctx, "stateless human approval tokens enabled",
+		slog.String("header", ac.Header),
+		slog.Bool("single_use", ac.SingleUse),
+		slog.Int("keys", keys.Len()))
+	return verifier, replay, nil
 }
 
 func (a *App) openPins(ctx context.Context) error {
@@ -875,6 +955,9 @@ func (a *App) Run(ctx context.Context) error {
 	bg.Go(func() { a.store.RunJanitor(bgCtx, time.Minute) })
 	if a.idempotencyMem != nil {
 		bg.Go(func() { a.idempotencyMem.RunJanitor(bgCtx, time.Minute) })
+	}
+	if a.approvalReplayMem != nil {
+		bg.Go(func() { a.approvalReplayMem.RunJanitor(bgCtx, time.Minute) })
 	}
 	if a.keys != nil {
 		if err := a.keys.Refresh(ctx); err != nil {

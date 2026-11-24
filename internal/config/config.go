@@ -11,6 +11,8 @@ type Config struct {
 	Policy      Policy      `koanf:"policy"`
 	RateLimits  RateLimits  `koanf:"rate_limits"`
 	Idempotency Idempotency `koanf:"idempotency"`
+	Approvals   Approvals   `koanf:"approvals"`
+	Bundle      Bundle      `koanf:"bundle"`
 	Audit       Audit       `koanf:"audit"`
 	Telemetry   Telemetry   `koanf:"telemetry"`
 	Pinning     Pinning     `koanf:"pinning"`
@@ -30,6 +32,26 @@ type Idempotency struct {
 	TTL        time.Duration `koanf:"ttl"`
 	MaxEntries int           `koanf:"max_entries"`
 	Tools      []string      `koanf:"tools"`
+}
+
+type Approvals struct {
+	Enabled     bool          `koanf:"enabled"`
+	Issuer      string        `koanf:"issuer"`
+	Header      string        `koanf:"header"`
+	PubKeyFiles []string      `koanf:"pubkey_files"`
+	PubKeyDir   string        `koanf:"pubkey_dir"`
+	MaxTTL      time.Duration `koanf:"max_ttl"`
+	ClockSkew   time.Duration `koanf:"clock_skew"`
+	SingleUse   bool          `koanf:"single_use"`
+	MaxEntries  int           `koanf:"max_entries"`
+}
+
+type Bundle struct {
+	Enabled      bool     `koanf:"enabled"`
+	ManifestFile string   `koanf:"manifest_file"`
+	PubKeyFiles  []string `koanf:"pubkey_files"`
+	PubKeyDir    string   `koanf:"pubkey_dir"`
+	RequirePins  bool     `koanf:"require_pins"`
 }
 
 const (
@@ -249,10 +271,13 @@ type Subjects struct {
 }
 
 type OnDeny struct {
-	StepUpScopes []string      `koanf:"step_up_scopes"`
-	ACRValues    []string      `koanf:"acr_values"`
-	MaxAge       time.Duration `koanf:"max_age"`
-	RequireDPoP  bool          `koanf:"require_dpop"`
+	StepUpScopes    []string      `koanf:"step_up_scopes"`
+	ACRValues       []string      `koanf:"acr_values"`
+	MaxAge          time.Duration `koanf:"max_age"`
+	RequireDPoP     bool          `koanf:"require_dpop"`
+	RequireApproval bool          `koanf:"require_approval"`
+	ApprovalTTL     time.Duration `koanf:"approval_ttl"`
+	ApprovalReason  string        `koanf:"approval_reason"`
 }
 
 const (
@@ -455,6 +480,13 @@ func Defaults() Config {
 		RateLimits: RateLimits{
 			Store: RateStoreMemory,
 			Redis: RedisLimits{KeyPrefix: "tollkeeper:rl:", Timeout: 50 * time.Millisecond, OnError: RedisOnErrorLocal},
+		},
+		Approvals: Approvals{
+			Header:     "X-Tollkeeper-Approval",
+			MaxTTL:     15 * time.Minute,
+			ClockSkew:  30 * time.Second,
+			SingleUse:  true,
+			MaxEntries: 10000,
 		},
 		Audit: Audit{
 			Enabled:        true,

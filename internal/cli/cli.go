@@ -71,6 +71,8 @@ func Root(info BuildInfo, stdout, stderr io.Writer) *cobra.Command {
 		policyCmd(),
 		auditCmd(),
 		pinCmd(),
+		approvalCmd(),
+		bundleCmd(),
 		devIssuerCmd(),
 		healthCmd(),
 	)
@@ -235,7 +237,7 @@ type verifyOpts struct {
 func verifyCmd() *cobra.Command {
 	var o verifyOpts
 	verify := &cobra.Command{
-		Use:   "verify",
+		Use:   cmdVerify,
 		Short: "Recompute the hash chain and check signed checkpoints and key rotations",
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			return runVerify(cmd.OutOrStdout(), o)
@@ -501,7 +503,7 @@ func keygenCmd() *cobra.Command {
 	var dir string
 	var ifMissing bool
 	keygen := &cobra.Command{
-		Use:   "keygen",
+		Use:   cmdKeygen,
 		Short: "Generate an Ed25519 checkpoint signing key pair",
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			priv, pub, err := audit.GenerateKeyPair()

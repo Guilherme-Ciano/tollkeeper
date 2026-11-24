@@ -55,10 +55,20 @@ const (
 )
 
 type StepUpChallenge struct {
-	Scopes      []string
-	ACRValues   []string
-	MaxAge      time.Duration
-	RequireDPoP bool
+	Scopes          []string
+	ACRValues       []string
+	MaxAge          time.Duration
+	RequireDPoP     bool
+	RequireApproval bool
+	ApprovalTTL     time.Duration
+	ApprovalReason  string
+}
+
+type Approval struct {
+	Verified bool
+	ID       string
+	Approver string
+	Reason   string
 }
 
 type Decision struct {
@@ -77,6 +87,7 @@ type ShadowHit struct {
 
 type Input struct {
 	Principal  identity.Principal
+	Approval   Approval
 	Method     string
 	Kind       catalog.Kind
 	Tool       catalog.Tool
@@ -106,6 +117,7 @@ type Engine struct {
 func newEnv() (*cel.Env, error) {
 	env, err := cel.NewEnv(
 		cel.Variable("principal", cel.MapType(cel.StringType, cel.DynType)),
+		cel.Variable("approval", cel.MapType(cel.StringType, cel.DynType)),
 		cel.Variable("tool", cel.MapType(cel.StringType, cel.DynType)),
 		cel.Variable("request", cel.MapType(cel.StringType, cel.DynType)),
 		cel.Variable("args", cel.DynType),
@@ -314,6 +326,12 @@ func activation(in Input, withArgs bool) (map[string]any, error) {
 			"jkt":              in.Principal.TokenThumbprint,
 			"claims":           claims,
 		},
+		"approval": map[string]any{
+			"verified": in.Approval.Verified,
+			"id":       in.Approval.ID,
+			"approver": in.Approval.Approver,
+			"reason":   in.Approval.Reason,
+		},
 		"tool": map[string]any{
 			"name":           in.Tool.Name,
 			"upstream":       in.Tool.Upstream,
@@ -400,7 +418,7 @@ func (e *Engine) Decide(ctx context.Context, in Input) Decision {
 	return Decision{Effect: sc.defaultEffect, Rule: "default", Reason: "no rule matched", Shadow: shadow}
 }
 
-func stepUpDecision(r *rule, p identity.Principal, now time.Time) (Decision, bool) {
+func stepUpDecision(r *rule, p identity.Principal, ap Approval, now time.Time) (Decision, bool) {
 	if r.effect != Allow {
 		return Decision{}, false
 	}
@@ -409,10 +427,16 @@ func stepUpDecision(r *rule, p identity.Principal, now time.Time) (Decision, boo
 	needACR := len(od.ACRValues) > 0 && !slices.Contains(od.ACRValues, p.ACR)
 	needFresh := od.MaxAge > 0 && (p.AuthTime.IsZero() || now.Sub(p.AuthTime) > od.MaxAge)
 	needDPoP := od.RequireDPoP && !p.DPoPVerified
-	if !needScopes && !needACR && !needFresh && !needDPoP {
+	needApproval := od.RequireApproval && !ap.Verified
+	if !needScopes && !needACR && !needFresh && !needDPoP && !needApproval {
 		return Decision{}, false
 	}
-	ch := &StepUpChallenge{RequireDPoP: needDPoP}
+	ch := &StepUpChallenge{
+		RequireDPoP:     needDPoP,
+		RequireApproval: needApproval,
+		ApprovalTTL:     od.ApprovalTTL,
+		ApprovalReason:  od.ApprovalReason,
+	}
 	if needScopes {
 		ch.Scopes = slices.Clone(od.StepUpScopes)
 	}
@@ -422,22 +446,29 @@ func stepUpDecision(r *rule, p identity.Principal, now time.Time) (Decision, boo
 	if needFresh {
 		ch.MaxAge = od.MaxAge
 	}
-	reason := "additional scope required"
-	if needACR || needFresh || needDPoP {
-		reason = "stronger authentication required"
-	}
 	return Decision{
 		Effect:       StepUp,
 		Rule:         r.cfg.Name,
-		Reason:       reason,
+		Reason:       stepUpReason(needACR, needFresh, needDPoP, needApproval),
 		StepUpScopes: ch.Scopes,
 		StepUp:       ch,
 	}, true
 }
 
+func stepUpReason(needACR, needFresh, needDPoP, needApproval bool) string {
+	switch {
+	case needApproval:
+		return "human approval required"
+	case needACR || needFresh || needDPoP:
+		return "stronger authentication required"
+	default:
+		return "additional scope required"
+	}
+}
+
 func (e *Engine) decideRule(ctx context.Context, r *rule, ev *evaluation) (Decision, bool) {
 	if r.program == nil {
-		if sd, need := stepUpDecision(r, ev.in.Principal, ev.in.Now); need {
+		if sd, need := stepUpDecision(r, ev.in.Principal, ev.in.Approval, ev.in.Now); need {
 			return sd, true
 		}
 		return Decision{Effect: r.effect, Rule: r.cfg.Name, Reason: reasonMatched}, true
@@ -451,12 +482,12 @@ func (e *Engine) decideRule(ctx context.Context, r *rule, ev *evaluation) (Decis
 		return Decision{Effect: Deny, Rule: r.cfg.Name, Reason: "policy evaluation failed: " + err.Error()}, true
 	}
 	if ok {
-		if sd, need := stepUpDecision(r, ev.in.Principal, ev.in.Now); need {
+		if sd, need := stepUpDecision(r, ev.in.Principal, ev.in.Approval, ev.in.Now); need {
 			return sd, true
 		}
 		return Decision{Effect: r.effect, Rule: r.cfg.Name, Reason: reasonMatched}, true
 	}
-	if sd, need := stepUpDecision(r, ev.in.Principal, ev.in.Now); need {
+	if sd, need := stepUpDecision(r, ev.in.Principal, ev.in.Approval, ev.in.Now); need {
 		return sd, true
 	}
 	return Decision{}, false

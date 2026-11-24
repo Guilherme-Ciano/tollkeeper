@@ -8,6 +8,7 @@ import (
 	"reflect"
 	"strings"
 
+	"github.com/Guilherme-Ciano/tollkeeper/internal/bundle"
 	"github.com/Guilherme-Ciano/tollkeeper/internal/config"
 	"github.com/Guilherme-Ciano/tollkeeper/internal/gateway"
 	"github.com/Guilherme-Ciano/tollkeeper/internal/policy"
@@ -31,6 +32,8 @@ func restartSections(cur, next config.Config) []string {
 		{"audit", cur.Audit, next.Audit},
 		{"telemetry", cur.Telemetry, next.Telemetry},
 		{"pinning", cur.Pinning, next.Pinning},
+		{"approvals", cur.Approvals, next.Approvals},
+		{"bundle", cur.Bundle, next.Bundle},
 		{"rate_limits.store", cur.RateLimits.Store, next.RateLimits.Store},
 		{"rate_limits.redis", cur.RateLimits.Redis, next.RateLimits.Redis},
 	} {
@@ -44,6 +47,21 @@ func restartSections(cur, next config.Config) []string {
 func (a *App) Reload(ctx context.Context, next config.Config) error {
 	a.reloadMu.Lock()
 	defer a.reloadMu.Unlock()
+	var verifiedBundle *bundle.Result
+	if a.cfg.Bundle.Enabled {
+		res, berr := bundle.Verify(bundle.VerifyOptions{
+			ManifestPath: a.cfg.Bundle.ManifestFile,
+			ConfigDigest: next.Digest,
+			PinsPath:     a.cfg.Pinning.File,
+			RequirePins:  a.cfg.Bundle.RequirePins,
+			Keys:         a.bundleKeys,
+		})
+		if berr != nil {
+			a.metrics.ConfigReloads.WithLabelValues("invalid").Inc()
+			return fmt.Errorf("verify signed bundle: %w", berr)
+		}
+		verifiedBundle = &res
+	}
 	pol, err := policy.New(next.Policy)
 	if err != nil {
 		a.metrics.ConfigReloads.WithLabelValues("invalid").Inc()
@@ -74,6 +92,9 @@ func (a *App) Reload(ctx context.Context, next config.Config) error {
 	}
 	a.gateway.Swap(pol, lim)
 	a.cfg.Policy, a.cfg.RateLimits.Rules, a.cfg.Digest = next.Policy, next.RateLimits.Rules, next.Digest
+	if verifiedBundle != nil {
+		a.bundleStatus = verifiedBundle
+	}
 	a.metrics.ConfigReloads.WithLabelValues("ok").Inc()
 	attrs := []any{slog.String("sha256", next.Digest)}
 	if len(restart) > 0 {

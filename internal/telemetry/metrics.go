@@ -23,6 +23,8 @@ type Metrics struct {
 	ConfigReloads         *prometheus.CounterVec
 	RateLimited           *prometheus.CounterVec
 	IdempotencyRejections prometheus.Counter
+	ApprovalVerifications *prometheus.CounterVec
+	BundleVerified        prometheus.Gauge
 	AuthFailures          *prometheus.CounterVec
 	AuditQueue            prometheus.Gauge
 	AuditDropped          prometheus.Counter
@@ -109,6 +111,14 @@ func NewMetrics() *Metrics {
 			Name: "mcpgw_idempotency_rejections_total",
 			Help: "Requests rejected by the stateless idempotency guard.",
 		}),
+		ApprovalVerifications: prometheus.NewCounterVec(prometheus.CounterOpts{
+			Name: "mcpgw_approval_verifications_total",
+			Help: "Stateless approval token verifications by result: ok, expired, mismatch, invalid, replayed, error.",
+		}, []string{labelResult}),
+		BundleVerified: prometheus.NewGauge(prometheus.GaugeOpts{
+			Name: "mcpgw_bundle_verified",
+			Help: "1 when a signed policy and pin bundle is loaded and verified, 0 otherwise.",
+		}),
 		AuthFailures: prometheus.NewCounterVec(prometheus.CounterOpts{
 			Name: "mcpgw_auth_failures_total", Help: "Rejected bearer tokens by reason.",
 		}, []string{"reason"}),
@@ -193,6 +203,8 @@ func NewMetrics() *Metrics {
 		m.ConfigReloads,
 		m.RateLimited,
 		m.IdempotencyRejections,
+		m.ApprovalVerifications,
+		m.BundleVerified,
 		m.AuthFailures,
 		m.AuditQueue,
 		m.AuditDropped,

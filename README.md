@@ -200,6 +200,8 @@ Grafana on `http://127.0.0.1:3000` opens on the provisioned tollkeeper dashboard
 | `tollkeeper audit keygen -o dir` | Ed25519 checkpoint key pair |
 | `tollkeeper pin status [--check]` | List catalog tools as `approved`, `new` or `changed` against the lockfile; `--check` fails when anything is pending |
 | `tollkeeper pin approve [tool...] \| --all [--prune] [--yes]` | Verify each reported pin, show a unified diff of the whole definition with hidden characters escaped, confirm per tool, then record it in the lockfile the gateway reloads |
+| `tollkeeper approval keygen\|sign\|verify` | Generate Ed25519 keys, sign argument-bound `tk-approval+jwt` HITL approval tokens, and verify them offline ([ADR 0022](docs/adr/0022-stateless-approval-tokens-and-signed-bundles.md)) |
+| `tollkeeper bundle keygen\|sign\|verify` | Generate Ed25519 keys, sign config + pin lockfile bundles into `bundle.sig.json`, and verify bundle integrity ([ADR 0022](docs/adr/0022-stateless-approval-tokens-and-signed-bundles.md)) |
 | `tollkeeper dev-issuer -c devissuer.yaml` | DEV ONLY OAuth issuer (refuses non-loopback binds without `--i-know-this-is-insecure`) |
 | `tollkeeper healthcheck --url …` | Probe for distroless container healthchecks |
 
@@ -273,8 +275,10 @@ A rule applies to tools, prompts or resources only through its own `tools`, `pro
 | `pinning.mode` | `warn` | `off`, `warn` (serve and report unapproved definitions) or `enforce` (hide and refuse them until approved) |
 | `pinning.file` | | Lockfile written by `tollkeeper pin approve`; required for `enforce`, reloaded every `pinning.reload_interval` (5 s); refused if group or world writable |
 | `pinning.report_token` | | Bearer token for `GET /pins`; without it the report is only served on a loopback admin listener |
+| `approvals.*` | `enabled: false` | Stateless Ed25519 Human-in-the-Loop approval tokens (`header`: `X-Tollkeeper-Approval`, `pubkey_files`/`pubkey_dir`, `issuer`, `max_ttl`: `15m`, `single_use`: `true`); enforces argument-bound single and batch approvals via `on_deny.require_approval` and CEL `approval.*`, logging `approved_by`/`approval_id` ([ADR 0022](docs/adr/0022-stateless-approval-tokens-and-signed-bundles.md)) |
+| `bundle.*` | `enabled: false` | Ed25519 supply-chain verification for `config.yaml` and optional `pinning.file` (`manifest_file`, `pubkey_files`/`pubkey_dir`, `require_pins`) enforced fail-closed at startup and on every `SIGHUP` reload ([ADR 0022](docs/adr/0022-stateless-approval-tokens-and-signed-bundles.md)) |
 
-CEL variables: `principal{sub, client_id, tenant, delegated, actor, scopes, roles, groups, acr, amr, auth_age_seconds, dpop, jkt, claims}`, `tool{name, upstream, original, pin_hash, trust, classification, egress, impact, annotations}` (for prompts and resources: the prompt name or URI, its upstream and the upstream's own name), `args` (prompt arguments for `prompts/get`), `request{kind, method, client_name}` with `kind` one of `tool`, `prompt`, `resource`, `template`, and `now`. Programs are compiled at load time with a cost limit and a 50 ms evaluation timeout, and arguments are only decoded when a rule references `args`. Per-tenant isolated policy scopes live under `policy.tenants.<id>`, and `on_deny` supports RFC 9470 `acr_values`, `max_age`, `require_dpop` and `step_up_scopes` ([ADR 0015](docs/adr/0015-tenant-policies-and-step-up.md)).
+CEL variables: `principal{sub, client_id, tenant, delegated, actor, scopes, roles, groups, acr, amr, auth_age_seconds, dpop, jkt, claims}`, `approval{verified, id, approver, reason}`, `tool{name, upstream, original, pin_hash, trust, classification, egress, impact, annotations}` (for prompts and resources: the prompt name or URI, its upstream and the upstream's own name), `args` (prompt arguments for `prompts/get`), `request{kind, method, client_name}` with `kind` one of `tool`, `prompt`, `resource`, `template`, and `now`. Programs are compiled at load time with a cost limit and a 50 ms evaluation timeout, and arguments are only decoded when a rule references `args`. Per-tenant isolated policy scopes live under `policy.tenants.<id>`, and `on_deny` supports RFC 9470 `acr_values`, `max_age`, `require_dpop` and `step_up_scopes` ([ADR 0015](docs/adr/0015-tenant-policies-and-step-up.md)).
 
 ## Benchmarks
 
@@ -379,9 +383,9 @@ Shipped in v1.5:
 Next (v1.6 — Stateless Governance & Hardening, [ADR 0020](docs/adr/0020-stateless-governance-boundaries.md)):
 
 - [x] Updated v1.5+ [Threat Model](docs/threat-model.md) with explicit stateless trust boundaries and dedicated adversarial security test suite (`internal/gateway/adversarial_test.go`)
-- [ ] Static upstream/tool classification (`trust`, `classification`, `egress`, `impact`) in CEL + deterministic `_meta.tollkeeper.provenance` response stamps
-- [ ] Cost-based GCRA impact limits (`cost_expr` in CEL) and short-window idempotency / anti-replay guard
-- [ ] Stateless argument-bound Human-in-the-Loop approval tokens (`tk-approval+jwt` + `tollkeeper approval sign`) and Ed25519-signed config+pin bundles
+- [x] Static upstream/tool classification (`trust`, `classification`, `egress`, `impact`) in CEL + deterministic `_meta.tollkeeper.provenance` response stamps ([ADR 0021](docs/adr/0021-provenance-impact-limits-and-idempotency.md))
+- [x] Cost-based GCRA impact limits (`cost_expr` in CEL) and short-window idempotency / anti-replay guard ([ADR 0021](docs/adr/0021-provenance-impact-limits-and-idempotency.md))
+- [x] Stateless argument-bound Human-in-the-Loop approval tokens (`tk-approval+jwt` + `tollkeeper approval sign`) and Ed25519-signed config+pin bundles ([ADR 0022](docs/adr/0022-stateless-approval-tokens-and-signed-bundles.md))
 - [ ] Tasks extension (SEP-2663)
 
 ## Development
