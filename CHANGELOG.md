@@ -1,5 +1,22 @@
 # Changelog
 
+## [1.5.0](https://github.com/Guilherme-Ciano/tollkeeper/compare/v1.4.1...v1.5.0) (2026-11-24)
+
+
+### Features
+
+* **audit:** add RepairTail torn-tail recovery with tamper refusal and corruption tests ([7a5db01](https://github.com/Guilherme-Ciano/tollkeeper/commit/7a5db01dcd34dee41bea255eb109eb13c90d1c73))
+
+
+### Security
+
+* **egress:** add netguard private-IP dialer control and SSRF test suite ([c1483f4](https://github.com/Guilherme-Ciano/tollkeeper/commit/c1483f4b07f55ae09804526333804b9e5aeaa03c))
+
+
+### Documentation
+
+* **readme:** align roadmap version with v1.5.0 release ([fbb3c5b](https://github.com/Guilherme-Ciano/tollkeeper/commit/fbb3c5b6a33af2d909cfdb4e316faf22e09982ee))
+
 ## [1.4.1](https://github.com/Guilherme-Ciano/tollkeeper/compare/v1.4.0...v1.4.1) (2026-11-23)
 
 
