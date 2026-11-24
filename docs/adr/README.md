@@ -25,6 +25,7 @@ Each record states the context, the decision, the alternatives that lost and wha
 | [0019](0019-embedded-admin-dashboard.md) | Embedded single-binary admin dashboard | Accepted |
 | [0020](0020-stateless-governance-boundaries.md) | Deliberate stateless data-plane boundaries and stateless governance primitives | Accepted |
 | [0021](0021-provenance-impact-limits-and-idempotency.md) | Provenance metadata, cost-based GCRA impact limits, and stateless idempotency | Accepted |
+| [0022](0022-stateless-approval-tokens-and-signed-bundles.md) | Stateless argument-bound human approval tokens and Ed25519-signed config bundles | Accepted |
 
 
 The threat model that ties these together is in [../threat-model.md](../threat-model.md).

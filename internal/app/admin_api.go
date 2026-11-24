@@ -97,6 +97,19 @@ type overviewUpstreamsDTO struct {
 	Synced int `json:"synced"`
 }
 
+type overviewBundleDTO struct {
+	Enabled  bool   `json:"enabled"`
+	Verified bool   `json:"verified"`
+	BundleID string `json:"bundle_id,omitempty"`
+	KeyID    string `json:"key_id,omitempty"`
+}
+
+type overviewApprovalsDTO struct {
+	Enabled   bool   `json:"enabled"`
+	Header    string `json:"header,omitempty"`
+	SingleUse bool   `json:"single_use,omitempty"`
+}
+
 type overviewResponse struct {
 	Version      string                `json:"version"`
 	Ready        bool                  `json:"ready"`
@@ -107,6 +120,8 @@ type overviewResponse struct {
 	Pinning      overviewPinningDTO    `json:"pinning"`
 	Policy       overviewPolicyDTO     `json:"policy"`
 	RateLimits   overviewRateLimitsDTO `json:"rate_limits"`
+	Approvals    overviewApprovalsDTO  `json:"approvals"`
+	Bundle       overviewBundleDTO     `json:"bundle"`
 	Audit        overviewAuditDTO      `json:"audit"`
 	Catalog      overviewCatalogDTO    `json:"catalog"`
 	Upstreams    overviewUpstreamsDTO  `json:"upstreams"`
@@ -192,7 +207,15 @@ func (a *App) apiOverview(w http.ResponseWriter, r *http.Request) {
 	pol := a.cfg.Policy
 	rlRules := len(a.cfg.RateLimits.Rules)
 	digest := a.cfg.Digest
+	bStatus := a.bundleStatus
 	a.reloadMu.Unlock()
+
+	bundleDTO := overviewBundleDTO{Enabled: a.cfg.Bundle.Enabled}
+	if bStatus != nil {
+		bundleDTO.Verified = true
+		bundleDTO.BundleID = bStatus.BundleID
+		bundleDTO.KeyID = bStatus.KeyID
+	}
 
 	a.writeAdminJSON(r.Context(), w, http.StatusOK, overviewResponse{
 		Version:      a.version,
@@ -215,7 +238,13 @@ func (a *App) apiOverview(w http.ResponseWriter, r *http.Request) {
 			Store: a.cfg.RateLimits.Store,
 			Rules: rlRules,
 		},
-		Audit: a.auditSummary(),
+		Approvals: overviewApprovalsDTO{
+			Enabled:   a.cfg.Approvals.Enabled,
+			Header:    a.cfg.Approvals.Header,
+			SingleUse: a.cfg.Approvals.SingleUse,
+		},
+		Bundle: bundleDTO,
+		Audit:  a.auditSummary(),
 		Catalog: overviewCatalogDTO{
 			Tools:     len(tools),
 			Prompts:   prompts,
