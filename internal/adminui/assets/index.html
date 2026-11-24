@@ -1,0 +1,665 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>tollkeeper — Admin Console</title>
+  <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' fill='%23111315'/%3E%3Crect x='11' y='16' width='7' height='32' fill='%23F5B544'/%3E%3Crect x='46' y='16' width='7' height='32' fill='%23F5B544'/%3E%3Crect x='18' y='28' width='28' height='8' fill='%23F5B544'/%3E%3Cpath d='M22 28h6l-3 8h-6l3-8Zm12 0h6l-3 8h-6l3-8Z' fill='%23111315'/%3E%3C/svg%3E">
+  <link rel="stylesheet" href="/ui/styles.css">
+</head>
+<body>
+  <svg class="svg-sprite" aria-hidden="true" xmlns="http://www.w3.org/2000/svg">
+    <symbol id="ic-activity" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M22 12h-4l-3 9L9 3l-3 9H2"/>
+    </symbol>
+    <symbol id="ic-shield" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M20 13c0 5-3.5 7.5-7.66 8.95a1 1 0 0 1-.67-.01C7.5 20.5 4 18 4 13V6a1 1 0 0 1 1-1c2 0 4.5-1.2 6.24-2.72a1.17 1.17 0 0 1 1.52 0C14.51 3.81 17 5 19 5a1 1 0 0 1 1 1z"/>
+    </symbol>
+    <symbol id="ic-shield-check" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M20 13c0 5-3.5 7.5-7.66 8.95a1 1 0 0 1-.67-.01C7.5 20.5 4 18 4 13V6a1 1 0 0 1 1-1c2 0 4.5-1.2 6.24-2.72a1.17 1.17 0 0 1 1.52 0C14.51 3.81 17 5 19 5a1 1 0 0 1 1 1z"/>
+      <path d="m9 12 2 2 4-4"/>
+    </symbol>
+    <symbol id="ic-lock" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round">
+      <rect width="18" height="11" x="3" y="11" rx="2" ry="2"/>
+      <path d="M7 11V7a5 5 0 0 1 10 0v4"/>
+    </symbol>
+    <symbol id="ic-play" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round">
+      <polygon points="6 3 20 12 6 21 6 3"/>
+    </symbol>
+    <symbol id="ic-scroll" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
+      <polyline points="14 2 14 8 20 8"/>
+      <line x1="8" x2="16" y1="13" y2="13"/>
+      <line x1="8" x2="16" y1="17" y2="17"/>
+    </symbol>
+    <symbol id="ic-server" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round">
+      <rect width="20" height="8" x="2" y="2" rx="2" ry="2"/>
+      <rect width="20" height="8" x="2" y="14" rx="2" ry="2"/>
+      <line x1="6" x2="6.01" y1="6" y2="6"/>
+      <line x1="6" x2="6.01" y1="18" y2="18"/>
+    </symbol>
+    <symbol id="ic-search" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round">
+      <circle cx="11" cy="11" r="8"/>
+      <path d="m21 21-4.3-4.3"/>
+    </symbol>
+    <symbol id="ic-refresh" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M21 12a9 9 0 1 1-9-9c2.52 0 4.93 1 6.74 2.74L21 8"/>
+      <path d="M21 3v5h-5"/>
+    </symbol>
+    <symbol id="ic-sun" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round">
+      <circle cx="12" cy="12" r="4"/>
+      <path d="M12 2v2"/><path d="M12 20v2"/>
+      <path d="m4.93 4.93 1.41 1.41"/><path d="m17.66 17.66 1.41 1.41"/>
+      <path d="M2 12h2"/><path d="M20 12h2"/>
+      <path d="m6.34 17.66-1.41 1.41"/><path d="m19.07 4.93-1.41 1.41"/>
+    </symbol>
+    <symbol id="ic-moon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9Z"/>
+    </symbol>
+    <symbol id="ic-key" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round">
+      <circle cx="7.5" cy="15.5" r="5.5"/>
+      <path d="m21 2-9.6 9.6"/>
+      <path d="m15.5 7.5 3 3L22 7l-3-3"/>
+    </symbol>
+    <symbol id="ic-copy" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round">
+      <rect width="14" height="14" x="8" y="8" rx="2" ry="2"/>
+      <path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2"/>
+    </symbol>
+    <symbol id="ic-download" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+      <polyline points="7 10 12 15 17 10"/>
+      <line x1="12" x2="12" y1="15" y2="3"/>
+    </symbol>
+    <symbol id="ic-rotate" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/>
+      <path d="M3 3v5h5"/>
+    </symbol>
+    <symbol id="ic-plus" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M5 12h14"/><path d="M12 5v14"/>
+    </symbol>
+    <symbol id="ic-check" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.85" stroke-linecap="round" stroke-linejoin="round">
+      <polyline points="20 6 9 17 4 12"/>
+    </symbol>
+    <symbol id="ic-alert" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round">
+      <path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3Z"/>
+      <line x1="12" x2="12" y1="9" y2="13"/>
+      <line x1="12" x2="12.01" y1="17" y2="17"/>
+    </symbol>
+    <symbol id="ic-x" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M18 6 6 18"/><path d="m6 6 12 12"/>
+    </symbol>
+    <symbol id="ic-chevron-down" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round">
+      <path d="m6 9 6 6 6-6"/>
+    </symbol>
+    <symbol id="ic-arrow-up" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round">
+      <path d="m18 15-6-6-6 6"/>
+    </symbol>
+    <symbol id="ic-arrow-down" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round">
+      <path d="m6 9 6 6 6-6"/>
+    </symbol>
+    <symbol id="ic-trash" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M3 6h18"/>
+      <path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"/>
+      <path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"/>
+    </symbol>
+    <symbol id="ic-terminal" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round">
+      <polyline points="4 17 10 11 4 5"/>
+      <line x1="12" x2="20" y1="19" y2="19"/>
+    </symbol>
+  </svg>
+
+  <div class="shell">
+    <aside class="sidebar">
+      <div class="brand">
+        <svg class="brand-logo" id="brand-tollgate-logo" viewBox="0 0 56 36" fill="none" aria-hidden="true">
+          <rect x="2" y="2" width="8" height="32" fill="currentColor"/>
+          <rect x="46" y="2" width="8" height="32" fill="currentColor"/>
+          <rect x="10" y="14" width="36" height="8" class="brand-bar"/>
+          <path d="M16 14h6l-3 8h-6l3-8Zm12 0h6l-3 8h-6l3-8Zm12 0h5l-3 8h-5l3-8Z" class="brand-stripe"/>
+        </svg>
+        <div class="brand-title">
+          <span class="brand-name">tollkeeper</span>
+          <span class="brand-sub" id="sidebar-version">gateway console</span>
+        </div>
+      </div>
+
+      <button class="cmd-trigger" id="btn-palette" type="button">
+        <svg class="ico ico-sm"><use href="#ic-search"></use></svg>
+        <span>Search or jump…</span>
+        <span class="kbd">Ctrl K</span>
+      </button>
+
+      <nav class="nav" aria-label="Primary">
+        <div class="nav-group">
+          <div class="nav-group-label">Monitoring</div>
+          <button class="nav-item active" data-view="overview" type="button">
+            <svg class="ico"><use href="#ic-activity"></use></svg>
+            <span>Overview</span>
+          </button>
+        </div>
+
+        <div class="nav-group">
+          <div class="nav-group-label">Governance</div>
+          <button class="nav-item" data-view="policy" type="button">
+            <svg class="ico"><use href="#ic-shield"></use></svg>
+            <span>Policy Editor</span>
+          </button>
+          <button class="nav-item" data-view="pins" type="button">
+            <svg class="ico"><use href="#ic-lock"></use></svg>
+            <span>Tool Pinning</span>
+            <span class="nav-count hidden" id="nav-pin-badge">0</span>
+          </button>
+          <button class="nav-item" data-view="simulator" type="button">
+            <svg class="ico"><use href="#ic-play"></use></svg>
+            <span>Call Simulator</span>
+          </button>
+        </div>
+
+        <div class="nav-group">
+          <div class="nav-group-label">Forensics</div>
+          <button class="nav-item" data-view="audit" type="button">
+            <svg class="ico"><use href="#ic-scroll"></use></svg>
+            <span>Audit Explorer</span>
+          </button>
+        </div>
+      </nav>
+
+      <div class="sidebar-footer">
+        <div class="meta-row">
+          <span>Chain</span>
+          <code id="meta-chain">—</code>
+        </div>
+        <div class="meta-row">
+          <span>Config</span>
+          <code id="meta-digest">—</code>
+        </div>
+        <div class="footer-controls">
+          <div class="theme-switch" role="group" aria-label="Color theme">
+            <button class="theme-opt" id="btn-theme-light" type="button" title="Light theme" aria-label="Light theme">
+              <svg class="ico ico-sm"><use href="#ic-sun"></use></svg>
+            </button>
+            <button class="theme-opt" id="btn-theme-dark" type="button" title="Dark theme" aria-label="Dark theme">
+              <svg class="ico ico-sm"><use href="#ic-moon"></use></svg>
+            </button>
+          </div>
+          <button class="btn btn-ghost btn-sm" id="btn-auth" type="button" title="Admin Bearer token">
+            <svg class="ico ico-sm"><use href="#ic-key"></use></svg>
+            <span>Token</span>
+          </button>
+        </div>
+      </div>
+    </aside>
+
+    <div class="main-col">
+      <header class="topbar">
+        <div class="topbar-left">
+          <div class="breadcrumb">
+            <span class="breadcrumb-root">tollkeeper</span>
+            <span class="breadcrumb-sep">/</span>
+            <h1 id="view-title">Overview</h1>
+          </div>
+          <span class="status-inline" id="global-status">
+            <span class="dot" id="global-status-dot"></span>
+            <span id="global-status-text">Connecting</span>
+          </span>
+        </div>
+        <div class="topbar-right">
+          <button class="live-pill on" id="btn-auto-refresh" type="button" aria-pressed="true">
+            <span class="dot dot-ok" id="live-dot"></span>
+            <span>Live 10s</span>
+          </button>
+          <button class="btn btn-sm" id="btn-refresh" type="button">
+            <svg class="ico ico-sm"><use href="#ic-refresh"></use></svg>
+            <span>Refresh</span>
+          </button>
+        </div>
+      </header>
+
+      <main class="content">
+        <div class="banner banner-error hidden" id="global-error"></div>
+
+        <!-- VIEW 1: OVERVIEW & UPSTREAMS -->
+        <section class="view active" id="view-overview">
+          <div class="page-head">
+            <div>
+              <h2 class="page-title">Gateway Overview</h2>
+              <p class="page-sub">Live MCP runtime posture, policy catalog, tool pinning, and hash-chain integrity.</p>
+            </div>
+            <div class="meta-inline" id="posture-meta"></div>
+          </div>
+
+          <div class="metrics-strip" id="overview-kpis"></div>
+
+          <div class="panel">
+            <div class="panel-header">
+              <div>
+                <h2>Upstream Diagnostics</h2>
+                <p class="muted">Connection health, circuit breaker state, in-flight concurrency, and rolling p50/p95 latency.</p>
+              </div>
+              <div class="toolbar-group">
+                <div class="input-search-wrap">
+                  <svg class="ico ico-sm"><use href="#ic-search"></use></svg>
+                  <input class="input input-sm" id="upstreams-search" type="search" placeholder="Filter upstream…">
+                </div>
+                <span class="badge badge-mono" id="upstreams-count">0 upstreams</span>
+              </div>
+            </div>
+            <div class="table-wrap">
+              <table class="data-table">
+                <thead>
+                  <tr>
+                    <th>Upstream</th>
+                    <th>Transport</th>
+                    <th>Health</th>
+                    <th>Breaker</th>
+                    <th>Catalog</th>
+                    <th class="num">Tools</th>
+                    <th class="num">In-flight</th>
+                    <th class="num">Latency (p50 / p95)</th>
+                    <th class="num">Errors</th>
+                    <th>Last Error</th>
+                  </tr>
+                </thead>
+                <tbody id="upstreams-tbody">
+                  <tr><td colspan="10"><div class="empty-state">Loading upstream diagnostics…</div></td></tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </section>
+
+        <!-- VIEW 2: POLICY EDITOR -->
+        <section class="view" id="view-policy">
+          <div class="page-head">
+            <div>
+              <h2 class="page-title">Policy Editor</h2>
+              <p class="page-sub">Author CEL rules visually or in YAML, compile against the live engine, and export for SIGHUP hot-reload.</p>
+            </div>
+            <div class="toolbar-group">
+              <button class="btn btn-sm" id="btn-send-to-sim" type="button">
+                <svg class="ico ico-sm"><use href="#ic-play"></use></svg>
+                <span>Test Draft</span>
+              </button>
+              <button class="btn btn-primary btn-sm" id="btn-validate-policy" type="button">
+                <svg class="ico ico-sm"><use href="#ic-check"></use></svg>
+                <span>Validate CEL</span>
+              </button>
+            </div>
+          </div>
+
+          <div class="toolbar">
+            <div class="toolbar-group">
+              <div class="pill-tabs" id="policy-scope-tabs"></div>
+              <button class="btn btn-sm" id="btn-add-tenant" type="button">
+                <svg class="ico ico-sm"><use href="#ic-plus"></use></svg>
+                <span>Tenant</span>
+              </button>
+              <label class="field-inline">
+                <span>Default</span>
+                <select class="input-sm" id="policy-default">
+                  <option value="deny">deny</option>
+                  <option value="allow">allow</option>
+                </select>
+              </label>
+            </div>
+            <div class="toolbar-group">
+              <button class="btn btn-sm" id="btn-add-rule" type="button">
+                <svg class="ico ico-sm"><use href="#ic-plus"></use></svg>
+                <span>Add Rule</span>
+              </button>
+              <button class="btn btn-ghost btn-icon" id="btn-copy-yaml" type="button" title="Copy YAML">
+                <svg class="ico ico-sm"><use href="#ic-copy"></use></svg>
+              </button>
+              <button class="btn btn-ghost btn-icon" id="btn-download-yaml" type="button" title="Export YAML file">
+                <svg class="ico ico-sm"><use href="#ic-download"></use></svg>
+              </button>
+              <button class="btn btn-ghost btn-icon" id="btn-reload-policy" type="button" title="Reset to live policy">
+                <svg class="ico ico-sm"><use href="#ic-rotate"></use></svg>
+              </button>
+            </div>
+          </div>
+
+          <div class="banner hidden" id="policy-validation-result"></div>
+
+          <div class="split-2">
+            <div class="panel">
+              <div class="panel-header">
+                <div>
+                  <h2>Rule Evaluation Order</h2>
+                  <p class="muted">First matching rule decides. Click a row to expand conditions and step-up rules.</p>
+                </div>
+                <span class="badge badge-mono" id="policy-rule-count">0 rules</span>
+              </div>
+              <div class="rule-list" id="policy-rules-list"></div>
+            </div>
+
+            <div class="panel">
+              <div class="panel-header">
+                <div>
+                  <h2>Policy YAML</h2>
+                  <p class="muted">Edit directly or synchronize back into the visual rule list.</p>
+                </div>
+                <button class="btn btn-sm" id="btn-sync-from-yaml" type="button">Sync Builder &larr; YAML</button>
+              </div>
+              <div class="editor-shell">
+                <div class="editor-gutter" id="policy-yaml-gutter" aria-hidden="true">1</div>
+                <textarea id="policy-yaml-editor" class="code-editor" spellcheck="false" aria-label="Policy YAML"></textarea>
+              </div>
+              <div class="panel-footer">
+                <span id="policy-yaml-meta">YAML · 0 lines</span>
+                <span><span class="kbd">Ctrl Enter</span> to validate</span>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <!-- VIEW 3: TOOL PINNING DIFFS -->
+        <section class="view" id="view-pins">
+          <div class="page-head">
+            <div>
+              <h2 class="page-title">Tool Pinning</h2>
+              <p class="page-sub">Inspect SHA-256 lockfile pins and canonical JSON schema diffs to detect silent rug pulls or tool poisoning.</p>
+            </div>
+            <span class="badge badge-mono" id="pins-mode-badge">mode: —</span>
+          </div>
+
+          <div class="toolbar">
+            <div class="pill-tabs" id="pins-filter">
+              <button class="pill-tab active" data-filter="all" type="button">All <span class="pill-count" id="pf-all">0</span></button>
+              <button class="pill-tab" data-filter="changed" type="button">Changed <span class="pill-count" id="pf-changed">0</span></button>
+              <button class="pill-tab" data-filter="new" type="button">New <span class="pill-count" id="pf-new">0</span></button>
+              <button class="pill-tab" data-filter="approved" type="button">Approved <span class="pill-count" id="pf-approved">0</span></button>
+            </div>
+            <div class="input-search-wrap">
+              <svg class="ico ico-sm"><use href="#ic-search"></use></svg>
+              <input class="input input-sm" id="pins-search" type="search" placeholder="Search tool or upstream…">
+            </div>
+          </div>
+
+          <div class="split-pins">
+            <div class="panel">
+              <div class="panel-header">
+                <h2>Catalog Tools</h2>
+                <span class="badge badge-mono" id="pins-count">0</span>
+              </div>
+              <div class="pin-list" id="pins-list"></div>
+            </div>
+
+            <div class="panel">
+              <div class="panel-header">
+                <div>
+                  <h2 id="pin-detail-title">Tool Definition Inspector</h2>
+                  <p class="muted" id="pin-detail-sub">Select a tool to compare its approved lockfile snapshot against the live upstream schema.</p>
+                </div>
+                <button class="btn btn-sm hidden" id="btn-copy-approve" type="button">
+                  <svg class="ico ico-sm"><use href="#ic-terminal"></use></svg>
+                  <span>Copy Approve CLI</span>
+                </button>
+              </div>
+              <div id="pin-detail-body" class="pin-detail-body">
+                <div class="empty-state">
+                  <svg class="ico"><use href="#ic-lock"></use></svg>
+                  <span>Select a tool on the left to inspect its SHA-256 pin and schema diff.</span>
+                </div>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <!-- VIEW 4: CALL SIMULATOR -->
+        <section class="view" id="view-simulator">
+          <div class="page-head">
+            <div>
+              <h2 class="page-title">Call Simulator</h2>
+              <p class="page-sub">Dry-run admission against the live CEL policy engine or editor draft with zero upstream side effects.</p>
+            </div>
+            <div class="toolbar-group">
+              <label class="toggle-inline">
+                <input type="checkbox" id="sim-use-draft">
+                <span>Evaluate Draft YAML</span>
+              </label>
+              <button class="btn btn-primary btn-sm" id="btn-run-sim" type="button">
+                <svg class="ico ico-sm"><use href="#ic-play"></use></svg>
+                <span>Run Simulation</span>
+              </button>
+            </div>
+          </div>
+
+          <div class="toolbar">
+            <div class="toolbar-group">
+              <span class="muted">Presets:</span>
+              <button class="btn btn-sm" data-preset="reader" type="button">Read-Only</button>
+              <button class="btn btn-sm" data-preset="writer" type="button">Scoped Writer</button>
+              <button class="btn btn-sm" data-preset="stepup" type="button">Stale Auth (Step-Up)</button>
+              <button class="btn btn-sm" data-preset="delegated" type="button">Delegated Agent</button>
+            </div>
+          </div>
+
+          <div class="split-2">
+            <div class="panel">
+              <div class="panel-header">
+                <div>
+                  <h2>Call Parameters</h2>
+                  <p class="muted">Target MCP primitive, synthetic caller claims, and JSON arguments.</p>
+                </div>
+              </div>
+              <form id="sim-form" class="form-grid">
+                <div class="form-section-title">Target</div>
+                <label class="field">
+                  <span>Kind</span>
+                  <select id="sim-kind">
+                    <option value="tool">tool</option>
+                    <option value="prompt">prompt</option>
+                    <option value="resource">resource</option>
+                    <option value="template">template</option>
+                  </select>
+                </label>
+                <label class="field">
+                  <span>Name or Resource URI</span>
+                  <input class="input mono" id="sim-name" list="catalog-tools-datalist" placeholder="e.g. files__delete_file" required>
+                  <datalist id="catalog-tools-datalist"></datalist>
+                </label>
+
+                <div class="form-section-title">Principal &amp; Authentication</div>
+                <label class="field">
+                  <span>Subject (sub)</span>
+                  <input class="input" id="sim-sub" value="alice" placeholder="alice">
+                </label>
+                <label class="field">
+                  <span>Tenant</span>
+                  <input class="input" id="sim-tenant" placeholder="acme">
+                </label>
+                <label class="field">
+                  <span>Client ID</span>
+                  <input class="input" id="sim-client-id" value="coding-agent">
+                </label>
+                <label class="field">
+                  <span>Actor (RFC 8693 act)</span>
+                  <input class="input" id="sim-actor" placeholder="optional agent actor">
+                </label>
+                <label class="field field-full">
+                  <span>Scopes (space or comma separated)</span>
+                  <input class="input mono" id="sim-scopes" value="mcp:tools">
+                </label>
+                <label class="field">
+                  <span>Roles</span>
+                  <input class="input" id="sim-roles" placeholder="analyst, admin">
+                </label>
+                <label class="field">
+                  <span>Groups</span>
+                  <input class="input" id="sim-groups" placeholder="engineering">
+                </label>
+                <label class="field">
+                  <span>ACR</span>
+                  <input class="input mono" id="sim-acr" placeholder="phr">
+                </label>
+                <label class="field">
+                  <span>Auth Age (seconds)</span>
+                  <input class="input mono" id="sim-auth-age" type="number" min="0" value="60">
+                </label>
+                <div class="field field-full checkbox-row">
+                  <label class="toggle-inline"><input type="checkbox" id="sim-dpop"><span>DPoP Verified</span></label>
+                  <label class="toggle-inline"><input type="checkbox" id="sim-ann-readonly"><span>Override readOnlyHint</span></label>
+                  <label class="toggle-inline"><input type="checkbox" id="sim-ann-destructive"><span>Override destructiveHint</span></label>
+                </div>
+
+                <div class="form-section-title">Arguments (JSON)</div>
+                <label class="field field-full">
+                  <textarea id="sim-args" class="code-editor code-editor-sm" spellcheck="false" aria-label="Arguments JSON">{}</textarea>
+                </label>
+              </form>
+            </div>
+
+            <div class="panel">
+              <div class="panel-header">
+                <div>
+                  <h2>Decision &amp; Evaluation Trace</h2>
+                  <p class="muted">Real output from <code>policy.Explain</code>, <code>VisibleAs</code>, and pin enforcement.</p>
+                </div>
+              </div>
+              <div id="sim-result" class="sim-result">
+                <div class="empty-state">
+                  <svg class="ico"><use href="#ic-play"></use></svg>
+                  <span>Configure a target and principal, then click <strong>Run Simulation</strong>.</span>
+                </div>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <!-- VIEW 5: AUDIT EXPLORER -->
+        <section class="view" id="view-audit">
+          <div class="page-head">
+            <div>
+              <h2 class="page-title">Audit Explorer</h2>
+              <p class="page-sub" id="audit-source-meta">Tail of local hash-chained audit.jsonl</p>
+            </div>
+            <span class="badge badge-mono" id="audit-count">0 records</span>
+          </div>
+
+          <div class="banner hidden" id="audit-watchdog-banner"></div>
+
+          <div class="panel">
+            <form class="filter-bar" id="audit-filter-form">
+              <div class="input-search-wrap">
+                <svg class="ico ico-sm"><use href="#ic-search"></use></svg>
+                <input class="input input-sm" id="af-q" type="search" placeholder="Search hash, rule, reason…">
+              </div>
+              <select class="input input-sm" id="af-decision" aria-label="Decision">
+                <option value="">All decisions</option>
+                <option value="allow">allow</option>
+                <option value="deny">deny</option>
+                <option value="step_up">step_up</option>
+                <option value="rate_limited">rate_limited</option>
+                <option value="rejected">rejected</option>
+              </select>
+              <select class="input input-sm" id="af-phase" aria-label="Phase">
+                <option value="">All phases</option>
+                <option value="intent">intent</option>
+                <option value="outcome">outcome</option>
+                <option value="decision">decision</option>
+                <option value="config">config</option>
+              </select>
+              <select class="input input-sm" id="af-kind" aria-label="Kind">
+                <option value="">All kinds</option>
+                <option value="event">event</option>
+                <option value="checkpoint">checkpoint</option>
+                <option value="anchor">anchor</option>
+                <option value="key_rotation">key_rotation</option>
+              </select>
+              <input class="input input-sm input-compact" id="af-tenant" type="search" placeholder="tenant">
+              <input class="input input-sm input-compact" id="af-sub" type="search" placeholder="sub">
+              <input class="input input-sm input-compact" id="af-tool" type="search" placeholder="tool">
+              <select class="input input-sm" id="af-limit" aria-label="Limit">
+                <option value="50">50</option>
+                <option value="100" selected>100</option>
+                <option value="250">250</option>
+                <option value="500">500</option>
+              </select>
+              <button class="btn btn-primary btn-sm" type="submit">Apply</button>
+              <button class="btn btn-ghost btn-sm" id="btn-audit-clear" type="button">Reset</button>
+            </form>
+
+            <div class="audit-split" id="audit-split">
+              <div class="table-wrap">
+                <table class="data-table">
+                  <thead>
+                    <tr>
+                      <th class="num">Seq</th>
+                      <th>Time (UTC)</th>
+                      <th>Type</th>
+                      <th>Decision</th>
+                      <th>Principal</th>
+                      <th>Target</th>
+                      <th class="col-hide-split">Rule</th>
+                      <th class="num col-hide-split">Latency</th>
+                      <th class="col-hide-split">Hash</th>
+                    </tr>
+                  </thead>
+                  <tbody id="audit-tbody">
+                    <tr><td colspan="9"><div class="empty-state">Loading audit records…</div></td></tr>
+                  </tbody>
+                </table>
+              </div>
+
+              <div class="audit-inspector hidden" id="audit-drawer">
+                <div class="panel-header">
+                  <div>
+                    <h3 id="audit-drawer-title">Record Detail</h3>
+                    <p class="muted" id="audit-drawer-sub">Hash-chained audit entry</p>
+                  </div>
+                  <div class="toolbar-group">
+                    <button class="btn btn-ghost btn-sm" id="btn-copy-audit" type="button">
+                      <svg class="ico ico-sm"><use href="#ic-copy"></use></svg>
+                      <span>JSON</span>
+                    </button>
+                    <button class="btn btn-ghost btn-icon" id="btn-close-drawer" type="button" aria-label="Close">
+                      <svg class="ico ico-sm"><use href="#ic-x"></use></svg>
+                    </button>
+                  </div>
+                </div>
+                <div class="inspector-tabs" id="inspector-tabs">
+                  <button class="insp-tab active" data-itab="details" type="button">Details</button>
+                  <button class="insp-tab" data-itab="raw" type="button">Raw JSON</button>
+                </div>
+                <div class="inspector-body" id="audit-inspector-body"></div>
+              </div>
+            </div>
+          </div>
+        </section>
+      </main>
+    </div>
+  </div>
+
+  <!-- COMMAND PALETTE -->
+  <div class="modal-backdrop hidden" id="palette-modal">
+    <div class="palette" role="dialog" aria-modal="true" aria-label="Command palette">
+      <div class="palette-input-wrap">
+        <svg class="ico"><use href="#ic-search"></use></svg>
+        <input class="palette-input" id="palette-input" type="text" placeholder="Go to view, inspect tool pin, or run action…" autocomplete="off">
+        <span class="kbd">ESC</span>
+      </div>
+      <div class="palette-list" id="palette-list"></div>
+    </div>
+  </div>
+
+  <!-- BEARER TOKEN MODAL -->
+  <div class="modal-backdrop hidden" id="auth-modal">
+    <div class="modal" role="dialog" aria-modal="true" aria-labelledby="auth-modal-title">
+      <h2 id="auth-modal-title">Admin Report Token</h2>
+      <p class="muted">Enter the gateway's <code>pinning.report_token</code>. Held only in browser session memory and sent as <code>Authorization: Bearer</code>.</p>
+      <form id="auth-modal-form" class="modal-form">
+        <input class="input mono" id="auth-token-input" type="password" placeholder="Paste Bearer token…" autocomplete="off">
+        <div class="modal-actions">
+          <button class="btn btn-ghost btn-sm" id="btn-auth-clear" type="button">Clear</button>
+          <button class="btn btn-ghost btn-sm" id="btn-auth-cancel" type="button">Cancel</button>
+          <button class="btn btn-primary btn-sm" type="submit">Save Token</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <div class="toast hidden" id="toast"></div>
+  <script src="/ui/app.js"></script>
+</body>
+</html>

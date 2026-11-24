@@ -208,6 +208,10 @@ func (g *Gateway) Server() *mcp.Server {
 	return g.server
 }
 
+func (g *Gateway) Policy() *policy.Engine {
+	return g.policy.Load()
+}
+
 func (g *Gateway) Handler() http.Handler {
 	mcpHandler := mcp.NewStreamableHTTPHandler(
 		func(*http.Request) *mcp.Server { return g.server },

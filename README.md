@@ -24,14 +24,14 @@
 |---|---|
 | Transport | Stateless Streamable HTTP for MCP `2026-07-28`, with fallback for `2025-11-25` clients (go-sdk v1.8.0) |
 | Aggregation | N upstreams (stdio subprocesses and Streamable HTTP) under `upstream__tool` names, sorted and deterministic, re-synced on upstream `list_changed` and a 60 s poll, with health probes and crash-loop backoff. Prompts are namespaced the same way; resources and resource templates keep their URIs and are routed to the upstream that listed them; `completion/complete` follows its reference |
-| Authentication | RFC 9728 protected-resource metadata, JWT via JWKS (`iss`, `aud` = canonical URI per RFC 8707, `exp`, algorithm allowlist), RFC 6750 challenges with `error=` and all required scopes |
-| No passthrough | Upstream HTTP clients are built from config only and never see the inbound request; covered by tests |
-| Authorization | First-match rules: static RBAC fast path plus optional CEL `when` over principal, tool annotations, arguments and time; default deny; `tools/list` filtered per caller; step-up challenges (`403 insufficient_scope`) |
+| Authentication | RFC 9728 protected-resource metadata, JWT via JWKS (`iss`, `aud` = canonical URI per RFC 8707, `exp`, algorithm allowlist), RFC 9449 DPoP sender-constrained proofs (`cnf.jkt`, `ath`, `jti` replay cache, `DPoP-Nonce`), RFC 7662 introspection, enterprise IdP presets (`entra`, `okta`, `keycloak`, `auth0`) + OIDC discovery, and RFC 6750/9470 challenges |
+| No passthrough | Upstream HTTP clients are built from config only and never see the inbound request (covered by tests); supports isolated `client_credentials`, RFC 8693 downscoped `token_exchange` with `act` delegation chains, SSRF `netguard` (`block_private_ips`), and Linux stdio sandboxing (`bwrap`, `prlimit`, `Pdeathsig`) |
+| Authorization | First-match rules (global and isolated `policy.tenants.<id>` scopes): static RBAC fast path plus optional CEL `when` over principal, roles, groups, delegation actor, tool annotations, arguments and time; default deny; `tools/list` filtered per caller; RFC 6750/9470 step-up challenges (`step_up_scopes`, `acr_values`, `max_age`, `require_dpop`); reusable CI-tested [policy library](policies/library/README.md) |
 | Tool pinning | Lockfile of approved tool definitions; `enforce` hides and refuses new or changed tools until `tollkeeper pin approve` (defends against tool poisoning and rug pulls) |
-| Rate limiting | GCRA, lock-free CAS on one `int64` per key, per subject / subject+tool / client / upstream / tool / global, all-or-nothing across rules, `429` + `Retry-After` + IETF `RateLimit` headers. Optional Redis backend shares limits across replicas with one atomic Lua script per call |
-| Audit | Intent + outcome records, hashed arguments by default (GDPR data minimisation), batched fsync, Ed25519 checkpoints, chain continuity across restarts. `fail_closed` refuses calls when the buffer is full *or* the disk is failing; lost events become signed gap records. Optional Postgres mirror, committed in the same step as the file, whose triggers reject changes and recompute every hash. Optional anchoring of checkpoints in a Rekor v2 transparency log, verified offline, with RFC 3161 timestamps from Sigstore's timestamp authority ([ADR 0010](docs/adr/0010-rekor-checkpoint-anchoring.md)) |
+| Rate limiting | GCRA, lock-free CAS on one `int64` per key, per subject / subject+tool / client / tenant / tenant+tool / upstream / tool / global, all-or-nothing across rules, `429` + `Retry-After` + IETF `RateLimit` headers. Optional Redis backend shares limits across replicas with one atomic Lua script per call |
+| Audit | Intent + outcome records, hashed arguments by default (GDPR data minimisation), batched fsync, Ed25519/ECDSA checkpoints (local or pure-Go Vault Transit / AWS KMS with zero-downtime key rotation), continuous chain watchdog, verified archiving/retention, optional Postgres immutable mirror, Rekor v2 anchoring with RFC 3161 timestamps ([ADR 0010](docs/adr/0010-rekor-checkpoint-anchoring.md)), OTLP logs, and native SIEM sink (`json`, `splunk_hec`, `cef`) |
 | Request hygiene | Strict JSON-RPC envelope parsing that rejects batches and duplicate or Unicode case-folded keys at any depth of `arguments` (closing parser-differential policy bypasses), a 100k-token complexity cap, `Mcp-Method`/`Mcp-Name` header agreement (`-32020`), body cap |
-| Observability | OTel traces with W3C context from headers or `_meta` (SEP-414), Prometheus metrics including `mcpgw_gateway_overhead_seconds` |
+| Observability & Admin UI | Embedded single-binary Admin Console at `GET /ui/` (upstream diagnostics, visual CEL policy editor, tool pinning diff viewer, MCP call simulator, audit explorer; [ADR 0019](docs/adr/0019-embedded-admin-dashboard.md)), `GET /upstreams`, OTel traces with W3C context from headers or `_meta` (SEP-414), Prometheus metrics including `mcpgw_gateway_overhead_seconds` |
 | Dev tooling | Built-in **DEV ONLY** OAuth issuer (client_credentials, authorization_code + PKCE S256, RFC 9207 `iss`), three demo MCP servers, a demo client and a benchmark harness, all in Go |
 
 ## Architecture
@@ -194,7 +194,9 @@ Grafana on `http://127.0.0.1:3000` opens on the provisioned tollkeeper dashboard
 | `tollkeeper config validate -c config.yaml` | Validate config, compile CEL rules and rate limits, report every bad field with its path |
 | `tollkeeper policy test -c config.yaml -f policies_test.yaml` | Table-driven policy fixtures for CI ([example](deploy/compose/policies_test.yaml)) |
 | `tollkeeper policy explain -c config.yaml --sub alice --scope notes:write --tool notes__create --args '{"body":"x"}'` | Rule-by-rule trace of one decision (`--prompt` and `--resource` for the other kinds), including shadow rules and visibility |
-| `tollkeeper audit verify -f audit.jsonl --pubkey audit.pub` | Recompute the chain, check signatures, report the first broken record. `--postgres DSN --chain-id ID` verifies a chain stored in Postgres instead. Fails when a log has no signed checkpoint or more than `--max-unsigned` (default 1000) records after the last one; `--chain-id` pins the chain; `--no-signatures` checks only the hash chain. `--rekor-trust trusted_root.json --chain-id ID` verifies anchor receipts; `--witness`, `--min-witnesses`, `--require-anchors`, `--max-unanchored`, `--max-anchor-delay` and `--max-anchor-age` bound time and the unanchored tail ([anchoring](docs/operations/anchoring.md)) |
+| `tollkeeper audit verify -f audit.jsonl --pubkey audit.pub` | Recompute the chain, check signatures, report the first broken record. `--postgres DSN --chain-id ID` (or `--all-chains`) verifies chains stored in Postgres instead. Fails when a log has no signed checkpoint or more than `--max-unsigned` (default 1000) records after the last one; `--chain-id` pins the chain; `--no-signatures` checks only the hash chain. `--rekor-trust trusted_root.json --chain-id ID` verifies anchor receipts; `--witness`, `--min-witnesses`, `--require-anchors`, `--max-unanchored`, `--max-anchor-delay` and `--max-anchor-age` bound time and the unanchored tail ([anchoring](docs/operations/anchoring.md)) |
+| `tollkeeper audit archive -f audit.jsonl -o dir [--prune]` | Verify a hash-chained audit file, compress into a manifest-verified gzip archive, and optionally prune expired archives ([ADR 0016](docs/adr/0016-distributed-audit-verification-and-retention.md)) |
+| `tollkeeper audit watch -f audit.jsonl --pubkey audit.pub` | Continuously verify an audit chain on an interval, detecting tampering, truncation, or excessive unsigned tails ([ADR 0016](docs/adr/0016-distributed-audit-verification-and-retention.md)) |
 | `tollkeeper audit keygen -o dir` | Ed25519 checkpoint key pair |
 | `tollkeeper pin status [--check]` | List catalog tools as `approved`, `new` or `changed` against the lockfile; `--check` fails when anything is pending |
 | `tollkeeper pin approve [tool...] \| --all [--prune] [--yes]` | Verify each reported pin, show a unified diff of the whole definition with hidden characters escaped, confirm per tool, then record it in the lockfile the gateway reloads |
@@ -238,7 +240,7 @@ A rule applies to tools, prompts or resources only through its own `tools`, `pro
 
 | Key | Default | Notes |
 |---|---|---|
-| `server.listen` / `admin_listen` | `:8080` / `127.0.0.1:9090` | Admin serves `/metrics`, `/livez`, `/readyz`, `/pins`, `/upstreams` ([ADR 0017](docs/adr/0017-upstream-diagnostics-and-resilience.md)); `server.pprof: true` adds `/debug/pprof` and requires a loopback admin address |
+| `server.listen` / `admin_listen` | `:8080` / `127.0.0.1:9090` | Admin serves `/ui/` (embedded admin dashboard: upstreams, visual CEL policy editor, tool pin diffs, call simulator, audit explorer; [ADR 0019](docs/adr/0019-embedded-admin-dashboard.md)), `/metrics`, `/livez`, `/readyz`, `/pins`, `/upstreams` ([ADR 0017](docs/adr/0017-upstream-diagnostics-and-resilience.md)); `server.pprof: true` adds `/debug/pprof` and requires a loopback admin address |
 | `server.public_url` | required | Canonical MCP URL; also the RFC 9728 metadata path |
 | `server.max_body_bytes` | 1 MiB | Enforced before parsing |
 | `server.request_state_key_file` | per-process key | HMAC key (at least 32 bytes) that seals upstream `requestState` for multi-round-trip calls; share one file across replicas so a retry can land on any of them |
@@ -363,10 +365,16 @@ Shipped in v1.3:
 - [x] RFC 7662 opaque token introspection and OTLP audit log sink
 - [x] Grafana dashboard, Prometheus alert rules, and Helm chart
 
+Shipped in v2.0 (main):
+
+- [x] Security hardening: SSRF `netguard`, stdio upstream sandboxing (`bwrap`/`prlimit`/`Pdeathsig`), Vault Transit & AWS KMS checkpoint signing with zero-downtime key rotation ([ADR 0011](docs/adr/0011-stdio-sandboxing.md), [ADR 0012](docs/adr/0012-audit-key-rotation-and-kms.md))
+- [x] Advanced identity & authz: RFC 8693 Token Exchange with `act` delegation, RFC 9449 DPoP, enterprise IdP presets & OIDC discovery, isolated tenant policies, per-tenant GCRA limits, and RFC 9470 Step-Up ([ADR 0013](docs/adr/0013-oauth-token-exchange-and-delegation.md), [ADR 0014](docs/adr/0014-dpop-and-enterprise-idp.md), [ADR 0015](docs/adr/0015-tenant-policies-and-step-up.md))
+- [x] Scalability & operations: continuous audit watchdog, verified archiving/retention, `GET /upstreams` diagnostics, chaos & dependency-recovery test suites, and distributed benchmarks ([ADR 0016](docs/adr/0016-distributed-audit-verification-and-retention.md), [ADR 0017](docs/adr/0017-upstream-diagnostics-and-resilience.md))
+- [x] Developer experience: native SIEM sink (`json`, `splunk_hec`, `cef`), CI-tested reusable policy library, agent platform integrations (Claude Code, Cursor, LangGraph, OpenAI Agents, CrewAI, AG-UI), and embedded single-binary Admin Console at `/ui/` ([ADR 0018](docs/adr/0018-siem-sink-and-developer-experience.md), [ADR 0019](docs/adr/0019-embedded-admin-dashboard.md))
+
 Next:
 
-- [ ] v1.4: the tasks extension (SEP-2663)
-- [ ] v2.0: RFC 8693 token exchange to upstreams, DPoP, stdio upstream sandboxing
+- [ ] Tasks extension (SEP-2663)
 
 ## Development
 
