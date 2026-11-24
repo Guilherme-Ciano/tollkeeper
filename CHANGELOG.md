@@ -5,6 +5,19 @@
 
 ### Features
 
+* **governance:** add stateless approval tokens (`tk-approval+jwt`), CEL `approval.*` four-eyes rules, and Ed25519-signed config+pin bundles ([4ffb27c](https://github.com/Guilherme-Ciano/tollkeeper/commit/4ffb27c5e0ccf66c89b5dfa5914c9ce56e216c2c))
+* **policy:** add static upstream provenance metadata (`trust`, `classification`, `egress`, `impact`), CEL fields, and `_meta["tollkeeper.provenance"]` response stamps ([87f53e8](https://github.com/Guilherme-Ciano/tollkeeper/commit/87f53e8))
+* **ratelimit:** add cost-based GCRA impact limits (`cost_expr` / `max_cost`) for memory and Redis backends ([87f53e8](https://github.com/Guilherme-Ciano/tollkeeper/commit/87f53e8))
+* **gateway:** add opt-in stateless idempotency / anti-replay guard (`header`, `required`, `canonical_hash`) and adversarial security test suite ([b3a5fb4](https://github.com/Guilherme-Ciano/tollkeeper/commit/b3a5fb4))
+
+### Bug Fixes
+
+* **ci:** split GitHub Pages build/deploy jobs and pin `ossf/scorecard-action` to `v2.5.0` ([421012f](https://github.com/Guilherme-Ciano/tollkeeper/commit/421012fdbfd74abf6f3335e7d50fe1745e5e6cba))
+* **security:** resolve CodeQL allocation overflow and user-input log alerts ([ccae695](https://github.com/Guilherme-Ciano/tollkeeper/commit/ccae69533f1d912fb28c9746dc0445dc727fc035))
+
+
+### Features
+
 * **gateway:** add opt-in stateless idempotency guard and adversarial security test suite ([4ffb27c](https://github.com/Guilherme-Ciano/tollkeeper/commit/4ffb27c5e0ccf66c89b5dfa5914c9ce56e216c2c))
 * **gateway:** add opt-in stateless idempotency guard and adversarial security test suite ([ccae695](https://github.com/Guilherme-Ciano/tollkeeper/commit/ccae69533f1d912fb28c9746dc0445dc727fc035))
 * **gateway:** add opt-in stateless idempotency guard and adversarial security test suite ([421012f](https://github.com/Guilherme-Ciano/tollkeeper/commit/421012fdbfd74abf6f3335e7d50fe1745e5e6cba))
