@@ -1,5 +1,15 @@
 # Changelog
 
+## [1.7.0](https://github.com/Guilherme-Ciano/tollkeeper/compare/v1.6.0...v1.7.0) (2026-11-24)
+
+
+### Features
+
+* **adminui:** expose v1.6 governance posture, approval simulation, and audit attribution ([a61abed](https://github.com/Guilherme-Ciano/tollkeeper/commit/a61abed5002b78cbd2ab241df43a7e4441ea9e27))
+* **dx:** add stateless-governance policy pack, AG-UI HITL bridge, and v1.6 site/README updates ([8f9a60a](https://github.com/Guilherme-Ciano/tollkeeper/commit/8f9a60a575b37bbf26d04905677c90befe6e09c1))
+* **tasks:** add stateless SEP-2663 tasks extension, v1.6 admin console, governance policy pack, and site updates ([#46](https://github.com/Guilherme-Ciano/tollkeeper/issues/46)) ([7cd91a3](https://github.com/Guilherme-Ciano/tollkeeper/commit/7cd91a33995b14c0164b587bfe1753181b486407))
+* **tasks:** implement stateless MCP Tasks extension (SEP-2663) with HMAC-sealed handles ([5efdc25](https://github.com/Guilherme-Ciano/tollkeeper/commit/5efdc255cd16cb382bac53c77e983d3face7fb0f))
+
 ## [1.6.0](https://github.com/Guilherme-Ciano/tollkeeper/compare/v1.5.0...v1.6.0) (2026-11-24)
 
 
