@@ -336,12 +336,26 @@
     if (ov.audit.otlp_enabled) sinks.push("OTLP");
     if (ov.audit.anchor_enabled) sinks.push("Rekor");
 
+    const gov = [];
+    if (ov.bundle && ov.bundle.enabled) {
+      gov.push("Bundle <strong>" + esc(ov.bundle.verified ? (ov.bundle.bundle_id || "verified") : "unverified") + "</strong>");
+    }
+    if (ov.approvals && ov.approvals.enabled) {
+      gov.push("HITL <strong>" + esc(ov.approvals.single_use ? "single-use" : "reusable") + "</strong>");
+    }
+    if (ov.idempotency && ov.idempotency.enabled) {
+      gov.push("Idempotency <strong>" + esc(ov.idempotency.mode || "header") + "</strong>");
+    }
+    if (ov.stamp_provenance) gov.push("<strong>Provenance Stamps</strong>");
+    if (ov.tasks_enabled) gov.push("<strong>Tasks (SEP-2663)</strong>");
+
     $("posture-meta").innerHTML =
       '<span class="meta-chip"><code>' + esc(ov.public_url || "—") + "</code></span>" +
       '<span class="meta-sep">·</span>' +
       '<span class="meta-chip">Auth <strong>' + esc((ov.auth.mode || "jwt").toUpperCase()) + "</strong> · DPoP <strong>" + esc(ov.auth.dpop_mode || "off") + "</strong></span>" +
       '<span class="meta-sep">·</span>' +
       '<span class="meta-chip">Rate Limit <strong>' + esc(ov.rate_limits.store || "memory") + "</strong> (" + esc(ov.rate_limits.rules || 0) + ")</span>" +
+      (gov.length ? '<span class="meta-sep">·</span><span class="meta-chip">' + gov.join(" · ") + "</span>" : "") +
       (sinks.length ? '<span class="meta-sep">·</span><span class="meta-chip">' + esc(sinks.join(", ")) + "</span>" : "");
   }
 
@@ -981,6 +995,23 @@
       $("sim-dpop").checked = true;
       $("sim-ann-readonly").checked = false;
       $("sim-ann-destructive").checked = false;
+      $("sim-approval-verified").checked = false;
+      $("sim-approver").value = "";
+    } else if (preset === "approved") {
+      $("sim-sub").value = "alice";
+      $("sim-tenant").value = "acme";
+      $("sim-actor").value = "coding-agent-v1";
+      $("sim-scopes").value = "mcp:tools files:write";
+      $("sim-roles").value = "operator";
+      $("sim-acr").value = "phr";
+      $("sim-auth-age").value = "60";
+      $("sim-dpop").checked = true;
+      $("sim-ann-readonly").checked = false;
+      $("sim-ann-destructive").checked = true;
+      $("sim-approval-verified").checked = true;
+      $("sim-approver").value = "bob@corp.com";
+      $("sim-approval-reason").value = "CHG-1042";
+      $("sim-meta-impact").value = "destructive";
     }
     toast("Loaded preset: " + preset);
   }
@@ -1022,6 +1053,26 @@
         destructiveHint: $("sim-ann-destructive").checked,
       };
     }
+    if ($("sim-approval-verified").checked || $("sim-approver").value.trim()) {
+      body.approval = {
+        verified: $("sim-approval-verified").checked,
+        id: $("sim-approval-verified").checked ? "apr_simulated" : "",
+        approver: $("sim-approver").value.trim(),
+        reason: $("sim-approval-reason").value.trim(),
+      };
+    }
+    const metaTrust = $("sim-meta-trust").value;
+    const metaClass = $("sim-meta-class").value;
+    const metaImpact = $("sim-meta-impact").value;
+    const metaEgress = $("sim-meta-egress").checked;
+    if (metaTrust || metaClass || metaImpact || metaEgress) {
+      body.metadata = {
+        trust: metaTrust,
+        classification: metaClass,
+        impact: metaImpact,
+        egress: metaEgress,
+      };
+    }
     if ($("sim-use-draft").checked) {
       body.policy_yaml = $("policy-yaml-editor").value;
     }
@@ -1039,7 +1090,19 @@
     const heroIco = res.decision === "allow" ? "check" : res.decision === "step_up" ? "alert" : "x";
 
     let challengeHTML = "";
-    if (res.step_up) {
+    if (res.step_up && res.step_up.require_approval) {
+      challengeHTML =
+        '<div class="challenge-box">' +
+        '<div class="challenge-head"><span>Human Approval Required (tk-approval+jwt)</span><span>HTTP 403 · -32010</span></div>' +
+        "<code>" +
+        esc(
+          "require_approval=true" +
+            (res.step_up.approval_ttl ? " ttl=" + res.step_up.approval_ttl : "") +
+            (res.step_up.approval_reason ? ' reason="' + res.step_up.approval_reason + '"' : "")
+        ) +
+        "</code>" +
+        "</div>";
+    } else if (res.step_up) {
       const attrs = [];
       const isAuth = (res.step_up.acr_values && res.step_up.acr_values.length) || res.step_up.max_age || res.step_up.require_dpop;
       attrs.push('error="' + (isAuth ? "insufficient_user_authentication" : "insufficient_scope") + '"');
@@ -1201,6 +1264,8 @@
       ["Target", ev.tool || ev.method || item.summary || "—"],
       ["Rule", ev.rule || "—"],
       ["Reason", ev.reason || "—"],
+      ["Approved By", ev.approved_by || "—"],
+      ["Approval ID", ev.approval_id || "—"],
       ["Latency", ev.latency_us ? (ev.latency_us / 1000).toFixed(2) + " ms" : "—"],
     ];
     const kvHTML = fields

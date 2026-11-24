@@ -110,21 +110,30 @@ type overviewApprovalsDTO struct {
 	SingleUse bool   `json:"single_use,omitempty"`
 }
 
+type overviewIdempotencyDTO struct {
+	Enabled bool   `json:"enabled"`
+	Mode    string `json:"mode,omitempty"`
+	Header  string `json:"header,omitempty"`
+}
+
 type overviewResponse struct {
-	Version      string                `json:"version"`
-	Ready        bool                  `json:"ready"`
-	PublicURL    string                `json:"public_url"`
-	AdminListen  string                `json:"admin_listen"`
-	ConfigDigest string                `json:"config_digest"`
-	Auth         overviewAuthDTO       `json:"auth"`
-	Pinning      overviewPinningDTO    `json:"pinning"`
-	Policy       overviewPolicyDTO     `json:"policy"`
-	RateLimits   overviewRateLimitsDTO `json:"rate_limits"`
-	Approvals    overviewApprovalsDTO  `json:"approvals"`
-	Bundle       overviewBundleDTO     `json:"bundle"`
-	Audit        overviewAuditDTO      `json:"audit"`
-	Catalog      overviewCatalogDTO    `json:"catalog"`
-	Upstreams    overviewUpstreamsDTO  `json:"upstreams"`
+	Version         string                 `json:"version"`
+	Ready           bool                   `json:"ready"`
+	PublicURL       string                 `json:"public_url"`
+	AdminListen     string                 `json:"admin_listen"`
+	ConfigDigest    string                 `json:"config_digest"`
+	StampProvenance bool                   `json:"stamp_provenance"`
+	TasksEnabled    bool                   `json:"tasks_enabled"`
+	Auth            overviewAuthDTO        `json:"auth"`
+	Pinning         overviewPinningDTO     `json:"pinning"`
+	Policy          overviewPolicyDTO      `json:"policy"`
+	RateLimits      overviewRateLimitsDTO  `json:"rate_limits"`
+	Idempotency     overviewIdempotencyDTO `json:"idempotency"`
+	Approvals       overviewApprovalsDTO   `json:"approvals"`
+	Bundle          overviewBundleDTO      `json:"bundle"`
+	Audit           overviewAuditDTO       `json:"audit"`
+	Catalog         overviewCatalogDTO     `json:"catalog"`
+	Upstreams       overviewUpstreamsDTO   `json:"upstreams"`
 }
 
 type auditEventsResponse struct {
@@ -218,11 +227,13 @@ func (a *App) apiOverview(w http.ResponseWriter, r *http.Request) {
 	}
 
 	a.writeAdminJSON(r.Context(), w, http.StatusOK, overviewResponse{
-		Version:      a.version,
-		Ready:        a.ready.Load(),
-		PublicURL:    a.cfg.Server.PublicURL,
-		AdminListen:  a.cfg.Server.AdminListen,
-		ConfigDigest: digest,
+		Version:         a.version,
+		Ready:           a.ready.Load(),
+		PublicURL:       a.cfg.Server.PublicURL,
+		AdminListen:     a.cfg.Server.AdminListen,
+		ConfigDigest:    digest,
+		StampProvenance: a.cfg.Server.StampProvenance,
+		TasksEnabled:    a.cfg.Server.TasksEnabled,
 		Auth: overviewAuthDTO{
 			Mode:     a.cfg.Auth.Mode,
 			Provider: a.cfg.Auth.Provider,
@@ -237,6 +248,11 @@ func (a *App) apiOverview(w http.ResponseWriter, r *http.Request) {
 		RateLimits: overviewRateLimitsDTO{
 			Store: a.cfg.RateLimits.Store,
 			Rules: rlRules,
+		},
+		Idempotency: overviewIdempotencyDTO{
+			Enabled: a.cfg.Idempotency.Enabled,
+			Mode:    a.cfg.Idempotency.Mode,
+			Header:  a.cfg.Idempotency.Header,
 		},
 		Approvals: overviewApprovalsDTO{
 			Enabled:   a.cfg.Approvals.Enabled,
