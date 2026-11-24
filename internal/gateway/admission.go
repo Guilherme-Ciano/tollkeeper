@@ -261,7 +261,12 @@ func (g *Gateway) admitCall(w http.ResponseWriter, r *http.Request, a *Admission
 		a.ArgsHash = audit.HashBytes(env.Arguments)
 	}
 	tool, known := g.resolveTarget(a)
-	subject := ratelimit.Subject{Sub: a.Principal.Subject, ClientID: a.Principal.ClientID, Tenant: a.Principal.Tenant}
+	subject := ratelimit.Subject{
+		Sub:      a.Principal.Subject,
+		ClientID: a.Principal.ClientID,
+		Tenant:   a.Principal.Tenant,
+		Args:     env.Arguments,
+	}
 	if known {
 		a.Tool = tool
 		subject.Tool, subject.Upstream = tool.Name, tool.Upstream
@@ -305,6 +310,9 @@ func (g *Gateway) admitCall(w http.ResponseWriter, r *http.Request, a *Admission
 		g.metrics.PolicyShadow.WithLabelValues(d.Shadow.Rule, d.Shadow.Effect.String(), d.Effect.String()).Inc()
 	}
 	if !g.applyDecision(ctx, w, a, d) {
+		return false
+	}
+	if !g.checkIdempotency(ctx, w, r, a) {
 		return false
 	}
 	return g.recordIntent(ctx, w, a)

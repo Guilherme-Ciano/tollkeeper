@@ -12,29 +12,30 @@ const (
 )
 
 type Metrics struct {
-	Registry        *prometheus.Registry
-	Requests        *prometheus.CounterVec
-	Duration        *prometheus.HistogramVec
-	Overhead        prometheus.Histogram
-	CallDispatch    *prometheus.CounterVec
-	UpstreamLatency *prometheus.HistogramVec
-	PolicyDecisions *prometheus.CounterVec
-	PolicyShadow    *prometheus.CounterVec
-	ConfigReloads   *prometheus.CounterVec
-	RateLimited     *prometheus.CounterVec
-	AuthFailures    *prometheus.CounterVec
-	AuditQueue      prometheus.Gauge
-	AuditDropped    prometheus.Counter
-	AuditErrors     prometheus.Counter
-	AuditWritten    prometheus.Counter
-	AuditExport     *prometheus.CounterVec
-	AuditSIEMExport *prometheus.CounterVec
-	UpstreamUp      *prometheus.GaugeVec
-	BreakerState    *prometheus.GaugeVec
-	CatalogTools    prometheus.Gauge
-	CatalogRejected *prometheus.CounterVec
-	PinUnapproved   *prometheus.GaugeVec
-	RateBackendErrs prometheus.Counter
+	Registry              *prometheus.Registry
+	Requests              *prometheus.CounterVec
+	Duration              *prometheus.HistogramVec
+	Overhead              prometheus.Histogram
+	CallDispatch          *prometheus.CounterVec
+	UpstreamLatency       *prometheus.HistogramVec
+	PolicyDecisions       *prometheus.CounterVec
+	PolicyShadow          *prometheus.CounterVec
+	ConfigReloads         *prometheus.CounterVec
+	RateLimited           *prometheus.CounterVec
+	IdempotencyRejections prometheus.Counter
+	AuthFailures          *prometheus.CounterVec
+	AuditQueue            prometheus.Gauge
+	AuditDropped          prometheus.Counter
+	AuditErrors           prometheus.Counter
+	AuditWritten          prometheus.Counter
+	AuditExport           *prometheus.CounterVec
+	AuditSIEMExport       *prometheus.CounterVec
+	UpstreamUp            *prometheus.GaugeVec
+	BreakerState          *prometheus.GaugeVec
+	CatalogTools          prometheus.Gauge
+	CatalogRejected       *prometheus.CounterVec
+	PinUnapproved         *prometheus.GaugeVec
+	RateBackendErrs       prometheus.Counter
 
 	AnchorAttempts     *prometheus.CounterVec
 	AnchorDuration     prometheus.Histogram
@@ -104,6 +105,10 @@ func NewMetrics() *Metrics {
 		RateLimited: prometheus.NewCounterVec(prometheus.CounterOpts{
 			Name: "mcpgw_ratelimit_rejections_total", Help: "Requests rejected by rate limit rule.",
 		}, []string{labelRule}),
+		IdempotencyRejections: prometheus.NewCounter(prometheus.CounterOpts{
+			Name: "mcpgw_idempotency_rejections_total",
+			Help: "Requests rejected by the stateless idempotency guard.",
+		}),
 		AuthFailures: prometheus.NewCounterVec(prometheus.CounterOpts{
 			Name: "mcpgw_auth_failures_total", Help: "Rejected bearer tokens by reason.",
 		}, []string{"reason"}),
@@ -187,6 +192,7 @@ func NewMetrics() *Metrics {
 		m.PolicyShadow,
 		m.ConfigReloads,
 		m.RateLimited,
+		m.IdempotencyRejections,
 		m.AuthFailures,
 		m.AuditQueue,
 		m.AuditDropped,

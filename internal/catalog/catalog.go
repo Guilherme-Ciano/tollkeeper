@@ -30,15 +30,44 @@ type Annotations struct {
 	OpenWorld   bool   `json:"openWorldHint"`
 }
 
+type Metadata struct {
+	Trust          string `json:"trust,omitempty"`
+	Classification string `json:"classification,omitempty"`
+	Egress         bool   `json:"egress,omitempty"`
+	Impact         string `json:"impact,omitempty"`
+}
+
 type Tool struct {
 	Name        string
 	Upstream    string
 	Original    string
 	Description string
 	Annotations Annotations
+	Metadata    Metadata
 	Pin         string
 	Descriptor  json.RawMessage
 	Definition  json.RawMessage
+}
+
+func (t Tool) ResolvedMetadata() Metadata {
+	m := t.Metadata
+	if m.Trust == "" {
+		m.Trust = "trusted"
+	}
+	if m.Classification == "" {
+		m.Classification = "internal"
+	}
+	if m.Impact == "" {
+		switch {
+		case t.Annotations.Destructive:
+			m.Impact = "destructive"
+		case t.Annotations.ReadOnly:
+			m.Impact = "read"
+		default:
+			m.Impact = "write"
+		}
+	}
+	return m
 }
 
 type Naming struct {
