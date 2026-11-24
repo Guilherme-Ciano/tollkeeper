@@ -103,7 +103,7 @@ func runConformance(t *testing.T, factory backendFactory) {
 	t.Run("all or nothing across rules", func(t *testing.T) {
 		clk := newClock()
 		b := factory(t, clk)
-		loose := NewLimit("loose", 100, time.Second, 100)
+		loose := NewLimit("loose", 100, time.Hour, 100)
 		tight := NewLimit("tight", 1, time.Minute, 1)
 		reqs := []Request{{Key: "a", Limit: loose}, {Key: "b", Limit: tight}}
 		if !b.Allow(t.Context(), reqs).Allowed {
