@@ -376,6 +376,27 @@ func TestAdversarialDPoPTheftReplayAndHTUMismatch(t *testing.T) {
 		t.Fatalf("wrong htu DPoP = %d, want 401", rec.Code)
 	}
 
+	wrongHTMProof := makeDPoPTestProof(
+		t,
+		alicePriv,
+		aliceJWK,
+		http.MethodGet,
+		"https://gw.example.com/mcp",
+		stolenTok,
+		"",
+		"jti-htm",
+		now,
+	)
+	rec = postMCPDirect(t, h, map[string]string{
+		"Authorization": "DPoP " + stolenTok,
+		"DPoP":          wrongHTMProof,
+		"Mcp-Method":    "tools/call",
+		"Mcp-Name":      "files__read_file",
+	}, body)
+	if rec.Code != http.StatusUnauthorized {
+		t.Fatalf("wrong htm DPoP = %d, want 401", rec.Code)
+	}
+
 	goodProof := makeDPoPTestProof(
 		t,
 		alicePriv,
