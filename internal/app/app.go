@@ -49,28 +49,30 @@ const (
 )
 
 type App struct {
-	cfg       config.Config
-	log       *slog.Logger
-	metrics   *telemetry.Metrics
-	tracing   *telemetry.Tracing
-	keys      *authn.KeySet
-	store     *ratelimit.Store
-	redis     redis.UniversalClient
-	auditLog  *audit.Log
-	auditPG   *pgsink.Sink
-	anchorer  *anchor.Anchorer
-	watchdog  *audit.Watchdog
-	otlp      *otlpsink.Sink
-	siem      *siemsink.Sink
-	version   string
-	catalog   *catalog.Catalog
-	directory *catalog.Directory
-	upstreams []*upstream.Upstream
-	gateway   *gateway.Gateway
-	pins      *pin.Guard
-	ready     atomic.Bool
-	synced    map[string]*atomic.Uint64
-	listeners sync.Map
+	cfg            config.Config
+	log            *slog.Logger
+	metrics        *telemetry.Metrics
+	tracing        *telemetry.Tracing
+	keys           *authn.KeySet
+	store          *ratelimit.Store
+	redis          redis.UniversalClient
+	auditLog       *audit.Log
+	auditPG        *pgsink.Sink
+	anchorer       *anchor.Anchorer
+	watchdog       *audit.Watchdog
+	otlp           *otlpsink.Sink
+	siem           *siemsink.Sink
+	version        string
+	catalog        *catalog.Catalog
+	directory      *catalog.Directory
+	upstreams      []*upstream.Upstream
+	gateway        *gateway.Gateway
+	idempotencyMem *gateway.MemoryIdempotencyStore
+	pins           *pin.Guard
+	ready          atomic.Bool
+	synced         map[string]*atomic.Uint64
+	upstreamMeta   map[string]catalog.Metadata
+	listeners      sync.Map
 
 	configPath string
 	backend    ratelimit.Backend
@@ -81,6 +83,7 @@ func Build(ctx context.Context, cfg config.Config, log *slog.Logger, version str
 	a := &App{
 		cfg: cfg, log: log, version: version, metrics: telemetry.NewMetrics(), catalog: catalog.New(maxCatalogTools),
 		directory: catalog.NewDirectory(maxDirectoryEntries), synced: map[string]*atomic.Uint64{},
+		upstreamMeta: map[string]catalog.Metadata{},
 	}
 	defer func() {
 		if err != nil {
@@ -147,22 +150,23 @@ func Build(ctx context.Context, cfg config.Config, log *slog.Logger, version str
 			slog.String("hint", "set server.request_state_key_file when running several replicas"))
 	}
 	a.gateway = gateway.New(gateway.Deps{
-		Config:     cfg,
-		Verifier:   verifier,
-		DPoP:       buildDPoP(cfg, stateKey),
-		Policy:     pol,
-		Limiter:    lim,
-		Audit:      auditor,
-		Catalog:    a.catalog,
-		Directory:  a.directory,
-		Upstreams:  callers,
-		Metrics:    a.metrics,
-		Tracer:     tr.Tracer(),
-		Propagator: tr.Propagator,
-		Log:        log,
-		Version:    version,
-		Pins:       pins,
-		StateKey:   stateKey,
+		Config:      cfg,
+		Verifier:    verifier,
+		DPoP:        buildDPoP(cfg, stateKey),
+		Policy:      pol,
+		Limiter:     lim,
+		Audit:       auditor,
+		Catalog:     a.catalog,
+		Directory:   a.directory,
+		Upstreams:   callers,
+		Metrics:     a.metrics,
+		Tracer:      tr.Tracer(),
+		Propagator:  tr.Propagator,
+		Log:         log,
+		Version:     version,
+		Pins:        pins,
+		Idempotency: a.openIdempotency(),
+		StateKey:    stateKey,
 	})
 	return a, nil
 }
@@ -193,6 +197,12 @@ func (a *App) buildUpstreams(
 		}
 		u := upstream.New(*uc, naming, f, log, hooks, version)
 		a.synced[uc.ID] = &atomic.Uint64{}
+		a.upstreamMeta[uc.ID] = catalog.Metadata{
+			Trust:          uc.Metadata.Trust,
+			Classification: uc.Metadata.Classification,
+			Egress:         uc.Metadata.Egress,
+			Impact:         uc.Metadata.Impact,
+		}
 		a.upstreams = append(a.upstreams, u)
 		callers[uc.ID] = u
 	}
@@ -235,6 +245,18 @@ func (a *App) openPins(ctx context.Context) error {
 		slog.String("file", cfg.File),
 		slog.Int("approved", len(guard.Lockfile().Tools)))
 	return nil
+}
+
+func (a *App) openIdempotency() gateway.IdempotencyStore {
+	if !a.cfg.Idempotency.Enabled {
+		return nil
+	}
+	if a.redis != nil {
+		rc := a.cfg.RateLimits.Redis
+		return gateway.NewRedisIdempotencyStore(a.redis, rc.KeyPrefix+"idem:", rc.Timeout)
+	}
+	a.idempotencyMem = gateway.NewMemoryIdempotencyStore(a.cfg.Idempotency.MaxEntries, nil)
+	return a.idempotencyMem
 }
 
 func (a *App) rateBackend(ctx context.Context) ratelimit.Backend {
@@ -763,6 +785,16 @@ func (a *App) syncLoop(ctx context.Context, u *upstream.Upstream) {
 	}
 }
 
+func (a *App) applyUpstreamMeta(upstreamID string, tools []catalog.Tool) {
+	m, ok := a.upstreamMeta[upstreamID]
+	if !ok {
+		return
+	}
+	for i := range tools {
+		tools[i].Metadata = m
+	}
+}
+
 func (a *App) serving(u *upstream.Upstream) bool {
 	gen := u.Generation()
 	return u.Up() && gen > 0 && a.synced[u.ID()].Load() == gen
@@ -790,6 +822,7 @@ func (a *App) resync(ctx context.Context, u *upstream.Upstream) {
 			tools, up = nil, false
 		}
 	}
+	a.applyUpstreamMeta(u.ID(), tools)
 	delta, err := a.catalog.Replace(u.ID(), tools)
 	if err != nil {
 		a.log.ErrorContext(
@@ -840,6 +873,9 @@ func (a *App) Run(ctx context.Context) error {
 	defer stopBg()
 	var bg sync.WaitGroup
 	bg.Go(func() { a.store.RunJanitor(bgCtx, time.Minute) })
+	if a.idempotencyMem != nil {
+		bg.Go(func() { a.idempotencyMem.RunJanitor(bgCtx, time.Minute) })
+	}
 	if a.keys != nil {
 		if err := a.keys.Refresh(ctx); err != nil {
 			a.log.WarnContext(ctx, "initial jwks fetch failed, will retry on demand", slog.String("error", err.Error()))

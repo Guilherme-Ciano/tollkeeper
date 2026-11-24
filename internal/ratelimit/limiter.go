@@ -2,9 +2,12 @@ package ratelimit
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"path"
 	"strings"
+
+	"github.com/google/cel-go/cel"
 
 	"github.com/Guilherme-Ciano/tollkeeper/internal/config"
 )
@@ -15,12 +18,15 @@ type Subject struct {
 	Tenant   string
 	Tool     string
 	Upstream string
+	Args     json.RawMessage
 }
 
 type rule struct {
-	limit Limit
-	tools []string
-	per   string
+	limit    Limit
+	tools    []string
+	per      string
+	costProg cel.Program
+	maxCost  int
 }
 
 type Backend interface {
@@ -43,7 +49,24 @@ func New(cfg config.RateLimits, store Backend) (*Limiter, error) {
 		if len(tools) == 0 {
 			tools = []string{"*"}
 		}
-		l.rules = append(l.rules, rule{limit: NewLimit(r.Name, count, per, r.Burst), tools: tools, per: r.Per})
+		var costProg cel.Program
+		if strings.TrimSpace(r.CostExpr) != "" {
+			costProg, err = compileCostExpr(r.Name, r.CostExpr)
+			if err != nil {
+				return nil, err
+			}
+		}
+		maxCost := r.MaxCost
+		if maxCost == 0 {
+			maxCost = r.Burst
+		}
+		l.rules = append(l.rules, rule{
+			limit:    NewLimit(r.Name, count, per, r.Burst),
+			tools:    tools,
+			per:      r.Per,
+			costProg: costProg,
+			maxCost:  maxCost,
+		})
 	}
 	return l, nil
 }
@@ -94,10 +117,29 @@ func (l *Limiter) Allow(ctx context.Context, s Subject) Result {
 		return Result{Allowed: true}
 	}
 	reqs := make([]Request, 0, len(l.rules))
+	var decodedArgs any
+	var argsReady bool
 	for _, r := range l.rules {
-		if matchAny(r.tools, s.Tool) {
-			reqs = append(reqs, Request{Key: key(r, s), Limit: r.limit})
+		if !matchAny(r.tools, s.Tool) {
+			continue
 		}
+		cost := 1
+		if r.costProg != nil {
+			if !argsReady {
+				var err error
+				decodedArgs, err = decodeCostArgs(s.Args)
+				if err != nil {
+					return Result{Allowed: false, Rule: r.limit.Rule, Limit: r.limit, RetryAfter: r.limit.Interval}
+				}
+				argsReady = true
+			}
+			c, err := evalCost(ctx, r.costProg, s, decodedArgs, r.maxCost)
+			if err != nil {
+				return Result{Allowed: false, Rule: r.limit.Rule, Limit: r.limit, RetryAfter: r.limit.Interval}
+			}
+			cost = c
+		}
+		reqs = append(reqs, Request{Key: key(r, s), Limit: r.limit, Cost: cost})
 	}
 	return l.store.Allow(ctx, reqs)
 }

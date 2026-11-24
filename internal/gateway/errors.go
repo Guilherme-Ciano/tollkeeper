@@ -13,16 +13,17 @@ import (
 )
 
 const (
-	CodeParseError      = -32700
-	CodeInvalidRequest  = -32600
-	CodeMethodNotFound  = -32601
-	CodeInvalidParams   = -32602
-	CodeInternal        = -32603
-	CodeRateLimited     = -32000
-	CodePolicyDenied    = -32001
-	CodeAuditUnavailabe = -32003
-	CodeUpstreamFailed  = -32004
-	CodeHeaderMismatch  = -32020
+	CodeParseError       = -32700
+	CodeInvalidRequest   = -32600
+	CodeMethodNotFound   = -32601
+	CodeInvalidParams    = -32602
+	CodeInternal         = -32603
+	CodeRateLimited      = -32000
+	CodePolicyDenied     = -32001
+	CodeAuditUnavailabe  = -32003
+	CodeUpstreamFailed   = -32004
+	CodeDuplicateRequest = -32009
+	CodeHeaderMismatch   = -32020
 )
 
 type rpcError struct {

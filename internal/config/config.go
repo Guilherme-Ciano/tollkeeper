@@ -5,15 +5,31 @@ import (
 )
 
 type Config struct {
-	Server     Server     `koanf:"server"`
-	Auth       Auth       `koanf:"auth"`
-	Upstreams  []Upstream `koanf:"upstreams"`
-	Policy     Policy     `koanf:"policy"`
-	RateLimits RateLimits `koanf:"rate_limits"`
-	Audit      Audit      `koanf:"audit"`
-	Telemetry  Telemetry  `koanf:"telemetry"`
-	Pinning    Pinning    `koanf:"pinning"`
-	Digest     string     `koanf:"-"`
+	Server      Server      `koanf:"server"`
+	Auth        Auth        `koanf:"auth"`
+	Upstreams   []Upstream  `koanf:"upstreams"`
+	Policy      Policy      `koanf:"policy"`
+	RateLimits  RateLimits  `koanf:"rate_limits"`
+	Idempotency Idempotency `koanf:"idempotency"`
+	Audit       Audit       `koanf:"audit"`
+	Telemetry   Telemetry   `koanf:"telemetry"`
+	Pinning     Pinning     `koanf:"pinning"`
+	Digest      string      `koanf:"-"`
+}
+
+const (
+	IdempotencyModeHeader        = "header"
+	IdempotencyModeRequired      = "required"
+	IdempotencyModeCanonicalHash = "canonical_hash"
+)
+
+type Idempotency struct {
+	Enabled    bool          `koanf:"enabled"`
+	Mode       string        `koanf:"mode"`
+	Header     string        `koanf:"header"`
+	TTL        time.Duration `koanf:"ttl"`
+	MaxEntries int           `koanf:"max_entries"`
+	Tools      []string      `koanf:"tools"`
 }
 
 const (
@@ -43,6 +59,7 @@ type Server struct {
 	DisableFastPath    bool          `koanf:"disable_fast_path"`
 	RequestStateKey    string        `koanf:"request_state_key_file"`
 	RequestStateTTL    time.Duration `koanf:"request_state_ttl"`
+	StampProvenance    bool          `koanf:"stamp_provenance"`
 	Pprof              bool          `koanf:"pprof"`
 }
 
@@ -110,6 +127,13 @@ type JWT struct {
 	Types         []string      `koanf:"types"`
 }
 
+type UpstreamMetadata struct {
+	Trust          string `koanf:"trust"`
+	Classification string `koanf:"classification"`
+	Egress         bool   `koanf:"egress"`
+	Impact         string `koanf:"impact"`
+}
+
 type Upstream struct {
 	ID              string            `koanf:"id"`
 	Transport       string            `koanf:"transport"`
@@ -119,6 +143,7 @@ type Upstream struct {
 	Sandbox         StdioSandbox      `koanf:"sandbox"`
 	URL             string            `koanf:"url"`
 	BlockPrivateIPs bool              `koanf:"block_private_ips"`
+	Metadata        UpstreamMetadata  `koanf:"metadata"`
 	Timeout         time.Duration     `koanf:"timeout"`
 	MaxConcurrency  int               `koanf:"max_concurrency"`
 	Breaker         Breaker           `koanf:"breaker"`
@@ -261,11 +286,13 @@ type RedisLimits struct {
 }
 
 type RateRule struct {
-	Name  string   `koanf:"name"`
-	Tools []string `koanf:"tools"`
-	Per   string   `koanf:"per"`
-	Rate  string   `koanf:"rate"`
-	Burst int      `koanf:"burst"`
+	Name     string   `koanf:"name"`
+	Tools    []string `koanf:"tools"`
+	Per      string   `koanf:"per"`
+	Rate     string   `koanf:"rate"`
+	Burst    int      `koanf:"burst"`
+	CostExpr string   `koanf:"cost_expr"`
+	MaxCost  int      `koanf:"max_cost"`
 }
 
 type Audit struct {
@@ -450,6 +477,13 @@ func Defaults() Config {
 			Verify: AuditVerify{Interval: 5 * time.Minute},
 		},
 		Pinning: Pinning{Mode: PinModeWarn, ReloadInterval: 5 * time.Second},
+		Idempotency: Idempotency{
+			Mode:       IdempotencyModeHeader,
+			Header:     "Idempotency-Key",
+			TTL:        5 * time.Minute,
+			MaxEntries: 100000,
+			Tools:      []string{"*"},
+		},
 		Telemetry: Telemetry{
 			ServiceName: "tollkeeper",
 			SampleRatio: 1.0,
@@ -535,4 +569,16 @@ const (
 	RecordArgsNone = "none"
 	RecordArgsHash = "hash"
 	RecordArgsFull = "full"
+
+	TrustTrusted   = "trusted"
+	TrustUntrusted = "untrusted"
+
+	ClassPublic       = "public"
+	ClassInternal     = "internal"
+	ClassConfidential = "confidential"
+	ClassRestricted   = "restricted"
+
+	ImpactRead        = "read"
+	ImpactWrite       = "write"
+	ImpactDestructive = "destructive"
 )

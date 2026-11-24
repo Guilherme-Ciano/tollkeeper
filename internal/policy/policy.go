@@ -296,6 +296,7 @@ func activation(in Input, withArgs bool) (map[string]any, error) {
 	if !in.Principal.AuthTime.IsZero() {
 		authAge = max(int64(in.Now.Sub(in.Principal.AuthTime)/time.Second), 0)
 	}
+	meta := in.Tool.ResolvedMetadata()
 	act := map[string]any{
 		"principal": map[string]any{
 			fieldSub:           in.Principal.Subject,
@@ -314,10 +315,14 @@ func activation(in Input, withArgs bool) (map[string]any, error) {
 			"claims":           claims,
 		},
 		"tool": map[string]any{
-			"name":     in.Tool.Name,
-			"upstream": in.Tool.Upstream,
-			"original": in.Tool.Original,
-			"pin_hash": in.Tool.Pin,
+			"name":           in.Tool.Name,
+			"upstream":       in.Tool.Upstream,
+			"original":       in.Tool.Original,
+			"pin_hash":       in.Tool.Pin,
+			"trust":          meta.Trust,
+			"classification": meta.Classification,
+			"egress":         meta.Egress,
+			"impact":         meta.Impact,
 			"annotations": map[string]any{
 				"readOnlyHint":    in.Tool.Annotations.ReadOnly,
 				"destructiveHint": in.Tool.Annotations.Destructive,

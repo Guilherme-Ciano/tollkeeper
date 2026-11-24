@@ -75,14 +75,26 @@ func (s *Store) cell(key string) *cell {
 	return fresh
 }
 
-func (s *Store) take(key string, lim Limit, now int64) (Result, *cell) {
-	c := s.cell(key)
+func (s *Store) take(key string, lim Limit, cost int, now int64) (res Result, c *cell, step int64) {
+	if cost < 1 {
+		cost = 1
+	}
 	interval := int64(lim.Interval)
 	tol := lim.tolerance()
+	if cost > lim.Burst {
+		return Result{
+			Allowed:    false,
+			Rule:       lim.Rule,
+			Limit:      lim,
+			RetryAfter: time.Duration(interval*int64(cost) - tol),
+		}, nil, 0
+	}
+	step = interval * int64(cost)
+	c = s.cell(key)
 	for {
 		tat := c.tat.Load()
 		base := max(tat, now)
-		next := base + interval
+		next := base + step
 		if next-now > tol {
 			retry := time.Duration(next - now - tol)
 			return Result{
@@ -91,7 +103,7 @@ func (s *Store) take(key string, lim Limit, now int64) (Result, *cell) {
 				Limit:      lim,
 				RetryAfter: retry,
 				ResetAfter: time.Duration(tat - now),
-			}, nil
+			}, nil, 0
 		}
 		if c.tat.CompareAndSwap(tat, next) {
 			remaining := int((tol - (next - now)) / interval)
@@ -101,7 +113,7 @@ func (s *Store) take(key string, lim Limit, now int64) (Result, *cell) {
 				Limit:      lim,
 				Remaining:  remaining,
 				ResetAfter: time.Duration(next - now),
-			}, c
+			}, c, step
 		}
 	}
 }
@@ -109,25 +121,26 @@ func (s *Store) take(key string, lim Limit, now int64) (Result, *cell) {
 type Request struct {
 	Key   string
 	Limit Limit
+	Cost  int
 }
 
 func (s *Store) Allow(_ context.Context, reqs []Request) Result {
 	now := s.nanos()
 	type taken struct {
-		c        *cell
-		interval int64
+		c    *cell
+		step int64
 	}
 	committed := make([]taken, 0, len(reqs))
 	var tightest Result
 	for i, r := range reqs {
-		res, c := s.take(r.Key, r.Limit, now)
+		res, c, step := s.take(r.Key, r.Limit, r.Cost, now)
 		if !res.Allowed {
 			for _, done := range committed {
-				done.c.tat.Add(-done.interval)
+				done.c.tat.Add(-done.step)
 			}
 			return res
 		}
-		committed = append(committed, taken{c: c, interval: int64(r.Limit.Interval)})
+		committed = append(committed, taken{c: c, step: step})
 		if i == 0 || res.Remaining < tightest.Remaining {
 			tightest = res
 		}

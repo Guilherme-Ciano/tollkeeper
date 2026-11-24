@@ -79,6 +79,7 @@ func (c *Config) Validate() error {
 	c.validateUpstreams(v)
 	c.validatePolicy(v)
 	c.validateRateLimits(v)
+	c.validateIdempotency(v)
 	c.validateAudit(v)
 	c.validatePinning(v)
 	if !c.Server.NamespaceTools && len(c.Upstreams) != 1 {
@@ -246,6 +247,7 @@ func (c *Config) validateUpstreams(v *validator) {
 		c.validateUpstreamID(v, f, u.ID, seen)
 		v.oneOf(f+".transport", u.Transport, TransportStdio, TransportStreamable)
 		validateTransport(v, f, u)
+		validateUpstreamMetadata(v, f+".metadata", u.Metadata)
 		for name := range u.Env {
 			if strings.ContainsAny(name, "= \x00") || name == "" {
 				v.add(f+".env", "invalid variable name %q", name)
@@ -271,6 +273,41 @@ func (c *Config) validateUpstreamID(v *validator, f, id string, seen map[string]
 		v.add(f+".id", "duplicate id %q", id)
 	}
 	seen[id] = true
+}
+
+func validateUpstreamMetadata(v *validator, f string, m UpstreamMetadata) {
+	if m.Trust != "" {
+		v.oneOf(f+".trust", m.Trust, TrustTrusted, TrustUntrusted)
+	}
+	if m.Classification != "" {
+		v.oneOf(f+".classification", m.Classification, ClassPublic, ClassInternal, ClassConfidential, ClassRestricted)
+	}
+	if m.Impact != "" {
+		v.oneOf(f+".impact", m.Impact, ImpactRead, ImpactWrite, ImpactDestructive)
+	}
+}
+
+func (c *Config) validateIdempotency(v *validator) {
+	if !c.Idempotency.Enabled {
+		return
+	}
+	v.oneOf(
+		"idempotency.mode",
+		c.Idempotency.Mode,
+		IdempotencyModeHeader,
+		IdempotencyModeRequired,
+		IdempotencyModeCanonicalHash,
+	)
+	if c.Idempotency.Mode != IdempotencyModeCanonicalHash {
+		v.require("idempotency.header", c.Idempotency.Header)
+	}
+	if c.Idempotency.TTL <= 0 || c.Idempotency.TTL > 24*time.Hour {
+		v.add("idempotency.ttl", "must be within (0, 24h]")
+	}
+	if c.Idempotency.MaxEntries < 100 {
+		v.add("idempotency.max_entries", "must be at least 100")
+	}
+	v.globs("idempotency.tools", c.Idempotency.Tools)
 }
 
 func validateTransport(v *validator, f string, u *Upstream) {
@@ -488,31 +525,40 @@ func (c *Config) validateRateLimits(v *validator) {
 		}
 	}
 	for i, r := range c.RateLimits.Rules {
-		f := fmt.Sprintf("rate_limits.rules[%d]", i)
-		v.require(f+".name", r.Name)
-		v.globs(f+".tools", r.Tools)
-		v.oneOf(
-			f+".per",
-			r.Per,
-			PerGlobal,
-			PerSubject,
-			PerSubjectTool,
-			PerClientID,
-			PerTenant,
-			PerTenantTool,
-			PerUpstream,
-			PerTool,
-		)
-		if count, per, err := ParseRate(r.Rate); err != nil {
-			v.add(f+".rate", "%v", err)
-		} else if interval := per / time.Duration(count); interval < time.Microsecond {
-			v.add(f+".rate", "faster than one call per microsecond is not supported")
-		} else if r.Burst > 0 && int64(r.Burst) > math.MaxInt64/2/int64(interval) {
-			v.add(f+".burst", "too large for rate %s", r.Rate)
-		}
-		if r.Burst < 1 {
-			v.add(f+".burst", "must be at least 1")
-		}
+		validateRateRule(v, fmt.Sprintf("rate_limits.rules[%d]", i), r)
+	}
+}
+
+func validateRateRule(v *validator, f string, r RateRule) {
+	v.require(f+".name", r.Name)
+	v.globs(f+".tools", r.Tools)
+	v.oneOf(
+		f+".per",
+		r.Per,
+		PerGlobal,
+		PerSubject,
+		PerSubjectTool,
+		PerClientID,
+		PerTenant,
+		PerTenantTool,
+		PerUpstream,
+		PerTool,
+	)
+	if count, per, err := ParseRate(r.Rate); err != nil {
+		v.add(f+".rate", "%v", err)
+	} else if interval := per / time.Duration(count); interval < time.Microsecond {
+		v.add(f+".rate", "faster than one call per microsecond is not supported")
+	} else if r.Burst > 0 && int64(r.Burst) > math.MaxInt64/2/int64(interval) {
+		v.add(f+".burst", "too large for rate %s", r.Rate)
+	}
+	if r.Burst < 1 {
+		v.add(f+".burst", "must be at least 1")
+	}
+	if r.MaxCost < 0 {
+		v.add(f+".max_cost", "must be non-negative")
+	}
+	if r.MaxCost > 0 && r.Burst > 0 && r.MaxCost > r.Burst {
+		v.add(f+".max_cost", "cannot exceed burst (%d)", r.Burst)
 	}
 }
 

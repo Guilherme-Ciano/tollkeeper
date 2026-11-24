@@ -51,23 +51,24 @@ type Caller interface {
 }
 
 type Deps struct {
-	Config     config.Config
-	Verifier   TokenVerifier
-	DPoP       *authn.DPoPVerifier
-	Policy     *policy.Engine
-	Limiter    *ratelimit.Limiter
-	Audit      Auditor
-	Catalog    *catalog.Catalog
-	Directory  *catalog.Directory
-	Upstreams  map[string]Caller
-	Metrics    *telemetry.Metrics
-	Tracer     trace.Tracer
-	Propagator propagation.TextMapPropagator
-	Log        *slog.Logger
-	Version    string
-	Now        func() time.Time
-	Pins       PinGuard
-	StateKey   []byte
+	Config      config.Config
+	Verifier    TokenVerifier
+	DPoP        *authn.DPoPVerifier
+	Policy      *policy.Engine
+	Limiter     *ratelimit.Limiter
+	Audit       Auditor
+	Catalog     *catalog.Catalog
+	Directory   *catalog.Directory
+	Upstreams   map[string]Caller
+	Metrics     *telemetry.Metrics
+	Tracer      trace.Tracer
+	Propagator  propagation.TextMapPropagator
+	Log         *slog.Logger
+	Version     string
+	Now         func() time.Time
+	Pins        PinGuard
+	Idempotency IdempotencyStore
+	StateKey    []byte
 }
 
 type PinGuard interface {
@@ -102,6 +103,7 @@ type Gateway struct {
 	prmPath        string
 
 	pins         PinGuard
+	idempotency  IdempotencyStore
 	fastDisabled bool
 	impl         *mcp.Implementation
 	states       *stateSealer
@@ -156,7 +158,11 @@ func New(d Deps) *Gateway {
 		quarantined:    map[string]string{},
 		unapproved:     map[string]pin.Status{},
 		pins:           d.Pins,
+		idempotency:    d.Idempotency,
 		fastDisabled:   d.Config.Server.DisableFastPath,
+	}
+	if d.Config.Idempotency.Enabled && g.idempotency == nil {
+		g.idempotency = NewMemoryIdempotencyStore(d.Config.Idempotency.MaxEntries, g.now)
 	}
 	if !d.Config.Audit.Enabled {
 		g.recordArgs = config.RecordArgsNone
@@ -539,6 +545,9 @@ func (g *Gateway) sealResult(
 	tool catalog.Tool,
 	p identity.Principal,
 ) (*mcp.CallToolResult, error) {
+	if res != nil && g.cfg.Server.StampProvenance {
+		stampProvenance(res, tool)
+	}
 	if res == nil || res.RequestState == "" {
 		return res, nil
 	}
@@ -550,6 +559,22 @@ func (g *Gateway) sealResult(
 	}
 	res.RequestState = sealed
 	return res, nil
+}
+
+func stampProvenance(res *mcp.CallToolResult, tool catalog.Tool) {
+	m := tool.ResolvedMetadata()
+	meta := make(mcp.Meta, len(res.Meta)+1)
+	maps.Copy(meta, res.Meta)
+	meta["tollkeeper.provenance"] = map[string]any{
+		"upstream":       tool.Upstream,
+		"tool":           tool.Name,
+		"trust":          m.Trust,
+		"classification": m.Classification,
+		"egress":         m.Egress,
+		"impact":         m.Impact,
+		"pin_hash":       tool.Pin,
+	}
+	res.Meta = meta
 }
 
 func (g *Gateway) openState(token string, tool catalog.Tool, p identity.Principal) (string, error) {

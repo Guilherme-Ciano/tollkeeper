@@ -19,10 +19,13 @@ local nexts = {}
 local best = -1
 local bestIdx = 1
 for i = 1, #KEYS do
-  local interval = tonumber(ARGV[2 * i])
-  local tol = tonumber(ARGV[2 * i + 1])
+  local interval = tonumber(ARGV[3 * i - 1])
+  local tol = tonumber(ARGV[3 * i])
+  local cost = tonumber(ARGV[3 * i + 1])
+  if cost < 1 then cost = 1 end
+  local step = interval * cost
   local tat = tonumber(redis.call('GET', KEYS[i])) or now
-  local nxt = math.max(tat, now) + interval
+  local nxt = math.max(tat, now) + step
   if nxt - now > tol then
     return {0, i, nxt - now - tol, tat - now}
   end
@@ -101,7 +104,7 @@ func (r *Redis) eval(ctx context.Context, reqs []Request) (Result, error) {
 	ctx, cancel := context.WithTimeout(ctx, r.opts.Timeout)
 	defer cancel()
 	keys := make([]string, len(reqs))
-	args := make([]any, 0, 1+2*len(reqs))
+	args := make([]any, 0, 1+3*len(reqs))
 	now := int64(0)
 	if r.opts.Now != nil {
 		now = r.opts.Now().UnixMicro()
@@ -110,7 +113,8 @@ func (r *Redis) eval(ctx context.Context, reqs []Request) (Result, error) {
 	for i, q := range reqs {
 		keys[i] = r.opts.Prefix + q.Key
 		interval := micros(q.Limit.Interval)
-		args = append(args, interval, interval*int64(q.Limit.Burst))
+		cost := max(q.Cost, 1)
+		args = append(args, interval, interval*int64(q.Limit.Burst), cost)
 	}
 	raw, err := r.script.Run(ctx, r.client, keys, args...).Int64Slice()
 	if err != nil {
