@@ -1,0 +1,60 @@
+server:
+  public_url: "https://mcp.example.com/mcp"
+  stamp_provenance: true
+  tasks_enabled: true
+  task_ttl: 1h
+auth:
+  mode: none
+upstreams:
+  - id: web
+    transport: streamable_http
+    url: "https://web-search.internal/mcp"
+    metadata:
+      trust: untrusted
+      classification: public
+      egress: true
+      impact: read
+  - id: files
+    transport: streamable_http
+    url: "https://files.internal/mcp"
+    metadata:
+      trust: trusted
+      classification: restricted
+      egress: false
+      impact: destructive
+policy:
+  default: deny
+  rules:
+    - name: allow-untrusted-readonly-egress
+      tools: ["web__*"]
+      when: 'tool.trust == "untrusted" && tool.egress && tool.impact == "read"'
+      effect: allow
+    - name: deny-untrusted-writes
+      tools: ["*"]
+      when: 'tool.trust == "untrusted" && tool.impact != "read"'
+      effect: deny
+    - name: destructive-requires-four-eyes-approval
+      tools: ["files__delete*"]
+      when: 'tool.impact == "destructive" && approval.verified && approval.approver != principal.sub'
+      effect: allow
+      on_deny:
+        require_approval: true
+        approval_ttl: 5m
+        approval_reason: "Destructive restricted file operations require independent human sign-off"
+rate_limits:
+  rules:
+    - name: bulk-delete-impact-budget
+      tools: ["files__delete*"]
+      per: subject
+      rate: "50/h"
+      burst: 10
+      cost_expr: "has(args.paths) ? size(args.paths) : 1"
+      max_cost: 5
+idempotency:
+  enabled: true
+  mode: required
+  header: Idempotency-Key
+  ttl: 5m
+  tools: ["files__delete*"]
+audit:
+  enabled: false

@@ -43,7 +43,7 @@
 
       <div class="masthead-meta">
         <a class="spec-stamp" href="https://github.com/Guilherme-Ciano/tollkeeper/releases/latest" target="_blank" rel="noopener">
-          <span id="release-version">v1.4.0</span> / MCP 2026-07-28
+          <span id="release-version">v1.6.0</span> / MCP 2026-07-28
         </a>
         <a class="action-link" href="https://github.com/Guilherme-Ciano/tollkeeper" target="_blank" rel="noopener">
           GitHub ↗
@@ -70,7 +70,7 @@
 
             <p class="hero-lead">
               Most MCP proxies forward the caller's token upstream and log JSON to stdout.
-              <strong>tollkeeper</strong> terminates OAuth 2.1 &amp; DPoP tokens at the boundary, exchanges downscoped upstream tokens via RFC 8693, evaluates tenant-scoped CEL policies and lock-free GCRA limits, pins tool definitions against rug pulls, sandboxes stdio upstreams, seals every call into a KMS/Ed25519 SHA-256 chain with SIEM export, and ships an embedded Admin Console at <code>/ui/</code>.
+              <strong>tollkeeper</strong> terminates OAuth 2.1 &amp; DPoP tokens at the boundary, exchanges downscoped upstream tokens via RFC 8693, evaluates tenant-scoped CEL policies with provenance metadata, cost-based GCRA impact budgets, stateless idempotency, and Ed25519 argument-bound HITL approval tokens, proxies SEP-2663 async tasks, verifies signed config+pin bundles, sandboxes stdio upstreams, seals every call into a KMS/Ed25519 SHA-256 chain with SIEM export, and ships an embedded Admin Console at <code>/ui/</code>.
             </p>
 
             <div class="hero-actions">
@@ -341,6 +341,36 @@ RateLimit: "weather-per-subject";r=0;t=10</code></pre>
               <pre><code>ADMIN UI    /ui/ · policy editor · pin diffs · call simulator
 EXPORTERS   siem (json / splunk_hec / cef) · otlp · prometheus
 ARTIFACTS   cosign keyless · spdx sbom · slsa provenance</code></pre>
+            </div>
+          </article>
+
+          <article class="ledger-row">
+            <div class="ledger-idx">07 / ADR 0021</div>
+            <div class="ledger-copy">
+              <h3>Provenance stamps, cost-based GCRA impact limits &amp; idempotency</h3>
+              <p>
+                Tag upstreams with static <code>trust</code>, <code>classification</code>, <code>egress</code>, and <code>impact</code> metadata exposed to CEL and stamped deterministically into <code>_meta["tollkeeper.provenance"]</code>. Cap blast radius with CEL <code>cost_expr</code> budgets in memory or 1-RTT Redis Lua, and block accidental duplicate mutations with opt-in stateless idempotency (HTTP <code>409</code> / <code>-32009</code>).
+              </p>
+            </div>
+            <div class="ledger-artifact">
+              <pre><code>COST EXPR   has(args.paths) ? size(args.paths) : 1 · max_cost: 5
+PROVENANCE  _meta["tollkeeper.provenance"] → trust: untrusted · egress: true
+IDEMPOTENCY Idempotency-Key / canonical_hash → HTTP 409 (-32009)</code></pre>
+            </div>
+          </article>
+
+          <article class="ledger-row">
+            <div class="ledger-idx">08 / ADR 0022–23</div>
+            <div class="ledger-copy">
+              <h3>Stateless HITL approval tokens, signed bundles &amp; SEP-2663 tasks</h3>
+              <p>
+                Require Ed25519 argument-bound human approvals (<code>tk-approval+jwt</code>, single-op &amp; batch, four-eyes CEL <code>approval.approver != principal.sub</code>, single-use replay protection, and <code>approved_by</code> in <code>audit.jsonl</code>), enforce Ed25519-signed <code>config.yaml</code> + <code>pins.json</code> bundles at boot and <code>SIGHUP</code>, and proxy SEP-2663 async tasks with HMAC-sealed ownership handles.
+              </p>
+            </div>
+            <div class="ledger-artifact">
+              <pre><code>APPROVAL    X-Tollkeeper-Approval (EdDSA) · args_hash · single-use
+BUNDLE      tollkeeper bundle verify · Ed25519 boot + SIGHUP gate
+TASKS       io.modelcontextprotocol/tasks · HMAC tkt1.* handles</code></pre>
             </div>
           </article>
         </div>

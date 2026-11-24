@@ -38,10 +38,26 @@ type FixtureAnnotations struct {
 	OpenWorld   bool `yaml:"openWorldHint"`
 }
 
+type FixtureApproval struct {
+	Verified bool   `yaml:"verified"`
+	ID       string `yaml:"id"`
+	Approver string `yaml:"approver"`
+	Reason   string `yaml:"reason"`
+}
+
+type FixtureMetadata struct {
+	Trust          string `yaml:"trust"`
+	Classification string `yaml:"classification"`
+	Egress         bool   `yaml:"egress"`
+	Impact         string `yaml:"impact"`
+}
+
 type Fixture struct {
 	Name        string             `yaml:"name"`
 	Principal   FixturePrincipal   `yaml:"principal"`
+	Approval    FixtureApproval    `yaml:"approval"`
 	Tool        string             `yaml:"tool"`
+	Metadata    FixtureMetadata    `yaml:"metadata"`
 	Annotations FixtureAnnotations `yaml:"annotations"`
 	Args        map[string]any     `yaml:"args"`
 	Now         string             `yaml:"now"`
@@ -82,11 +98,28 @@ func (fx *Fixture) input(naming catalog.Naming) (Input, error) {
 			DPoPVerified: fx.Principal.DPoP,
 			Claims:       fx.Principal.Claims,
 		},
+		Approval: Approval{
+			Verified: fx.Approval.Verified,
+			ID:       fx.Approval.ID,
+			Approver: fx.Approval.Approver,
+			Reason:   fx.Approval.Reason,
+		},
 		Method: "tools/call",
-		Tool: catalog.Tool{Name: fx.Tool, Upstream: upstream, Original: original, Annotations: catalog.Annotations{
-			ReadOnly: fx.Annotations.ReadOnly, Destructive: fx.Annotations.Destructive,
-			Idempotent: fx.Annotations.Idempotent, OpenWorld: fx.Annotations.OpenWorld,
-		}},
+		Tool: catalog.Tool{
+			Name:     fx.Tool,
+			Upstream: upstream,
+			Original: original,
+			Metadata: catalog.Metadata{
+				Trust:          fx.Metadata.Trust,
+				Classification: fx.Metadata.Classification,
+				Egress:         fx.Metadata.Egress,
+				Impact:         fx.Metadata.Impact,
+			},
+			Annotations: catalog.Annotations{
+				ReadOnly: fx.Annotations.ReadOnly, Destructive: fx.Annotations.Destructive,
+				Idempotent: fx.Annotations.Idempotent, OpenWorld: fx.Annotations.OpenWorld,
+			},
+		},
 		Now: time.Now(),
 	}
 	if fx.Principal.AuthTime != "" {

@@ -247,6 +247,7 @@ A rule applies to tools, prompts or resources only through its own `tools`, `pro
 | `server.max_body_bytes` | 1 MiB | Enforced before parsing |
 | `server.request_state_key_file` | per-process key | HMAC key (at least 32 bytes) that seals upstream `requestState` for multi-round-trip calls; share one file across replicas so a retry can land on any of them |
 | `server.request_state_ttl` | `10m` | How long a sealed `requestState` stays valid |
+| `server.tasks_enabled` / `task_ttl` | `false` / `1h` | Opt-in stateless SEP-2663 MCP Tasks extension (`io.modelcontextprotocol/tasks`); seals upstream `taskId` handles with HMAC-SHA256 bound to `(upstream, tool, sub, tenant, client_id)` and proxies `tasks/get`, `tasks/update`, and `tasks/cancel` ([ADR 0023](docs/adr/0023-mcp-tasks-extension.md)) |
 | `server.disable_fast_path` | `false` | Serve every `tools/call` through the go-sdk transport instead of the direct path for protocol 2026-07-28 |
 | `server.stamp_provenance` | `false` | Attach `_meta["tollkeeper.provenance"]` (`upstream`, `tool`, `trust`, `classification`, `egress`, `impact`, `pin_hash`) to every `tools/call` response across both fast and SDK paths ([ADR 0021](docs/adr/0021-provenance-impact-limits-and-idempotency.md)) |
 | `auth.mode` | `jwt` | `introspection` checks opaque tokens at an RFC 7662 endpoint (`auth.introspection.url`, `client_id`, `client_secret`, `audiences`, optional `issuer`); results are cached by token hash for `cache_ttl` (1m), never past `exp` ([example](examples/configs/keycloak-introspection.yaml)). `none` exists for local experiments and logs a warning |
@@ -337,7 +338,7 @@ Report vulnerabilities as described in [SECURITY.md](SECURITY.md).
 
 ## Known limitations
 
-- **Prompts and resources go through the go-sdk path**, not the direct `tools/call` path, and are re-listed on the same schedule as tools. A resource URI listed by two upstreams belongs to the first one; templates are tried in sorted order. `resources/subscribe` and the tasks extension (SEP-2663) are not proxied.
+- **Prompts and resources go through the go-sdk path**, not the direct `tools/call` path, and are re-listed on the same schedule as tools. A resource URI listed by two upstreams belongs to the first one; templates are tried in sorted order. `resources/subscribe` is not proxied; the Tasks extension (SEP-2663) is opt-in via `server.tasks_enabled: true` for `streamable_http` upstreams.
 - **Progress is relayed only on protocol 2026-07-28.** When a `tools/call` carries `_meta.progressToken`, the gateway gives the upstream its own token and streams the notifications back as server-sent events under the client's token, with the result last. go-sdk can hand a notification to the client after the result ([go-sdk#1337](https://github.com/modelcontextprotocol/go-sdk/issues/1337)), so such calls wait for 10 ms without a new notification (100 ms at most) before answering; anything later is dropped. Older protocol versions get no progress.
 - **Sealed, not encrypted.** The gateway seals an upstream's `requestState` with HMAC-SHA256 and binds it to the upstream, tool, subject and client id. A retry with a tampered, expired or foreign state gets JSON-RPC `-32602`. The upstream's own state stays readable by the client, as it was before the gateway.
 - Rate limits are per replica unless `rate_limits.store: redis` is set. Each replica writes its own audit chain (`chain_id`), also when they share one Postgres table.
@@ -380,13 +381,13 @@ Shipped in v1.5:
 - [x] Scalability & operations: continuous audit watchdog, verified archiving/retention, `GET /upstreams` diagnostics, chaos & dependency-recovery test suites, and distributed benchmarks ([ADR 0016](docs/adr/0016-distributed-audit-verification-and-retention.md), [ADR 0017](docs/adr/0017-upstream-diagnostics-and-resilience.md))
 - [x] Developer experience: native SIEM sink (`json`, `splunk_hec`, `cef`), CI-tested reusable policy library, agent platform integrations (Claude Code, Cursor, LangGraph, OpenAI Agents, CrewAI, AG-UI), and embedded single-binary Admin Console at `/ui/` ([ADR 0018](docs/adr/0018-siem-sink-and-developer-experience.md), [ADR 0019](docs/adr/0019-embedded-admin-dashboard.md))
 
-Next (v1.6 — Stateless Governance & Hardening, [ADR 0020](docs/adr/0020-stateless-governance-boundaries.md)):
+Shipped in v1.6 (Stateless Governance & Hardening, [ADR 0020](docs/adr/0020-stateless-governance-boundaries.md)):
 
 - [x] Updated v1.5+ [Threat Model](docs/threat-model.md) with explicit stateless trust boundaries and dedicated adversarial security test suite (`internal/gateway/adversarial_test.go`)
 - [x] Static upstream/tool classification (`trust`, `classification`, `egress`, `impact`) in CEL + deterministic `_meta.tollkeeper.provenance` response stamps ([ADR 0021](docs/adr/0021-provenance-impact-limits-and-idempotency.md))
 - [x] Cost-based GCRA impact limits (`cost_expr` in CEL) and short-window idempotency / anti-replay guard ([ADR 0021](docs/adr/0021-provenance-impact-limits-and-idempotency.md))
 - [x] Stateless argument-bound Human-in-the-Loop approval tokens (`tk-approval+jwt` + `tollkeeper approval sign`) and Ed25519-signed config+pin bundles ([ADR 0022](docs/adr/0022-stateless-approval-tokens-and-signed-bundles.md))
-- [ ] Tasks extension (SEP-2663)
+- [x] Stateless MCP Tasks extension (SEP-2663: `io.modelcontextprotocol/tasks`, `tasks/get`, `tasks/update`, `tasks/cancel` with HMAC-sealed ownership handles; [ADR 0023](docs/adr/0023-mcp-tasks-extension.md))
 
 ## Development
 

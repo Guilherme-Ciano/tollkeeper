@@ -54,3 +54,9 @@ curl -N -X POST http://127.0.0.1:8000/ag-ui/run \
 ```
 
 If the token lacks `acr=phr` or fresh `auth_time`, the SSE stream emits a `CUSTOM` `tollkeeper.step_up_required` event containing the parsed `WWW-Authenticate` parameters ready for your frontend's OAuth/OIDC step-up redirect.
+
+## Stateless Human-in-the-Loop Approval Tokens (`tk-approval+jwt`)
+
+When a policy rule specifies `on_deny: { require_approval: true }` (see [stateless-governance.yaml](../../../policies/library/stateless-governance.yaml)), Tollkeeper responds with HTTP `403` and JSON-RPC `-32010` carrying `tool`, `args_hash`, `subject`, `header`, `reason`, and `ttl_s`. The bridge automatically translates this into a typed AG-UI `CUSTOM` event named `tollkeeper.approval_required`.
+
+Once the human approves the exact operation in the UI, your approval backend signs a short-lived Ed25519 token (`tollkeeper approval sign`) and the frontend retries `/ag-ui/run` with `-H "X-Tollkeeper-Approval: <jwt>"` (plus optional `-H "Idempotency-Key: <uuid>"`). Tollkeeper verifies the signature, checks the canonical `args_hash`, enforces single-use replay protection, and records `approved_by` and `approval_id` in `audit.jsonl`.
