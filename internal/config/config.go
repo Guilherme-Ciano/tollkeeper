@@ -81,6 +81,8 @@ type Server struct {
 	DisableFastPath    bool          `koanf:"disable_fast_path"`
 	RequestStateKey    string        `koanf:"request_state_key_file"`
 	RequestStateTTL    time.Duration `koanf:"request_state_ttl"`
+	TasksEnabled       bool          `koanf:"tasks_enabled"`
+	TaskTTL            time.Duration `koanf:"task_ttl"`
 	StampProvenance    bool          `koanf:"stamp_provenance"`
 	Pprof              bool          `koanf:"pprof"`
 }
@@ -459,6 +461,7 @@ func Defaults() Config {
 			ShutdownDrainDelay: 0,
 			ShutdownTimeout:    20 * time.Second,
 			RequestStateTTL:    10 * time.Minute,
+			TaskTTL:            time.Hour,
 		},
 		Auth: Auth{
 			Mode: AuthModeJWT,

@@ -130,6 +130,9 @@ func (c *Config) validateServer(v *validator) {
 	if c.Server.RequestStateTTL <= 0 || c.Server.RequestStateTTL > 24*time.Hour {
 		v.add("server.request_state_ttl", "must be within (0, 24h]")
 	}
+	if c.Server.TasksEnabled && (c.Server.TaskTTL <= 0 || c.Server.TaskTTL > 24*time.Hour) {
+		v.add("server.task_ttl", "must be within (0, 24h]")
+	}
 	sep := c.Server.NamespaceSeparator
 	if sep == "" || strings.ContainsAny(sep, " *?[]") ||
 		!strings.ContainsFunc(
